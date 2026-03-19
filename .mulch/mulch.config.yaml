@@ -1,8 +1,11 @@
+
+
 version: '1'
 domains:
   - architecture
   - agents
   - infrastructure
+  - orchestration
 governance:
   max_entries: 100
   warn_entries: 150
