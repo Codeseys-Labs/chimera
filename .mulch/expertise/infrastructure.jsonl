@@ -1,0 +1,1 @@
+{"type":"convention","content":"Hybrid storage: S3 primary + EFS for POSIX workspaces. EFS Access Points per tenant for isolation. Cost: ~/mo per 100 tenants, negligible vs LLM spend.","classification":"foundational","recorded_at":"2026-03-19T22:55:08.031Z","evidence":{"commit":"a5d176c"},"outcomes":[{"status":"success","agent":"val-infra-deploy"}],"id":"mx-e62ffe"}
