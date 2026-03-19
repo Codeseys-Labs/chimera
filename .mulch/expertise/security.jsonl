@@ -1,0 +1,1 @@
+{"type":"convention","content":"Per-tenant encryption with AWS KMS: Create dedicated customer managed keys per tenant for data-at-rest encryption. Enforce tenant isolation via key policies preventing cross-tenant key usage.","classification":"foundational","recorded_at":"2026-03-19T22:58:33.200Z","outcomes":[{"status":"success","agent":"aws-services-audit"}],"id":"mx-897e07"}
