@@ -9,6 +9,7 @@ import { SkillPipelineStack } from '../lib/skill-pipeline-stack';
 import { ChatStack } from '../lib/chat-stack';
 import { PipelineStack } from '../lib/pipeline-stack';
 import { OrchestrationStack } from '../lib/orchestration-stack';
+import { EvolutionStack } from '../lib/evolution-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -126,7 +127,18 @@ const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`
 });
 orchestrationStack.addDependency(securityStack);
 
-// --- Stack 9: CI/CD Pipeline ---
+// --- Stack 9: Evolution Engine ---
+// Self-improvement mechanisms: prompt evolution, auto-skill generation, model routing optimization,
+// memory GC, cron self-scheduling. All changes are Cedar-bounded, audited, and reversible.
+const evolutionStack = new EvolutionStack(app, `${prefix}-Evolution`, {
+  env: envConfig,
+  description: 'Chimera evolution engine: prompt A/B testing, auto-skills, model routing, memory GC',
+  envName,
+  auditTable: dataStack.auditTable,
+});
+evolutionStack.addDependency(dataStack);
+
+// --- Stack 10: CI/CD Pipeline ---
 // CodePipeline with multi-stage canary deployment: GitHub source -> Build/Test -> Canary -> Progressive Rollout.
 // Independent stack, can be deployed separately from application stacks.
 const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
@@ -139,7 +151,7 @@ const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
 });
 
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, pipelineStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, pipelineStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -154,6 +166,7 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // SkillPipelineStack exports state machine ARN/name
 // ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
 // OrchestrationStack exports event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN
+// EvolutionStack exports evolution state table ARN/name, artifacts bucket ARN/name, state machine ARNs
 // PipelineStack exports pipeline ARN/name, artifact bucket name, orchestration state machine ARN, alarm topic ARN
 
 app.synth();
