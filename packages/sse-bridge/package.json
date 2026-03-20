@@ -1,0 +1,32 @@
+{
+  "name": "@chimera/sse-bridge",
+  "version": "0.1.0",
+  "description": "SSE bridge translating Strands AgentCore streaming to Vercel AI SDK Data Stream Protocol",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "sse",
+    "streaming",
+    "strands",
+    "vercel",
+    "ai-sdk",
+    "data-stream-protocol"
+  ],
+  "author": "Chimera Platform",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.7.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "@types/jest": "^29.5.0"
+  }
+}
