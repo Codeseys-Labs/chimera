@@ -1,5 +1,3 @@
-
-
 /**
  * @chimera/core - Core agent runtime for AWS Chimera platform
  *
@@ -156,3 +154,6 @@ export * from './discovery';
 
 // Activity module (real-time agent activity monitoring)
 export * from './activity';
+
+// Infrastructure Builder module (agent-driven IaC workspace and deployment)
+export * from './infra-builder';

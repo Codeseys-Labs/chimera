@@ -48,7 +48,9 @@
   "peerDependencies": {
     "@aws-sdk/client-bedrock-agent": "^3.0.0",
     "@aws-sdk/client-bedrock-agent-runtime": "^3.0.0",
+    "@aws-sdk/client-cloudformation": "^3.0.0",
     "@aws-sdk/client-codecommit": "^3.0.0",
+    "@aws-sdk/client-codepipeline": "^3.0.0",
     "@aws-sdk/client-config": "^3.0.0",
     "@aws-sdk/client-cost-explorer": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",
