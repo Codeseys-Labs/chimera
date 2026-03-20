@@ -46,5 +46,18 @@
 		"status": "active",
 		"createdAt": "2026-03-20T05:16:54.343Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-f2f547dc",
+		"name": "phase4-7-final-batch",
+		"memberIssueIds": [
+			"chimera-3bd8",
+			"chimera-dd5b",
+			"chimera-f6d1",
+			"chimera-cacf"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T07:43:40.354Z",
+		"completedAt": null
 	}
 ]
