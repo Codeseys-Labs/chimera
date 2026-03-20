@@ -49,13 +49,12 @@ const dataStack = new DataStack(app, `${prefix}-Data`, {
 dataStack.addDependency(networkStack);
 
 // --- Stack 3: Security ---
-// Cognito user pool, WAF WebACL, KMS keys. Depends on NetworkStack (WAF for regional resources).
+// Cognito user pool, WAF WebACL, KMS keys. No stack dependencies.
 const securityStack = new SecurityStack(app, `${prefix}-Security`, {
   env: envConfig,
   description: 'Chimera security layer: Cognito user pool, WAF WebACL, KMS key',
   envName,
 });
-securityStack.addDependency(networkStack);
 
 // --- Stack 4: Observability ---
 // CloudWatch dashboard, SNS alarm topic, X-Ray config, DDB throttle alarms.
@@ -116,7 +115,30 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 
-// --- Stack 8: Tenant Onboarding ---
+// --- Stack 8: Orchestration ---
+// EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
+// Supports swarm, workflow, and graph orchestration patterns.
+// Depends on SecurityStack for KMS encryption.
+const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
+  env: envConfig,
+  description: 'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
+  envName,
+  platformKey: securityStack.platformKey,
+});
+orchestrationStack.addDependency(securityStack);
+
+// --- Stack 9: Evolution Engine ---
+// Self-improvement mechanisms: prompt evolution, auto-skill generation, model routing optimization,
+// memory GC, cron self-scheduling. All changes are Cedar-bounded, audited, and reversible.
+const evolutionStack = new EvolutionStack(app, `${prefix}-Evolution`, {
+  env: envConfig,
+  description: 'Chimera evolution engine: prompt A/B testing, auto-skills, model routing, memory GC',
+  envName,
+  auditTable: dataStack.auditTable,
+});
+evolutionStack.addDependency(dataStack);
+
+// --- Stack 10: Tenant Onboarding ---
 // Cedar policy infrastructure + Step Functions workflow for tenant provisioning.
 // Creates DDB records, Cognito groups, IAM roles, S3 prefixes, Cedar policies, cost tracking.
 // Depends on DataStack for tables/buckets and SecurityStack for user pool/KMS.
@@ -140,29 +162,6 @@ tenantOnboardingStack.addDependency(dataStack);
 tenantOnboardingStack.addDependency(securityStack);
 tenantOnboardingStack.addDependency(observabilityStack);
 
-// --- Stack 9: Orchestration ---
-// EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
-// Supports swarm, workflow, and graph orchestration patterns.
-// Depends on SecurityStack for KMS encryption.
-const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
-  env: envConfig,
-  description: 'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
-  envName,
-  platformKey: securityStack.platformKey,
-});
-orchestrationStack.addDependency(securityStack);
-
-// --- Stack 10: Evolution Engine ---
-// Self-improvement mechanisms: prompt evolution, auto-skill generation, model routing optimization,
-// memory GC, cron self-scheduling. All changes are Cedar-bounded, audited, and reversible.
-const evolutionStack = new EvolutionStack(app, `${prefix}-Evolution`, {
-  env: envConfig,
-  description: 'Chimera evolution engine: prompt A/B testing, auto-skills, model routing, memory GC',
-  envName,
-  auditTable: dataStack.auditTable,
-});
-evolutionStack.addDependency(dataStack);
-
 // --- Stack 11: CI/CD Pipeline ---
 // CodePipeline with multi-stage canary deployment: GitHub source -> Build/Test -> Canary -> Progressive Rollout.
 // Independent stack, can be deployed separately from application stacks.
@@ -176,23 +175,23 @@ const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
 });
 
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, tenantOnboardingStack, orchestrationStack, evolutionStack, pipelineStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
 }
 
 // --- Stack outputs for cross-stack consumption ---
-// NetworkStack exports VPC ID, subnet IDs, security group IDs
-// DataStack exports table ARNs/names, bucket ARNs/names
-// SecurityStack exports user pool ID/ARN, WebACL ARN, KMS key ARN
-// ObservabilityStack exports alarm topic ARN, dashboard URL/name
-// ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
-// SkillPipelineStack exports state machine ARN/name
-// ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
-// TenantOnboardingStack exports Cedar policy store ID/ARN, onboarding state machine ARN, evaluation Lambda ARN
-// OrchestrationStack exports event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN
-// EvolutionStack exports evolution state table ARN/name, artifacts bucket ARN/name, state machine ARNs
-// PipelineStack exports pipeline ARN/name, artifact bucket name, orchestration state machine ARN, alarm topic ARN
+// Stack 1 (NetworkStack): VPC ID, subnet IDs, security group IDs
+// Stack 2 (DataStack): table ARNs/names, bucket ARNs/names
+// Stack 3 (SecurityStack): user pool ID/ARN, WebACL ARN, KMS key ARN
+// Stack 4 (ObservabilityStack): alarm topic ARN, dashboard URL/name
+// Stack 5 (ApiStack): REST API ID/URL, authorizer ID, WebSocket API ID/URL
+// Stack 6 (SkillPipelineStack): state machine ARN/name
+// Stack 7 (ChatStack): ALB DNS/ARN, ECS cluster/service names, task definition ARN
+// Stack 8 (OrchestrationStack): event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN
+// Stack 9 (EvolutionStack): evolution state table ARN/name, artifacts bucket ARN/name, state machine ARNs
+// Stack 10 (TenantOnboardingStack): Cedar policy store ID/ARN, onboarding state machine ARN, evaluation Lambda ARN
+// Stack 11 (PipelineStack): pipeline ARN/name, artifact bucket name, orchestration state machine ARN, alarm topic ARN
 
 app.synth();
