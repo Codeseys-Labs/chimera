@@ -87,5 +87,17 @@
 		"status": "active",
 		"createdAt": "2026-03-20T17:02:32.056Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-3866018b",
+		"name": "aws-agent-impl-batch",
+		"memberIssueIds": [
+			"chimera-0b40",
+			"chimera-3180",
+			"chimera-586a"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T18:27:29.334Z",
+		"completedAt": null
 	}
 ]
