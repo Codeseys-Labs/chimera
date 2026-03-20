@@ -100,3 +100,6 @@ export {
   type BudgetCheckResult,
   type BudgetAction,
 } from './billing';
+
+// Evolution module (self-improvement engine)
+export * from './evolution';
