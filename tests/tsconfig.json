@@ -1,0 +1,43 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "module": "ESNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node", "jest"],
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "@chimera/shared": ["../packages/shared/src"],
+      "@chimera/core": ["../packages/core/src"],
+      "@chimera/sse-bridge": ["../packages/sse-bridge/src"],
+      "@chimera/chat-gateway": ["../packages/chat-gateway/src"]
+    }
+  },
+  "include": [
+    "**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.spec.ts",
+    "**/*.test.ts"
+  ],
+  "references": [
+    { "path": "../packages/shared" },
+    { "path": "../packages/core" },
+    { "path": "../packages/sse-bridge" },
+    { "path": "../packages/chat-gateway" }
+  ]
+}
