@@ -9,6 +9,7 @@ import { ObservabilityStack } from '../lib/observability-stack';
 import { ApiStack } from '../lib/api-stack';
 import { SkillPipelineStack } from '../lib/skill-pipeline-stack';
 import { ChatStack } from '../lib/chat-stack';
+import { OrchestrationStack } from '../lib/orchestration-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -114,8 +115,20 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 
+// --- Stack 8: Orchestration ---
+// EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
+// Supports swarm, workflow, and graph orchestration patterns.
+// Depends on SecurityStack for KMS encryption.
+const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
+  env: envConfig,
+  description: 'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
+  envName,
+  platformKey: securityStack.platformKey,
+});
+orchestrationStack.addDependency(securityStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -129,5 +142,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
 // SkillPipelineStack exports state machine ARN/name
 // ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
+// OrchestrationStack exports event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN
 
 app.synth();
