@@ -153,3 +153,6 @@ export * from './aws-tools';
 
 // Discovery module (AWS account-wide resource discovery)
 export * from './discovery';
+
+// Activity module (real-time agent activity monitoring)
+export * from './activity';
