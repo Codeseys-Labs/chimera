@@ -1,7 +1,7 @@
-# ClawCore Architecture Review: Developer Experience & Migration
+# Chimera Architecture Review: Developer Experience & Migration
 
 > **Reviewer:** Developer Experience Advocate
-> **Team:** clawcore-architecture
+> **Team:** chimera-architecture
 > **Date:** 2026-03-19
 > **Review Type:** Task #7 - Developer Experience & Migration Review
 > **Input Documents:** Synthesis doc, OpenClaw Core Architecture, Skill System, Memory/Persistence, Strands Agents Core
@@ -10,9 +10,9 @@
 
 ## Executive Assessment
 
-ClawCore's architecture makes strong infrastructure choices (AgentCore MicroVMs, Strands model-driven loop, Cedar policies) but the developer experience layer is **largely undesigned**. The synthesis document describes *what* the platform does, not *how developers interact with it*. This review fills that gap with concrete CLI designs, SDK patterns, getting-started workflows, and migration tooling.
+Chimera's architecture makes strong infrastructure choices (AgentCore MicroVMs, Strands model-driven loop, Cedar policies) but the developer experience layer is **largely undesigned**. The synthesis document describes *what* the platform does, not *how developers interact with it*. This review fills that gap with concrete CLI designs, SDK patterns, getting-started workflows, and migration tooling.
 
-**Key finding:** The platform needs a dedicated `clawcore` CLI and SDK layer that abstracts the underlying AWS complexity. Without it, developers face a wall of CDK, DynamoDB, S3, Cognito, and EventBridge configuration before they can run their first agent. OpenClaw's viral growth came from `openclaw onboard` getting people to a working agent in under 5 minutes. ClawCore must match or beat that.
+**Key finding:** The platform needs a dedicated `chimera` CLI and SDK layer that abstracts the underlying AWS complexity. Without it, developers face a wall of CDK, DynamoDB, S3, Cognito, and EventBridge configuration before they can run their first agent. OpenClaw's viral growth came from `openclaw onboard` getting people to a working agent in under 5 minutes. Chimera must match or beat that.
 
 ---
 
@@ -23,7 +23,7 @@ ClawCore's architecture makes strong infrastructure choices (AgentCore MicroVMs,
 The synthesis document jumps straight to CDK deployment:
 
 ```bash
-npx cdk deploy ClawCorePlatformStack --context environment=prod --context region=us-west-2
+npx cdk deploy ChimeraPlatformStack --context environment=prod --context region=us-west-2
 ```
 
 This is a **platform operator** getting-started experience, not a **developer** getting-started experience. A skill author or tenant developer should never need to touch CDK.
@@ -32,16 +32,16 @@ This is a **platform operator** getting-started experience, not a **developer** 
 
 ```bash
 # Step 1: Install CLI (30 seconds)
-pip install clawcore-cli
-# or: brew install clawcore
+pip install chimera-cli
+# or: brew install chimera
 
 # Step 2: Authenticate (60 seconds)
-clawcore auth login
+chimera auth login
 # Opens browser for Cognito auth, stores JWT locally
-# For AWS-native: clawcore auth login --aws-profile my-profile
+# For AWS-native: chimera auth login --aws-profile my-profile
 
 # Step 3: Create your first agent (30 seconds)
-clawcore agent init my-assistant
+chimera agent init my-assistant
 # Creates:
 #   my-assistant/
 #     agent.yaml          <- agent definition
@@ -51,16 +51,16 @@ clawcore agent init my-assistant
 
 # Step 4: Run locally (60 seconds)
 cd my-assistant
-clawcore agent run
+chimera agent run
 # > Agent "my-assistant" running locally on http://localhost:8080
 # > Model: us.anthropic.claude-sonnet-4-6-v1:0 (Bedrock)
 # > Tools: read_file, write_file, edit_file, shell
 # > Type a message or press Ctrl+C to stop
 
 # Step 5: Deploy (120 seconds)
-clawcore agent deploy --tenant my-org
+chimera agent deploy --tenant my-org
 # > Deploying to AgentCore Runtime...
-# > Agent endpoint: https://my-org.clawcore.example.com/agents/my-assistant
+# > Agent endpoint: https://my-org.chimera.example.com/agents/my-assistant
 # > Slack webhook: /agents/my-assistant/slack
 # > Done.
 ```
@@ -70,27 +70,27 @@ clawcore agent deploy --tenant my-org
 1. **Prerequisites** (1 page)
    - AWS account with Bedrock access
    - Python 3.11+ or Node.js 20+
-   - `clawcore-cli` installed
+   - `chimera-cli` installed
 
 2. **Your First Agent** (2 pages)
-   - `clawcore agent init` walkthrough
+   - `chimera agent init` walkthrough
    - Edit `system-prompt.md` to define personality
-   - `clawcore agent run` for local testing
+   - `chimera agent run` for local testing
    - Chat with your agent in the terminal
 
 3. **Adding a Skill** (2 pages)
    - Create a `SKILL.md` in `skills/`
-   - Test with `clawcore skill test my-skill`
+   - Test with `chimera skill test my-skill`
    - See the agent use the skill in conversation
 
 4. **Adding an MCP Tool** (1 page)
    - Add MCP server to `agent.yaml`
-   - `clawcore agent run` picks it up automatically
+   - `chimera agent run` picks it up automatically
 
 5. **Deploying to the Cloud** (2 pages)
-   - `clawcore agent deploy` walkthrough
-   - Connect to Slack with `clawcore channel connect slack`
-   - Set up a cron job with `clawcore cron create`
+   - `chimera agent deploy` walkthrough
+   - Connect to Slack with `chimera channel connect slack`
+   - Set up a cron job with `chimera cron create`
 
 6. **Next Steps** (1 page)
    - Multi-agent orchestration
@@ -109,7 +109,7 @@ The synthesis correctly preserves OpenClaw's `SKILL.md` format. This is the righ
 
 ```bash
 # Create a new skill from template
-clawcore skill init code-review --template tool-skill
+chimera skill init code-review --template tool-skill
 # Creates:
 #   skills/code-review/
 #     SKILL.md             <- skill definition (YAML frontmatter + instructions)
@@ -122,7 +122,7 @@ clawcore skill init code-review --template tool-skill
 $EDITOR skills/code-review/SKILL.md
 
 # Test the skill locally (runs against test fixtures)
-clawcore skill test code-review
+chimera skill test code-review
 # > Running 3 test cases...
 # > [PASS] basic_review: Agent correctly identified null pointer risk
 # > [PASS] security_scan: Agent flagged SQL injection
@@ -130,16 +130,16 @@ clawcore skill test code-review
 # > 2/3 passed
 
 # Test interactively (spin up agent with only this skill)
-clawcore skill test code-review --interactive
+chimera skill test code-review --interactive
 # > Agent running with skill "code-review" only
 # > Type a message to test...
 
 # Publish to tenant skill registry
-clawcore skill publish code-review --version 1.0.0
+chimera skill publish code-review --version 1.0.0
 # > Published code-review@1.0.0 to tenant registry
 
 # Share to marketplace (requires review)
-clawcore skill publish code-review --marketplace
+chimera skill publish code-review --marketplace
 # > Submitted code-review@1.0.0 for marketplace review
 # > Security scan: PASSED
 # > Estimated review time: 24-48 hours
@@ -179,7 +179,7 @@ For skills that provide tools (MCP server skills), the SDK should make tool crea
 
 ```python
 # skills/code-review/tools/review.py
-from clawcore.skill import skill_tool
+from chimera.skill import skill_tool
 
 @skill_tool
 def review_file(file_path: str, focus: str = "all") -> str:
@@ -198,7 +198,7 @@ def review_file(file_path: str, focus: str = "all") -> str:
 
 ```typescript
 // skills/code-review/tools/review.ts
-import { skillTool } from '@clawcore/skill-sdk'
+import { skillTool } from '@chimera/skill-sdk'
 import { z } from 'zod'
 
 export const reviewFile = skillTool({
@@ -263,21 +263,21 @@ cron:
 
 ```bash
 # Create a cron job from an existing agent
-clawcore cron create daily-digest \
+chimera cron create daily-digest \
   --agent my-assistant \
   --schedule "weekdays 8:00 AM ET" \
   --budget 2.00 \
   --notify-slack "#daily-digest"
 
 # List all cron jobs
-clawcore cron list
+chimera cron list
 # NAME            SCHEDULE              LAST RUN      STATUS   COST
 # daily-digest    Weekdays 08:00 ET     2h ago        OK       $0.47
 # extract-tasks   Weekdays 08:45 ET     1h ago        OK       $0.31
 # weekly-report   Mondays 09:00 ET      5d ago        FAILED   $1.82
 
 # View cron job details and recent runs
-clawcore cron status daily-digest
+chimera cron status daily-digest
 # Schedule:    Weekdays 08:00 ET (next: tomorrow 08:00)
 # Last 5 runs:
 #   2026-03-19 08:00  OK     $0.47  42s   outputs/digests/2026-03-19.md
@@ -286,14 +286,14 @@ clawcore cron status daily-digest
 #   ...
 
 # Trigger a manual run
-clawcore cron run daily-digest --now
+chimera cron run daily-digest --now
 
 # Pause/resume
-clawcore cron pause daily-digest
-clawcore cron resume daily-digest
+chimera cron pause daily-digest
+chimera cron resume daily-digest
 
 # Delete
-clawcore cron delete daily-digest
+chimera cron delete daily-digest
 ```
 
 #### Method C: Chat Command (Self-Scheduling Agent)
@@ -310,7 +310,7 @@ Agent: I'll create a cron job for that. Here's what I'll set up:
   Shall I proceed?
 User: Yes
 Agent: Done. Created cron job "email-summary" (ID: cron-a1b2c3).
-  You can manage it with: clawcore cron status email-summary
+  You can manage it with: chimera cron status email-summary
 ```
 
 ---
@@ -367,8 +367,8 @@ conversation:
 
 ```python
 # agent.py -- escape hatch for the 20% case
-from clawcore import ClawCoreAgent, CronJob
-from clawcore.skills import load_skill
+from chimera import ChimeraAgent, CronJob
+from chimera.skills import load_skill
 from strands import Agent, tool
 from strands.multiagent import AgentsAsTool
 
@@ -389,7 +389,7 @@ reviewer = Agent(
 )
 
 # Main agent with subagent
-agent = ClawCoreAgent(
+agent = ChimeraAgent(
     config="agent.yaml",  # Load base config from YAML
     extra_tools=[
         custom_analysis,
@@ -409,7 +409,7 @@ agent.add_cron(CronJob(
 
 ```typescript
 // agent.ts
-import { ClawCoreAgent, CronJob } from '@clawcore/sdk'
+import { ChimeraAgent, CronJob } from '@chimera/sdk'
 import { Agent, tool } from '@strands-agents/sdk'
 import { z } from 'zod'
 
@@ -425,7 +425,7 @@ const customAnalysis = tool({
   },
 })
 
-const agent = new ClawCoreAgent({
+const agent = new ChimeraAgent({
   configPath: 'agent.yaml',
   extraTools: [customAnalysis],
 })
@@ -441,10 +441,10 @@ agent.addCron(new CronJob({
 
 ## 5. CLI Tool Design
 
-### `clawcore` CLI Command Tree
+### `chimera` CLI Command Tree
 
 ```
-clawcore
+chimera
   auth
     login [--aws-profile <profile>]     # Authenticate (Cognito or IAM)
     logout                               # Clear credentials
@@ -518,7 +518,7 @@ clawcore
 ### Error Messages
 
 ```bash
-$ clawcore agent deploy my-assistant
+$ chimera agent deploy my-assistant
 ERROR: Bedrock model access not configured
 
   The model "us.anthropic.claude-sonnet-4-6-v1:0" is not enabled in your
@@ -530,14 +530,14 @@ ERROR: Bedrock model access not configured
   3. Enable "Claude Sonnet 4.6" from Anthropic
   4. Wait 1-2 minutes for access to propagate
 
-  Then retry: clawcore agent deploy my-assistant
+  Then retry: chimera agent deploy my-assistant
 
   Alternatively, use a different model:
-    clawcore agent deploy my-assistant --model us.amazon.nova-pro-v1:0
+    chimera agent deploy my-assistant --model us.amazon.nova-pro-v1:0
 ```
 
 ```bash
-$ clawcore cron run daily-digest --now
+$ chimera cron run daily-digest --now
 ERROR: MCP authentication failed for "outlook"
 
   The Outlook MCP server returned 401 Unauthorized.
@@ -545,25 +545,25 @@ ERROR: MCP authentication failed for "outlook"
 
   To fix this:
   1. Run: mwinit -o
-  2. Retry: clawcore cron run daily-digest --now
+  2. Retry: chimera cron run daily-digest --now
 
   If the problem persists, check:
-    clawcore doctor --check mcp-auth
+    chimera doctor --check mcp-auth
 ```
 
 ---
 
 ## 6. SDK Design for Skill Authors
 
-### Python SDK (`clawcore-sdk`)
+### Python SDK (`chimera-sdk`)
 
 ```python
 # Installation
-# pip install clawcore-sdk
+# pip install chimera-sdk
 
-from clawcore.skill import skill_tool, SkillContext
-from clawcore.memory import TenantMemory
-from clawcore.types import SkillResult
+from chimera.skill import skill_tool, SkillContext
+from chimera.memory import TenantMemory
+from chimera.types import SkillResult
 
 # Simple tool (decorator-based, mirrors Strands @tool)
 @skill_tool
@@ -613,13 +613,13 @@ async def process_batch(items: list[str]) -> str:
     yield f"Completed {len(items)} items"
 ```
 
-### TypeScript SDK (`@clawcore/skill-sdk`)
+### TypeScript SDK (`@chimera/skill-sdk`)
 
 ```typescript
 // Installation
-// npm install @clawcore/skill-sdk
+// npm install @chimera/skill-sdk
 
-import { skillTool, type SkillContext } from '@clawcore/skill-sdk'
+import { skillTool, type SkillContext } from '@chimera/skill-sdk'
 import { z } from 'zod'
 
 // Simple tool
@@ -667,7 +667,7 @@ export const getTenantConfig = skillTool({
 
 ```bash
 # Start local agent (uses Bedrock for model, runs tools locally)
-clawcore agent run
+chimera agent run
 # > Agent "my-assistant" starting...
 # > Loading system prompt from system-prompt.md
 # > Loading 3 skills: code-review, ticket-manager, acme-policies
@@ -685,16 +685,16 @@ clawcore agent run
 # agent> I'll review that file for you...
 
 # Run with specific model (e.g., local Ollama for offline dev)
-clawcore agent run --model ollama:llama3.2
+chimera agent run --model ollama:llama3.2
 
 # Run with debug logging
-clawcore agent run --verbose
+chimera agent run --verbose
 
 # Run with hot-reload (watches for skill/prompt changes)
-clawcore agent run --watch
+chimera agent run --watch
 
 # Run a specific test scenario
-clawcore agent test --file tests/support-flow.yaml
+chimera agent test --file tests/support-flow.yaml
 ```
 
 ### Local Dev Features
@@ -702,18 +702,18 @@ clawcore agent test --file tests/support-flow.yaml
 | Feature | Behavior |
 |---------|----------|
 | **Hot reload** | `--watch` flag restarts agent when `SKILL.md`, `system-prompt.md`, or tool files change |
-| **Local memory** | SQLite-backed memory in `.clawcore/memory/` (same API as production AgentCore Memory) |
+| **Local memory** | SQLite-backed memory in `.chimera/memory/` (same API as production AgentCore Memory) |
 | **Local MCP** | MCP servers run as local processes (stdio transport) |
 | **Model switching** | `--model` flag overrides `agent.yaml` for quick testing with cheaper/faster models |
 | **Web UI** | Built-in chat interface at `localhost:8080/chat` for testing |
-| **Request logging** | Every model call and tool execution logged to `.clawcore/logs/` |
+| **Request logging** | Every model call and tool execution logged to `.chimera/logs/` |
 | **Cost tracking** | Running token/cost estimate displayed in terminal |
 
 ### Docker-Based Local Dev (Full Isolation)
 
 ```bash
 # Run in a container that mirrors AgentCore MicroVM
-clawcore agent run --docker
+chimera agent run --docker
 # > Building container from agent.yaml...
 # > Starting in isolated environment (mirrors AgentCore Runtime)
 # > Same sandboxing as production deployment
@@ -725,7 +725,7 @@ clawcore agent run --docker
 
 ### What Works the Same
 
-| Feature | OpenClaw | ClawCore | Migration Effort |
+| Feature | OpenClaw | Chimera | Migration Effort |
 |---------|----------|----------|-----------------|
 | **SKILL.md format** | YAML frontmatter + markdown | Same format | **Zero** -- copy files directly |
 | **System prompt** | SOUL.md (markdown) | system-prompt.md (markdown) | **Rename only** |
@@ -735,7 +735,7 @@ clawcore agent run --docker
 
 ### What's Different
 
-| Feature | OpenClaw | ClawCore | Migration Impact |
+| Feature | OpenClaw | Chimera | Migration Impact |
 |---------|----------|----------|-----------------|
 | **Agent framework** | Pi (TypeScript, 4 tools) | Strands (Python/TS, model-driven) | **Medium** -- different tool registration |
 | **Gateway** | Node.js daemon on port 18789 | API Gateway + AgentCore Runtime | **High** -- no local daemon concept |
@@ -750,7 +750,7 @@ clawcore agent run --docker
 
 ```bash
 # Scan an OpenClaw workspace and generate migration report
-clawcore migrate scan ~/openclaw-workspace/
+chimera migrate scan ~/openclaw-workspace/
 # > Scanning OpenClaw workspace...
 # > Found:
 # >   SOUL.md             -> Will become system-prompt.md
@@ -765,10 +765,10 @@ clawcore migrate scan ~/openclaw-workspace/
 # >   - skills/custom-browser: Uses Pi-specific bash patterns
 # >   - Memory: 847 daily log entries (recommend selective import)
 # >
-# > Run `clawcore migrate apply` to proceed
+# > Run `chimera migrate apply` to proceed
 
 # Apply migration
-clawcore migrate apply ~/openclaw-workspace/ --tenant my-org
+chimera migrate apply ~/openclaw-workspace/ --tenant my-org
 # > Converting SOUL.md -> system-prompt.md ... done
 # > Converting openclaw.json -> agent.yaml ... done
 # > Importing 11 skills ... done
@@ -776,7 +776,7 @@ clawcore migrate apply ~/openclaw-workspace/ --tenant my-org
 # > Converting cron schedules to EventBridge ... done
 # > Uploading to tenant "my-org" ... done
 # >
-# > Migration complete. Run `clawcore agent run` to test locally.
+# > Migration complete. Run `chimera agent run` to test locally.
 ```
 
 ### Config Conversion Example
@@ -837,7 +837,7 @@ OpenFang migration is more complex due to fundamental architectural differences 
 
 ### Key Differences
 
-| Feature | OpenFang | ClawCore |
+| Feature | OpenFang | Chimera |
 |---------|----------|----------|
 | **Language** | Rust | Python/TypeScript |
 | **Tool sandbox** | WASM with capability grants | AgentCore MicroVM + Cedar policies |
@@ -852,11 +852,11 @@ OpenFang migration is more complex due to fundamental architectural differences 
 
 2. **Security model:** OpenFang's WASM capability grants map conceptually to Cedar policies. The migration tool should generate Cedar policy skeletons from OpenFang capability manifests.
 
-3. **Audit trail:** OpenFang's Merkle chain provides cryptographic tamper evidence. ClawCore's CloudTrail + Cedar audit is different (centralized, not cryptographic). Organizations requiring tamper-evident audit may need a custom plugin.
+3. **Audit trail:** OpenFang's Merkle chain provides cryptographic tamper evidence. Chimera's CloudTrail + Cedar audit is different (centralized, not cryptographic). Organizations requiring tamper-evident audit may need a custom plugin.
 
 ```bash
 # OpenFang migration (more manual than OpenClaw)
-clawcore migrate scan-openfang ~/openfang-workspace/
+chimera migrate scan-openfang ~/openfang-workspace/
 # > Found:
 # >   5 Rust crate skills -> Manual rewrite required (SKILL.md + tools)
 # >   Agent config        -> Will convert to agent.yaml
@@ -864,7 +864,7 @@ clawcore migrate scan-openfang ~/openfang-workspace/
 # >   Memory (SQLite)     -> Will import to AgentCore Memory
 # >
 # > Compatibility: 45% (manual work required for compiled skills)
-# > See migration guide: docs.clawcore.dev/migration/openfang
+# > See migration guide: docs.chimera.dev/migration/openfang
 ```
 
 ---
@@ -874,7 +874,7 @@ clawcore migrate scan-openfang ~/openfang-workspace/
 ### Recommended Structure
 
 ```
-docs.clawcore.dev/
+docs.chimera.dev/
   getting-started/
     quickstart.md              # 5-minute zero to first agent
     installation.md            # CLI install + auth setup
@@ -915,7 +915,7 @@ docs.clawcore.dev/
     build-research-agent.md    # End-to-end: multi-agent research pipeline
 
   concepts/
-    architecture.md            # How ClawCore works (the synthesis doc, simplified)
+    architecture.md            # How Chimera works (the synthesis doc, simplified)
     agent-loop.md              # Strands event loop explained
     multi-tenancy.md           # Isolation model
     skill-marketplace.md       # Publishing and governance
@@ -932,7 +932,7 @@ docs.clawcore.dev/
 ### Examples Repository
 
 ```
-github.com/clawcore/examples/
+github.com/chimera/examples/
   agents/
     hello-world/               # Minimal agent
     support-bot/               # Full support bot with skills + cron
@@ -944,9 +944,9 @@ github.com/clawcore/examples/
     code-review/               # Tool-providing skill
     ticket-manager/            # MCP-wrapping skill
   templates/
-    agent-basic/               # Template for `clawcore agent init`
+    agent-basic/               # Template for `chimera agent init`
     agent-multi-agent/         # Template with subagents
-    skill-basic/               # Template for `clawcore skill init`
+    skill-basic/               # Template for `chimera skill init`
     skill-tool/                # Template with tool implementations
 ```
 
@@ -956,7 +956,7 @@ github.com/clawcore/examples/
 
 ### Skill Marketplace Governance
 
-ClawHub's ClawHavoc incident (1,184 malicious skills, 12% of registry) is the cautionary tale. ClawCore must build security in from day one.
+ClawHub's ClawHavoc incident (1,184 malicious skills, 12% of registry) is the cautionary tale. Chimera must build security in from day one.
 
 #### Recommended Governance Model
 
@@ -966,7 +966,7 @@ ClawHub's ClawHavoc incident (1,184 malicious skills, 12% of registry) is the ca
 | **Organization-shared** | Org admin approval | High | Admin review |
 | **Marketplace: Unverified** | Account + code scan | Low (sandboxed) | Automated scan |
 | **Marketplace: Verified** | Automated + manual review | Medium | Security team review |
-| **Marketplace: Official** | ClawCore team authored | High | Internal QA |
+| **Marketplace: Official** | Chimera team authored | High | Internal QA |
 
 #### Automated Security Pipeline
 
@@ -985,7 +985,7 @@ Skill submitted
 1. **Skill contribution:** Fork examples repo, add skill, submit PR. Automated CI runs tests + security scan.
 2. **SDK contribution:** Standard open-source workflow (issues, PRs, CLA).
 3. **Documentation:** Docs-as-code in the main repo. Anyone can submit corrections.
-4. **Community tools:** Published to npm/PyPI with `clawcore-skill-` or `@clawcore/skill-` prefix for discoverability.
+4. **Community tools:** Published to npm/PyPI with `chimera-skill-` or `@chimera/skill-` prefix for discoverability.
 
 ---
 
@@ -1006,14 +1006,14 @@ ERROR: <What happened>
 
   <Alternative approach if applicable>
 
-  More info: docs.clawcore.dev/errors/<error-code>
+  More info: docs.chimera.dev/errors/<error-code>
 ```
 
 ### Common Error Scenarios
 
 ```bash
 # Model access error
-$ clawcore agent run
+$ chimera agent run
 ERROR: Model not available (CC-1001)
 
   The model "us.anthropic.claude-sonnet-4-6-v1:0" returned
@@ -1024,12 +1024,12 @@ ERROR: Model not available (CC-1001)
   2. Wait 1-2 minutes, then retry
 
   For local development without Bedrock access:
-    clawcore agent run --model ollama:llama3.2
+    chimera agent run --model ollama:llama3.2
 
-  More info: docs.clawcore.dev/errors/CC-1001
+  More info: docs.chimera.dev/errors/CC-1001
 
 # Skill test failure
-$ clawcore skill test code-review
+$ chimera skill test code-review
 FAIL: test "security_scan" (CC-4012)
 
   Expected output to contain "SQL injection" but agent response was:
@@ -1041,12 +1041,12 @@ FAIL: test "security_scan" (CC-4012)
   - The model version may behave differently (try with --model flag)
 
   Debug with:
-    clawcore skill test code-review --interactive --verbose
+    chimera skill test code-review --interactive --verbose
 
-  More info: docs.clawcore.dev/errors/CC-4012
+  More info: docs.chimera.dev/errors/CC-4012
 
 # Cron failure
-$ clawcore cron status daily-digest
+$ chimera cron status daily-digest
 Last run: FAILED at 2026-03-19 08:00 ET (CC-5003)
 
   MCP server "outlook" failed to authenticate.
@@ -1054,21 +1054,21 @@ Last run: FAILED at 2026-03-19 08:00 ET (CC-5003)
 
   To fix this:
   1. Renew credentials: mwinit -o
-  2. Test manually: clawcore cron run daily-digest --now
+  2. Test manually: chimera cron run daily-digest --now
 
   To prevent this:
   - Set up credential auto-renewal (see docs)
-  - Add failure notifications: clawcore cron update daily-digest --notify-on-failure
+  - Add failure notifications: chimera cron update daily-digest --notify-on-failure
 
-  Run logs: clawcore cron logs daily-digest --run-id run-2026-03-19-0800
-  More info: docs.clawcore.dev/errors/CC-5003
+  Run logs: chimera cron logs daily-digest --run-id run-2026-03-19-0800
+  More info: docs.chimera.dev/errors/CC-5003
 ```
 
 ### Debugging Tools
 
 ```bash
 # Comprehensive health check
-clawcore doctor
+chimera doctor
 # [OK]  CLI version: 1.2.0 (latest)
 # [OK]  AWS credentials: valid (expires in 11h)
 # [OK]  Bedrock access: Claude Sonnet 4.6 enabled
@@ -1079,11 +1079,11 @@ clawcore doctor
 #        Fix: brew install chromium
 
 # Debug a specific agent run
-clawcore agent logs my-assistant --follow --verbose
+chimera agent logs my-assistant --follow --verbose
 # Shows: model calls, tool executions, memory reads/writes, token usage
 
 # Trace a specific request
-clawcore agent trace <request-id>
+chimera agent trace <request-id>
 # Shows: full execution timeline with model reasoning, tool calls, latency
 ```
 
@@ -1093,13 +1093,13 @@ clawcore agent trace <request-id>
 
 | Priority | Recommendation | Effort |
 |----------|---------------|--------|
-| **P0** | Build `clawcore` CLI with `agent init/run/deploy` | Medium |
+| **P0** | Build `chimera` CLI with `agent init/run/deploy` | Medium |
 | **P0** | Create 5-minute getting-started tutorial | Low |
 | **P0** | Define `agent.yaml` schema as the primary config format | Low |
-| **P1** | Build skill testing framework (`clawcore skill test`) | Medium |
+| **P1** | Build skill testing framework (`chimera skill test`) | Medium |
 | **P1** | Design error messages with fix instructions for all common failures | Medium |
-| **P1** | Build OpenClaw migration tool (`clawcore migrate`) | Medium |
-| **P1** | Create `clawcore doctor` diagnostic command | Low |
+| **P1** | Build OpenClaw migration tool (`chimera migrate`) | Medium |
+| **P1** | Create `chimera doctor` diagnostic command | Low |
 | **P2** | Python + TypeScript skill SDKs | Medium |
 | **P2** | Cron job CLI and YAML configuration | Medium |
 | **P2** | Local web UI for agent testing | Medium |

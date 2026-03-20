@@ -1,4 +1,4 @@
-# ClawCore Architecture Review: Platform Engineering & IaC
+# Chimera Architecture Review: Platform Engineering & IaC
 
 > **Reviewer:** Platform Engineering Agent
 > **Date:** 2026-03-19
@@ -29,7 +29,7 @@ This review provides the missing specificity: exact stack decomposition, L3 cons
 The synthesis proposes 4 platform stacks and 3 tenant stacks. This is insufficient. Here is the complete stack graph:
 
 ```
-ClawCoreApp
+ChimeraApp
   |
   +-- NetworkStack              (VPC, subnets, NAT, VPC endpoints, security groups)
   |     |
@@ -87,7 +87,7 @@ export class NetworkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    this.vpc = new ec2.Vpc(this, 'ClawCoreVpc', {
+    this.vpc = new ec2.Vpc(this, 'ChimeraVpc', {
       maxAzs: 3,
       natGateways: 2, // HA but cost-conscious; scale to 3 for prod-critical
       subnetConfiguration: [
@@ -117,7 +117,7 @@ export class NetworkStack extends cdk.Stack {
 
     this.agentSecurityGroup = new ec2.SecurityGroup(this, 'AgentSG', {
       vpc: this.vpc,
-      description: 'Security group for ClawCore agent services',
+      description: 'Security group for Chimera agent services',
       allowAllOutbound: true,
     });
   }
@@ -150,7 +150,7 @@ export class DataStack extends cdk.Stack {
 
     // Single-table design: PK=TENANT#{id}, SK=SESSION#|SKILL#|CONFIG|CRON#
     this.platformTable = new dynamodb.Table(this, 'PlatformTable', {
-      tableName: 'clawcore-platform',
+      tableName: 'chimera-platform',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -170,7 +170,7 @@ export class DataStack extends cdk.Stack {
 
     // Tenant data bucket with prefix isolation
     this.tenantBucket = new s3.Bucket(this, 'TenantBucket', {
-      bucketName: `clawcore-tenants-${this.account}-${this.region}`,
+      bucketName: `chimera-tenants-${this.account}-${this.region}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -188,7 +188,7 @@ export class DataStack extends cdk.Stack {
 
     // Skills bucket (global + marketplace + tenant skills)
     this.skillsBucket = new s3.Bucket(this, 'SkillsBucket', {
-      bucketName: `clawcore-skills-${this.account}-${this.region}`,
+      bucketName: `chimera-skills-${this.account}-${this.region}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -238,7 +238,7 @@ export class PlatformRuntimeStack extends cdk.Stack {
 
     // AgentCore Runtime -- shared pool for standard-tier tenants
     this.agentRuntime = new agentcore.Runtime(this, 'PoolRuntime', {
-      runtimeName: 'clawcore-pool',
+      runtimeName: 'chimera-pool',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
         './agent-code'
       ),
@@ -255,13 +255,13 @@ export class PlatformRuntimeStack extends cdk.Stack {
     });
 
     // Custom event bus for agent platform events
-    this.eventBus = new events.EventBus(this, 'ClawCoreEventBus', {
-      eventBusName: 'clawcore-events',
+    this.eventBus = new events.EventBus(this, 'ChimeraEventBus', {
+      eventBusName: 'chimera-events',
     });
 
     // WebSocket API for real-time agent streaming
     this.webSocketApi = new apigateway.CfnApi(this, 'AgentWebSocketApi', {
-      name: 'clawcore-websocket',
+      name: 'chimera-websocket',
       protocolType: 'WEBSOCKET',
       routeSelectionExpression: '$request.body.action',
     });
@@ -278,7 +278,7 @@ export class PlatformRuntimeStack extends cdk.Stack {
 
 ## 2. CDK Construct Library (L3 Constructs)
 
-The platform should publish reusable L3 constructs that encapsulate common ClawCore patterns. These live in a shared construct library package: `@clawcore/cdk-constructs`.
+The platform should publish reusable L3 constructs that encapsulate common Chimera patterns. These live in a shared construct library package: `@chimera/cdk-constructs`.
 
 ### TenantAgent Construct
 
@@ -327,7 +327,7 @@ export class TenantAgent extends Construct {
     // Scoped IAM role for this tenant
     this.tenantRole = new iam.Role(this, 'TenantRole', {
       assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
-      description: `ClawCore tenant role for ${props.tenantId}`,
+      description: `Chimera tenant role for ${props.tenantId}`,
     });
 
     // DynamoDB access scoped to tenant's partition key prefix
@@ -354,7 +354,7 @@ export class TenantAgent extends Construct {
     // Enterprise tier: dedicated AgentCore runtime
     if (props.tier === 'enterprise') {
       const dedicatedRuntime = new agentcore.Runtime(this, 'DedicatedRuntime', {
-        runtimeName: `clawcore-${props.tenantId}`,
+        runtimeName: `chimera-${props.tenantId}`,
         agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
           './agent-code'
         ),
@@ -380,7 +380,7 @@ export class TenantAgent extends Construct {
     // (Full definition would chain: LoadConfig -> InvokeAgent -> WriteOutput -> Notify)
 
     const stateMachine = new sfn.StateMachine(this, `${job.name}-SM`, {
-      stateMachineName: `clawcore-${props.tenantId}-${job.name}`,
+      stateMachineName: `chimera-${props.tenantId}-${job.name}`,
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
       timeout: cdk.Duration.minutes(30),
     });
@@ -420,7 +420,7 @@ export class AgentObservability extends Construct {
     const prefix = props.tenantId ? `Tenant-${props.tenantId}` : 'Platform';
 
     this.dashboard = new cloudwatch.Dashboard(this, 'Dashboard', {
-      dashboardName: `ClawCore-${prefix}`,
+      dashboardName: `Chimera-${prefix}`,
     });
 
     // Agent invocation metrics
@@ -563,10 +563,10 @@ export class PipelineStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const pipeline = new pipelines.CodePipeline(this, 'ClawCorePipeline', {
-      pipelineName: 'clawcore-deploy',
+    const pipeline = new pipelines.CodePipeline(this, 'ChimeraPipeline', {
+      pipelineName: 'chimera-deploy',
       synth: new pipelines.ShellStep('Synth', {
-        input: pipelines.CodePipelineSource.connection('org/clawcore', 'main', {
+        input: pipelines.CodePipelineSource.connection('org/chimera', 'main', {
           connectionArn: 'arn:aws:codestar-connections:...',
         }),
         commands: [
@@ -582,7 +582,7 @@ export class PipelineStack extends cdk.Stack {
     });
 
     // Dev stage
-    const devStage = pipeline.addStage(new ClawCoreStage(this, 'Dev', {
+    const devStage = pipeline.addStage(new ChimeraStage(this, 'Dev', {
       env: { account: '111111111111', region: 'us-west-2' },
       stageName: 'dev',
     }));
@@ -593,7 +593,7 @@ export class PipelineStack extends cdk.Stack {
     }));
 
     // Staging stage
-    const stagingStage = pipeline.addStage(new ClawCoreStage(this, 'Staging', {
+    const stagingStage = pipeline.addStage(new ChimeraStage(this, 'Staging', {
       env: { account: '222222222222', region: 'us-west-2' },
       stageName: 'staging',
     }));
@@ -611,7 +611,7 @@ export class PipelineStack extends cdk.Stack {
     );
 
     // Manual approval before prod
-    const prodStage = pipeline.addStage(new ClawCoreStage(this, 'Prod', {
+    const prodStage = pipeline.addStage(new ChimeraStage(this, 'Prod', {
       env: { account: '333333333333', region: 'us-west-2' },
       stageName: 'prod',
     }), {
@@ -710,10 +710,10 @@ const tenantsDir = path.join(__dirname, '..', 'tenants');
 const tenantFiles = fs.readdirSync(tenantsDir).filter(f => f.endsWith('.yaml'));
 
 // Deploy platform stacks first
-const networkStack = new NetworkStack(app, `ClawCore-${env}-Network`, { env: envConfig });
-const dataStack = new DataStack(app, `ClawCore-${env}-Data`, { vpc: networkStack.vpc, env: envConfig });
-const securityStack = new SecurityStack(app, `ClawCore-${env}-Security`, { env: envConfig });
-const runtimeStack = new PlatformRuntimeStack(app, `ClawCore-${env}-Runtime`, {
+const networkStack = new NetworkStack(app, `Chimera-${env}-Network`, { env: envConfig });
+const dataStack = new DataStack(app, `Chimera-${env}-Data`, { vpc: networkStack.vpc, env: envConfig });
+const securityStack = new SecurityStack(app, `Chimera-${env}-Security`, { env: envConfig });
+const runtimeStack = new PlatformRuntimeStack(app, `Chimera-${env}-Runtime`, {
   vpc: networkStack.vpc,
   platformTable: dataStack.platformTable,
   tenantBucket: dataStack.tenantBucket,
@@ -724,7 +724,7 @@ const runtimeStack = new PlatformRuntimeStack(app, `ClawCore-${env}-Runtime`, {
 // Deploy tenant stacks from YAML configs
 for (const file of tenantFiles) {
   const config = yaml.parse(fs.readFileSync(path.join(tenantsDir, file), 'utf8'));
-  new TenantStack(app, `ClawCore-${env}-Tenant-${config.tenantId}`, {
+  new TenantStack(app, `Chimera-${env}-Tenant-${config.tenantId}`, {
     tenantConfig: config,
     platformTable: dataStack.platformTable,
     tenantBucket: dataStack.tenantBucket,
@@ -862,7 +862,7 @@ Enterprise tenants who need isolated development environments get a **tenant san
 // - Isolated DynamoDB partition
 // - Own cron schedules (disabled by default)
 // - Connected to dev AgentCore runtime
-new TenantStack(app, `ClawCore-dev-Sandbox-${tenantId}`, {
+new TenantStack(app, `Chimera-dev-Sandbox-${tenantId}`, {
   tenantConfig: { ...tenantConfig, tier: 'basic' }, // Always basic tier in sandbox
   isSandbox: true,
   // Auto-cleanup after 7 days of inactivity
@@ -977,7 +977,7 @@ describe('Tenant lifecycle integration', () => {
 
   test('New tenant has config in DynamoDB', async () => {
     const result = await ddb.send(new GetItemCommand({
-      TableName: 'clawcore-platform',
+      TableName: 'chimera-platform',
       Key: {
         PK: { S: 'TENANT#test-tenant' },
         SK: { S: 'CONFIG' },
@@ -989,7 +989,7 @@ describe('Tenant lifecycle integration', () => {
 
   test('Tenant S3 prefix exists with default skills', async () => {
     const result = await s3.send(new HeadObjectCommand({
-      Bucket: `clawcore-tenants-${process.env.ACCOUNT_ID}-${process.env.REGION}`,
+      Bucket: `chimera-tenants-${process.env.ACCOUNT_ID}-${process.env.REGION}`,
       Key: 'tenants/test-tenant/system-prompt.md',
     }));
     expect(result.$metadata.httpStatusCode).toBe(200);
@@ -1055,8 +1055,8 @@ Per-Tenant Dashboard (tenant admin + platform team)
 // lib/constructs/backup.ts
 import * as backup from 'aws-cdk-lib/aws-backup';
 
-const plan = new backup.BackupPlan(this, 'ClawCoreBackup', {
-  backupPlanName: 'clawcore-daily',
+const plan = new backup.BackupPlan(this, 'ChimeraBackup', {
+  backupPlanName: 'chimera-daily',
 });
 
 plan.addRule(backup.BackupPlanRule.daily());
@@ -1081,7 +1081,7 @@ plan.addSelection('DataResources', {
 ```typescript
 // In DataStack, add replication to DR region
 const drBucket = new s3.Bucket(this, 'TenantBucketDR', {
-  bucketName: `clawcore-tenants-${this.account}-${drRegion}`,
+  bucketName: `chimera-tenants-${this.account}-${drRegion}`,
   // ... same config as primary
 });
 
@@ -1122,7 +1122,7 @@ Secondary: us-east-1 (warm standby)
 ```typescript
 // DataStack modification for multi-region
 const platformTable = new dynamodb.Table(this, 'PlatformTable', {
-  tableName: 'clawcore-platform',
+  tableName: 'chimera-platform',
   partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
   sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
   billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -1147,7 +1147,7 @@ Estimated failover time: **15-30 minutes** (dominated by AgentCore Runtime start
 ## 11. Monorepo Directory Structure
 
 ```
-clawcore/
+chimera/
   |
   +-- bin/
   |     app.ts                    # CDK app entry point
@@ -1218,7 +1218,7 @@ clawcore/
   |           chat-delivery.test.ts
   |
   +-- packages/
-  |     +-- cdk-constructs/       # Published L3 construct library (@clawcore/cdk-constructs)
+  |     +-- cdk-constructs/       # Published L3 construct library (@chimera/cdk-constructs)
   |           src/
   |             tenant-agent.ts
   |             agent-observability.ts
@@ -1285,7 +1285,7 @@ phases:
       - |
         if grep -q "Resources$" drift-report.txt; then
           aws sns publish --topic-arn $ALERT_TOPIC \
-            --subject "ClawCore Drift Detected" \
+            --subject "Chimera Drift Detected" \
             --message file://drift-report.txt
         fi
 ```

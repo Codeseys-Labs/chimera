@@ -1,15 +1,15 @@
-# ClawCore Architecture Review: Cost & Scale
+# Chimera Architecture Review: Cost & Scale
 
 > **Reviewer:** Cost & Scale Optimizer
 > **Date:** 2026-03-19
-> **Scope:** Detailed cost modeling, scaling analysis, and optimization recommendations for ClawCore multi-tenant agent platform
+> **Scope:** Detailed cost modeling, scaling analysis, and optimization recommendations for Chimera multi-tenant agent platform
 > **Architecture Reference:** [[AWS-Native-OpenClaw-Architecture-Synthesis]]
 
 ---
 
 ## Executive Summary
 
-ClawCore's architecture maps well to consumption-based AWS pricing, but costs scale non-linearly with tenant count due to per-session compute overhead and LLM token costs that dominate the bill. At 10 tenants, the platform is viable on a shoestring (~$2,800/mo). At 100 tenants, aggressive model tiering becomes essential (~$18,500/mo). At 1,000 tenants, reserved capacity, prompt caching, and tenant self-service cost controls are mandatory to stay under $120K/mo.
+Chimera's architecture maps well to consumption-based AWS pricing, but costs scale non-linearly with tenant count due to per-session compute overhead and LLM token costs that dominate the bill. At 10 tenants, the platform is viable on a shoestring (~$2,800/mo). At 100 tenants, aggressive model tiering becomes essential (~$18,500/mo). At 1,000 tenants, reserved capacity, prompt caching, and tenant self-service cost controls are mandatory to stay under $120K/mo.
 
 **Top cost drivers (in order):**
 1. LLM token costs (60-75% of total bill)
@@ -283,7 +283,7 @@ For a platform serving 300K sessions/month, caching system prompts saves:
 - **With caching:** 300K * 3K * $0.30/M = $270/mo
 - **Savings: $2,430/mo (90%)**
 
-Caching requires the system prompt to remain identical across calls. ClawCore's per-tenant system prompts loaded from S3 are a perfect fit -- the same tenant gets the same cached prefix on every call.
+Caching requires the system prompt to remain identical across calls. Chimera's per-tenant system prompts loaded from S3 are a perfect fit -- the same tenant gets the same cached prefix on every call.
 
 ### Tiered Model Routing Economics
 
@@ -562,11 +562,11 @@ For high-volume, predictable model usage, Bedrock Provisioned Throughput guarant
 
 ---
 
-## 10. ClawCore on AWS vs Self-Hosted OpenClaw
+## 10. Chimera on AWS vs Self-Hosted OpenClaw
 
 ### Monthly Cost Comparison (100 tenants, moderate usage)
 
-| Component | ClawCore (AWS-native) | Self-Hosted OpenClaw |
+| Component | Chimera (AWS-native) | Self-Hosted OpenClaw |
 |-----------|----------------------|---------------------|
 | Compute (agent runtime) | $29 (AgentCore) | $800 (3x c6i.xlarge EC2 for Docker) |
 | LLM tokens | $1,444 (Bedrock) | $1,444 (Anthropic direct API) |
@@ -585,7 +585,7 @@ For high-volume, predictable model usage, Bedrock Provisioned Throughput guarant
 
 ### Hidden Costs of Self-Hosted
 
-| Cost Factor | ClawCore | Self-Hosted OpenClaw |
+| Cost Factor | Chimera | Self-Hosted OpenClaw |
 |-------------|----------|---------------------|
 | Ops engineer time (% of FTE) | ~10% | ~50-75% |
 | Security patching | AWS-managed | Manual |
@@ -595,7 +595,7 @@ For high-volume, predictable model usage, Bedrock Provisioned Throughput guarant
 | Compliance (SOC2, etc.) | Inherit from AWS | Must achieve independently |
 | Incident response (2 AM pages) | Rare (managed services) | Frequent (self-managed infra) |
 
-**Bottom line:** ClawCore on AWS is ~18% cheaper on raw infrastructure and dramatically cheaper on engineering time. The self-hosted approach only makes sense if you have unique requirements that AgentCore cannot support (e.g., air-gapped environments, specific hardware requirements).
+**Bottom line:** Chimera on AWS is ~18% cheaper on raw infrastructure and dramatically cheaper on engineering time. The self-hosted approach only makes sense if you have unique requirements that AgentCore cannot support (e.g., air-gapped environments, specific hardware requirements).
 
 ---
 

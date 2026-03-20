@@ -141,16 +141,16 @@ response = table.query(
 
 **Current Design:**
 3 shared buckets with prefix-based isolation:
-- `s3://clawcore-tenants-*/tenants/{tenantId}/*` — tenant data
-- `s3://clawcore-skills-*/skills/tenant/{tenantId}/*` — tenant skills
-- `s3://clawcore-skills-*/skills/global/*` — shared (read-only)
+- `s3://chimera-tenants-*/tenants/{tenantId}/*` — tenant data
+- `s3://chimera-skills-*/skills/tenant/{tenantId}/*` — tenant skills
+- `s3://chimera-skills-*/skills/global/*` — shared (read-only)
 
 **IAM Policy:**
 ```json
 {
   "Effect": "Allow",
   "Action": ["s3:GetObject", "s3:PutObject"],
-  "Resource": "arn:aws:s3:::clawcore-tenants-*/tenants/${aws:PrincipalTag/TenantId}/*"
+  "Resource": "arn:aws:s3:::chimera-tenants-*/tenants/${aws:PrincipalTag/TenantId}/*"
 }
 ```
 
@@ -168,7 +168,7 @@ response = table.query(
 {
   "Effect": "Deny",
   "Action": "s3:*",
-  "Resource": "arn:aws:s3:::clawcore-tenants-*/tenants/*",
+  "Resource": "arn:aws:s3:::chimera-tenants-*/tenants/*",
   "Condition": {
     "StringNotLike": {
       "s3:prefix": ["tenants/${aws:PrincipalTag/TenantId}/*"]
@@ -182,7 +182,7 @@ response = table.query(
 ### Layer 5 — Memory Isolation (AgentCore Memory)
 
 **Current Design:**
-AgentCore Memory with namespace-per-tenant: `clawcore/{tenantId}`
+AgentCore Memory with namespace-per-tenant: `chimera/{tenantId}`
 
 **Validation:** ✅ **PASS** — but application must enforce it
 
@@ -190,14 +190,14 @@ AgentCore Memory with namespace-per-tenant: `clawcore/{tenantId}`
 ```python
 # CORRECT: Tenant-scoped namespace
 memory = MemorySessionManager(
-    memory_id="clawcore-memory",
+    memory_id="chimera-memory",
     namespace=f"tenant-{tenant_id}",  # Enforced per-tenant
     strategies=["SUMMARY", "SEMANTIC_MEMORY", "USER_PREFERENCE"],
 )
 
 # WRONG: Global namespace (DANGEROUS)
 memory = MemorySessionManager(
-    memory_id="clawcore-memory",
+    memory_id="chimera-memory",
     namespace="global",  # ALL TENANTS SHARE MEMORY
 )
 ```
@@ -267,10 +267,10 @@ forbid(
 **Four conflicting DynamoDB designs exist across the research corpus:**
 
 #### Design 1: Platform IaC Review (Single-Table)
-**Source:** `ClawCore-Architecture-Review-Platform-IaC.md` (lines 150-161)
+**Source:** `Chimera-Architecture-Review-Platform-IaC.md` (lines 150-161)
 
 ```
-TABLE: clawcore-platform
+TABLE: chimera-platform
 PK: TENANT#{id}
 SK: SESSION# | SKILL# | CONFIG | CRON#
 GSI1: Cross-tenant queries
@@ -281,15 +281,15 @@ GSI1: Cross-tenant queries
 ---
 
 #### Design 2: Final Architecture Plan (6 Tables)
-**Source:** `ClawCore-Final-Architecture-Plan.md` (lines 100-115)
+**Source:** `Chimera-Final-Architecture-Plan.md` (lines 100-115)
 
 ```
-1. clawcore-tenants:       TENANT#{id} / META
-2. clawcore-sessions:      TENANT#{id} / SESSION#{id}
-3. clawcore-skills:        TENANT#{id} / SKILL#{name}
-4. clawcore-rate-limits:   TENANT#{id} / WINDOW#{timestamp}
-5. clawcore-cost-tracking: TENANT#{id} / PERIOD#{yyyy-mm}
-6. clawcore-audit:         TENANT#{id} / EVENT#{timestamp}
+1. chimera-tenants:       TENANT#{id} / META
+2. chimera-sessions:      TENANT#{id} / SESSION#{id}
+3. chimera-skills:        TENANT#{id} / SKILL#{name}
+4. chimera-rate-limits:   TENANT#{id} / WINDOW#{timestamp}
+5. chimera-cost-tracking: TENANT#{id} / PERIOD#{yyyy-mm}
+6. chimera-audit:         TENANT#{id} / EVENT#{timestamp}
 ```
 
 **Assessment:** Multi-table design with clear separation of concerns. Matches implementation.
@@ -297,7 +297,7 @@ GSI1: Cross-tenant queries
 ---
 
 #### Design 3: AWS Component Blueprint (6 Tables, Different Attributes)
-**Source:** `ClawCore-AWS-Component-Blueprint.md` (lines 135-226)
+**Source:** `Chimera-AWS-Component-Blueprint.md` (lines 135-226)
 
 ```
 Same 6 tables as Design 2, but with:
@@ -312,10 +312,10 @@ Same 6 tables as Design 2, but with:
 ---
 
 #### Design 4: Multi-Tenant Review (5 Tables, Enhanced Tenant Table)
-**Source:** `ClawCore-Architecture-Review-Multi-Tenant.md` (lines 911-980)
+**Source:** `Chimera-Architecture-Review-Multi-Tenant.md` (lines 911-980)
 
 ```
-1. clawcore-tenants (enhanced):
+1. chimera-tenants (enhanced):
    - TENANT#{id} / PROFILE
    - TENANT#{id} / CONFIG#features
    - TENANT#{id} / CONFIG#models
@@ -381,7 +381,7 @@ Note: Audit table omitted, but likely oversight not intentional change
 
 **RECOMMENDATION:** Adopt **6-table design** from `infra/lib/data-stack.ts` (Design 3) with **enhanced tenant config pattern** from Design 4.
 
-#### Table 1: `clawcore-tenants` (Enhanced)
+#### Table 1: `chimera-tenants` (Enhanced)
 
 ```typescript
 // Multiple items per tenant for config flexibility
@@ -468,7 +468,7 @@ from decimal import Decimal
 from typing import Dict, Optional
 
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('clawcore-rate-limits')
+table = dynamodb.Table('chimera-rate-limits')
 
 class TokenBucketRateLimiter:
     """

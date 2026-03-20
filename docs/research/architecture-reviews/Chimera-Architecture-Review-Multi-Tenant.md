@@ -1,4 +1,4 @@
-# ClawCore Architecture Review: Multi-Tenant & Data Isolation
+# Chimera Architecture Review: Multi-Tenant & Data Isolation
 
 > **Review Date:** 2026-03-19
 > **Reviewer:** Multi-Tenant Specialist
@@ -10,7 +10,7 @@
 
 ## Executive Assessment
 
-The ClawCore synthesis document lays a strong architectural foundation for multi-tenancy by leveraging AgentCore's MicroVM isolation and consumption-based billing. However, the current design leaves several critical areas underspecified: tenant lifecycle state management, noisy neighbor throttling mechanics, GDPR data deletion workflows, cross-tenant resource sharing boundaries, and tenant migration paths. This review fills those gaps with concrete designs, schemas, and policy examples.
+The Chimera synthesis document lays a strong architectural foundation for multi-tenancy by leveraging AgentCore's MicroVM isolation and consumption-based billing. However, the current design leaves several critical areas underspecified: tenant lifecycle state management, noisy neighbor throttling mechanics, GDPR data deletion workflows, cross-tenant resource sharing boundaries, and tenant migration paths. This review fills those gaps with concrete designs, schemas, and policy examples.
 
 **Overall Rating: B+** -- Strong isolation primitives from AgentCore, but needs hardening at the application layer for production-grade multi-tenancy.
 
@@ -149,7 +149,7 @@ import boto3
 from decimal import Decimal
 
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('clawcore-rate-limits')
+table = dynamodb.Table('chimera-rate-limits')
 
 def check_and_consume_token(tenant_id: str, resource: str, cost: int = 1) -> bool:
     """
@@ -390,7 +390,7 @@ For self-service onboarding, expose a web portal backed by this Step Function:
 
 ```bash
 # CLI for platform operators
-clawcore tenant create \
+chimera tenant create \
   --name "Acme Corp" \
   --tier advanced \
   --admin-email admin@acme.com \
@@ -401,7 +401,7 @@ clawcore tenant create \
 # Output:
 # Tenant ID: tenant-acme-a1b2c3d4
 # API Key:   cc_live_sk_...
-# Endpoint:  https://api.clawcore.example.com/v1
+# Endpoint:  https://api.chimera.example.com/v1
 # Status:    PROVISIONING -> ACTIVE (estimated: 90 seconds)
 ```
 
@@ -426,13 +426,13 @@ Every piece of tenant data must be catalogued and deletable:
 
 | Data Store | Data Type | Location | Deletion Method |
 |------------|-----------|----------|----------------|
-| DynamoDB | Tenant config | `clawcore-tenants` table, PK=`TENANT#{id}` | BatchWriteItem delete |
-| DynamoDB | Session history | `clawcore-sessions` table, PK=`TENANT#{id}` | BatchWriteItem delete with pagination |
-| DynamoDB | Rate limit state | `clawcore-rate-limits` table, PK=`TENANT#{id}` | BatchWriteItem delete |
-| DynamoDB | Cost attribution | `clawcore-cost-tracking` table, PK=`TENANT#{id}` | BatchWriteItem delete |
-| DynamoDB | Skill metadata | `clawcore-skills` table, PK=`TENANT#{id}` | BatchWriteItem delete |
-| S3 | Skills, memory, outputs | `s3://clawcore-tenants/{tenant_id}/` | DeleteObjects (recursive) |
-| S3 | Skill packages | `s3://clawcore-skills/tenants/{tenant_id}/` | DeleteObjects (recursive) |
+| DynamoDB | Tenant config | `chimera-tenants` table, PK=`TENANT#{id}` | BatchWriteItem delete |
+| DynamoDB | Session history | `chimera-sessions` table, PK=`TENANT#{id}` | BatchWriteItem delete with pagination |
+| DynamoDB | Rate limit state | `chimera-rate-limits` table, PK=`TENANT#{id}` | BatchWriteItem delete |
+| DynamoDB | Cost attribution | `chimera-cost-tracking` table, PK=`TENANT#{id}` | BatchWriteItem delete |
+| DynamoDB | Skill metadata | `chimera-skills` table, PK=`TENANT#{id}` | BatchWriteItem delete |
+| S3 | Skills, memory, outputs | `s3://chimera-tenants/{tenant_id}/` | DeleteObjects (recursive) |
+| S3 | Skill packages | `s3://chimera-skills/tenants/{tenant_id}/` | DeleteObjects (recursive) |
 | AgentCore Memory | STM + LTM | Namespace `{tenant_id}` | AgentCore Memory API delete |
 | Cognito | User pool group | Group `tenant-{id}` | DeleteGroup + remove users |
 | EventBridge | Cron schedules | Rules with tenant tag | DeleteRule |
@@ -501,7 +501,7 @@ def verify_tenant_deletion(tenant_id: str) -> dict:
     # Check S3 prefixes
     for prefix in [f'tenants/{tenant_id}/', f'skills/tenants/{tenant_id}/']:
         response = s3.list_objects_v2(
-            Bucket='clawcore-tenants', Prefix=prefix, MaxKeys=1
+            Bucket='chimera-tenants', Prefix=prefix, MaxKeys=1
         )
         results[f's3:{prefix}'] = response['KeyCount'] == 0
 
@@ -548,14 +548,14 @@ AgentCore Memory provides namespace-level isolation, but the application must en
 ```python
 # CORRECT: Namespace scoped to tenant
 memory = MemorySessionManager(
-    memory_id="clawcore-memory",
+    memory_id="chimera-memory",
     namespace=f"tenant-{tenant_id}",  # Tenant-scoped namespace
     strategies=["SUMMARY", "SEMANTIC_MEMORY", "USER_PREFERENCE"],
 )
 
 # WRONG: Global namespace (cross-tenant leakage risk)
 memory = MemorySessionManager(
-    memory_id="clawcore-memory",
+    memory_id="chimera-memory",
     namespace="global",  # DANGER: all tenants share memory
 )
 ```
@@ -688,7 +688,7 @@ Configuration changes must propagate to active sessions. Two strategies:
 
 ### SOC2 Controls Mapping
 
-| SOC2 Control | ClawCore Implementation |
+| SOC2 Control | Chimera Implementation |
 |-------------|------------------------|
 | **CC6.1** Logical access security | Cognito JWT + IAM + Cedar policies |
 | **CC6.2** User authentication | Cognito MFA + OAuth 2.0 |
@@ -734,7 +734,7 @@ Every tenant-affecting operation must be logged:
     "latency_ms": 3200,
     "status": "SUCCESS",
     "ip_address": "203.0.113.42",
-    "user_agent": "clawcore-sdk/1.0",
+    "user_agent": "chimera-sdk/1.0",
     "cedar_policy_evaluated": "tenant-acme-tool-access",
     "cedar_decision": "ALLOW"
 }
@@ -787,8 +787,8 @@ def create_tenant_alarms(tenant_id: str, tier: str):
     thresholds = TIER_SLA_THRESHOLDS[tier]
 
     cloudwatch.put_metric_alarm(
-        AlarmName=f'clawcore-{tenant_id}-error-rate',
-        Namespace='ClawCore/Tenants',
+        AlarmName=f'chimera-{tenant_id}-error-rate',
+        Namespace='Chimera/Tenants',
         MetricName='ErrorRate',
         Dimensions=[{'Name': 'TenantId', 'Value': tenant_id}],
         Threshold=thresholds['max_error_rate'],
@@ -801,8 +801,8 @@ def create_tenant_alarms(tenant_id: str, tier: str):
     )
 
     cloudwatch.put_metric_alarm(
-        AlarmName=f'clawcore-{tenant_id}-p99-latency',
-        Namespace='ClawCore/Tenants',
+        AlarmName=f'chimera-{tenant_id}-p99-latency',
+        Namespace='Chimera/Tenants',
         MetricName='Latency',
         Dimensions=[{'Name': 'TenantId', 'Value': tenant_id}],
         ExtendedStatistic='p99',
@@ -908,7 +908,7 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
 
 ## 11. DynamoDB Table Design for Tenant Management
 
-### Core Tenant Table: `clawcore-tenants`
+### Core Tenant Table: `chimera-tenants`
 
 **Access patterns:**
 1. Get tenant by ID
@@ -936,7 +936,7 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
 - GSI2PK: `TIER#{tier}`
 - GSI2SK: `TENANT#{id}`
 
-### Rate Limits Table: `clawcore-rate-limits`
+### Rate Limits Table: `chimera-rate-limits`
 
 | PK | SK | Attributes |
 |----|-----|------------|
@@ -946,7 +946,7 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
 | `TENANT#{id}` | `RATELIMIT#tool_calls_per_hour` | tokens, max_tokens, refill_rate, last_refill |
 | `TENANT#{id}` | `BUDGET#monthly` | limit_usd, current_usd, reset_date |
 
-### Sessions Table: `clawcore-sessions`
+### Sessions Table: `chimera-sessions`
 
 | PK | SK | Attributes |
 |----|-----|------------|
@@ -954,7 +954,7 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
 
 **GSI**: `USER#{user_id}` / `SESSION#{session_id}` (for user-scoped session lookups)
 
-### Cost Attribution Table: `clawcore-cost-tracking`
+### Cost Attribution Table: `chimera-cost-tracking`
 
 | PK | SK | Attributes |
 |----|-----|------------|
@@ -962,7 +962,7 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
 
 **GSI**: `TENANT#{id}` / `MONTH#{yyyy-mm}` (for monthly aggregation)
 
-### Skill Metadata Table: `clawcore-skills`
+### Skill Metadata Table: `chimera-skills`
 
 | PK | SK | Attributes |
 |----|-----|------------|
@@ -970,7 +970,7 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
 | `GLOBAL` | `SKILL#{name}` | version, author, tags, mcp_endpoint, trust_level | (platform-provided) |
 | `MARKETPLACE` | `SKILL#{name}` | version, author, tags, download_count, verified |
 
-### Audit Log Table: `clawcore-audit`
+### Audit Log Table: `chimera-audit`
 
 | PK | SK | Attributes |
 |----|-----|------------|
@@ -1001,11 +1001,11 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
                 "dynamodb:BatchWriteItem"
             ],
             "Resource": [
-                "arn:aws:dynamodb:*:*:table/clawcore-tenants",
-                "arn:aws:dynamodb:*:*:table/clawcore-sessions",
-                "arn:aws:dynamodb:*:*:table/clawcore-skills",
-                "arn:aws:dynamodb:*:*:table/clawcore-tenants/index/*",
-                "arn:aws:dynamodb:*:*:table/clawcore-sessions/index/*"
+                "arn:aws:dynamodb:*:*:table/chimera-tenants",
+                "arn:aws:dynamodb:*:*:table/chimera-sessions",
+                "arn:aws:dynamodb:*:*:table/chimera-skills",
+                "arn:aws:dynamodb:*:*:table/chimera-tenants/index/*",
+                "arn:aws:dynamodb:*:*:table/chimera-sessions/index/*"
             ],
             "Condition": {
                 "ForAllValues:StringEquals": {
@@ -1033,8 +1033,8 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
                 "s3:ListBucket"
             ],
             "Resource": [
-                "arn:aws:s3:::clawcore-tenants/tenants/${aws:PrincipalTag/TenantId}/*",
-                "arn:aws:s3:::clawcore-skills/tenants/${aws:PrincipalTag/TenantId}/*"
+                "arn:aws:s3:::chimera-tenants/tenants/${aws:PrincipalTag/TenantId}/*",
+                "arn:aws:s3:::chimera-skills/tenants/${aws:PrincipalTag/TenantId}/*"
             ]
         },
         {
@@ -1042,15 +1042,15 @@ def migrate_dynamodb_items(source_table: str, target_table: str,
             "Effect": "Allow",
             "Action": ["s3:GetObject"],
             "Resource": [
-                "arn:aws:s3:::clawcore-skills/global/*",
-                "arn:aws:s3:::clawcore-skills/marketplace/*"
+                "arn:aws:s3:::chimera-skills/global/*",
+                "arn:aws:s3:::chimera-skills/marketplace/*"
             ]
         },
         {
             "Sid": "DenyOtherTenantPrefixes",
             "Effect": "Deny",
             "Action": "s3:*",
-            "Resource": "arn:aws:s3:::clawcore-tenants/tenants/*",
+            "Resource": "arn:aws:s3:::chimera-tenants/tenants/*",
             "Condition": {
                 "StringNotLike": {
                     "s3:prefix": ["tenants/${aws:PrincipalTag/TenantId}/*"]
@@ -1069,7 +1069,7 @@ def get_tenant_scoped_credentials(tenant_id: str, user_id: str) -> dict:
     sts = boto3.client('sts')
 
     response = sts.assume_role(
-        RoleArn='arn:aws:iam::123456789012:role/ClawCoreTenantRole',
+        RoleArn='arn:aws:iam::123456789012:role/ChimeraTenantRole',
         RoleSessionName=f'tenant-{tenant_id}-{user_id}',
         DurationSeconds=3600,
         Tags=[
@@ -1247,7 +1247,7 @@ def transition_tenant_state(tenant_id: str, new_state: str) -> bool:
 
 ## Summary
 
-The ClawCore architecture has strong bones: AgentCore MicroVM isolation, consumption-based billing, Cedar policy enforcement, and the hybrid silo/pool model are all architecturally sound. The primary work needed is at the **application layer** -- tenant lifecycle management, rate limiting, offboarding, compliance logging, and migration tooling. These are standard SaaS engineering problems with well-understood solutions, and the DynamoDB schemas and IAM policies in this review provide a concrete starting point.
+The Chimera architecture has strong bones: AgentCore MicroVM isolation, consumption-based billing, Cedar policy enforcement, and the hybrid silo/pool model are all architecturally sound. The primary work needed is at the **application layer** -- tenant lifecycle management, rate limiting, offboarding, compliance logging, and migration tooling. These are standard SaaS engineering problems with well-understood solutions, and the DynamoDB schemas and IAM policies in this review provide a concrete starting point.
 
 The most urgent action items are:
 1. Implement the tenant lifecycle state machine (prevents orphaned resources)
@@ -1255,4 +1255,4 @@ The most urgent action items are:
 3. Design the data deletion pipeline (GDPR compliance)
 4. Deploy per-tenant CloudWatch alarms (SLA visibility)
 
-With these additions, ClawCore would be production-ready for multi-tenant deployment.
+With these additions, Chimera would be production-ready for multi-tenant deployment.

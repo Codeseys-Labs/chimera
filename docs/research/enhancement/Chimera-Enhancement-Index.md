@@ -1,24 +1,24 @@
 ---
 tags:
   - research-rabbithole
-  - clawcore
+  - chimera
   - chimera
   - aws
   - enhancement
   - architecture
 date: 2026-03-19
-topic: ClawCore Enhancement Session
+topic: Chimera Enhancement Session
 status: complete
 project: AWS Chimera
 ---
 
-# ClawCore Enhancement Index — AWS Chimera
+# Chimera Enhancement Index — AWS Chimera
 
-> **Session purpose:** Review, deepen, and extend the existing 31,000-line ClawCore
+> **Session purpose:** Review, deepen, and extend the existing 31,000-line Chimera
 > research corpus. Fill implementation gaps, add CDK scaffold code, produce operational
 > documentation, and prepare for the AWS Chimera project.
 
-**Project renamed:** ClawCore → **AWS Chimera** — the multi-formed, self-evolving
+**Project renamed:** Chimera → **AWS Chimera** — the multi-formed, self-evolving
 agent platform. Repo: `~/Documents/DevBox/chimera/`
 
 ---
@@ -49,7 +49,7 @@ plus a gap analysis that identified 14 critical issues in the existing corpus.
 | `infra/package.json` | Dependencies (aws-cdk-lib, constructs) |
 | `infra/tsconfig.json` | Strict TypeScript config |
 | `infra/cdk.json` | CDK app config |
-| `infra/bin/clawcore.ts` | App entry point, 3 stacks with dependency ordering |
+| `infra/bin/chimera.ts` | App entry point, 3 stacks with dependency ordering |
 | `infra/lib/network-stack.ts` | VPC, 3 subnets, NAT, 9 VPC endpoints, 4 security groups |
 | `infra/lib/data-stack.ts` | 6 DynamoDB tables + GSIs, 3 S3 buckets with lifecycle |
 | `infra/lib/security-stack.ts` | Cognito user pool, WAF WebACL, KMS key |
@@ -134,7 +134,7 @@ chimera/
 │   ├── enhancement/                       # 8 docs (12,308 lines)
 │   └── earlier/                           # 8 docs (earlier OpenClaw on AWS research)
 ├── infra/                                 # CDK scaffold (8 files)
-│   ├── bin/clawcore.ts
+│   ├── bin/chimera.ts
 │   ├── lib/{network,data,security}-stack.ts
 │   └── constructs/tenant-agent.ts
 └── .gitignore
@@ -154,7 +154,7 @@ chimera/
 ## Next Steps
 
 1. **Resolve contradictions** — canonicalize DynamoDB schema, cost model, and Cedar entities (gap report priority)
-2. **Rename ClawCore → Chimera** throughout all docs (search-replace pass)
+2. **Rename Chimera → Chimera** throughout all docs (search-replace pass)
 3. **Add API specification** — OpenAPI/AsyncAPI for all endpoints (gap report: missing)
 4. **SSE bridge implementation** — connect Strands streaming to Vercel Data Stream Protocol (gap report: critical)
 5. **Initial commit** — commit the chimera repo with all research + scaffold
@@ -163,7 +163,7 @@ chimera/
 ## Research Metadata
 
 - **Date:** 2026-03-19
-- **Team:** clawcore-enhance (8 agents, 3 replacements)
+- **Team:** chimera-enhance (8 agents, 3 replacements)
 - **New lines produced:** 12,308 (docs) + ~800 (CDK code) = ~13,100
 - **Cumulative corpus:** ~48,000 lines across 47+ documents
 - **Agent success rate:** 5/8 first-attempt, 3/8 required replacement (write-as-you-go failure)
@@ -172,4 +172,4 @@ chimera/
 ---
 
 *Enhancement session completed 2026-03-19. 8 specialist agents across 2 waves.*
-*Project renamed: ClawCore → AWS Chimera — where agents are forged.*
+*Project renamed: Chimera → AWS Chimera — where agents are forged.*

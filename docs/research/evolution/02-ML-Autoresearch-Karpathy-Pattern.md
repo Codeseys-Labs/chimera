@@ -16,7 +16,7 @@ status: complete
 > How Chimera agents run ML experiments, evaluate results, iterate on hypotheses, and improve
 > their own models — inspired by Andrej Karpathy's vision of agents that "do research autonomously."
 
-**Related:** [[ClawCore-Self-Evolution-Engine]] | [[01-Auto-Skill-Generation]] | [[README]]
+**Related:** [[Chimera-Self-Evolution-Engine]] | [[01-Auto-Skill-Generation]] | [[README]]
 
 ---
 
@@ -988,7 +988,7 @@ compressing research time.
 
 ## Related Documents
 
-- [[ClawCore-Self-Evolution-Engine]] — Overall self-evolution architecture
+- [[Chimera-Self-Evolution-Engine]] — Overall self-evolution architecture
 - [[01-Auto-Skill-Generation]] — How agents create new capabilities
 - [[03-Code-Sandbox-Interpreter]] — Safe execution environment for experiments
 
