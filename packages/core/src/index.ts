@@ -74,3 +74,6 @@ export {
   type PrincipalContext,
   type AuthorizationResult,
 } from './skills';
+
+// Evolution module (self-improvement engine)
+export * from './evolution';
