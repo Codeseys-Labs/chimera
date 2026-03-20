@@ -9,6 +9,7 @@ import { ObservabilityStack } from '../lib/observability-stack';
 import { ApiStack } from '../lib/api-stack';
 import { SkillPipelineStack } from '../lib/skill-pipeline-stack';
 import { ChatStack } from '../lib/chat-stack';
+import { PipelineStack } from '../lib/pipeline-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -114,8 +115,20 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 
+// --- Stack 8: CI/CD Pipeline ---
+// CodePipeline with multi-stage canary deployment: GitHub source -> Build/Test -> Canary -> Progressive Rollout.
+// Independent stack, can be deployed separately from application stacks.
+const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
+  env: envConfig,
+  description: 'Chimera CI/CD pipeline: CodePipeline with canary deployment and auto-rollback',
+  envName,
+  repository: app.node.tryGetContext('repository') ?? 'your-org/chimera',
+  branch: app.node.tryGetContext('branch') ?? 'main',
+  githubTokenSecretName: app.node.tryGetContext('githubTokenSecret'),
+});
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, pipelineStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -129,5 +142,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
 // SkillPipelineStack exports state machine ARN/name
 // ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
+// PipelineStack exports pipeline ARN/name, artifact bucket name, orchestration state machine ARN, alarm topic ARN
 
 app.synth();
