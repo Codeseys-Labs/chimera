@@ -145,3 +145,6 @@ export {
 
 // Evolution module (self-improvement engine)
 export * from './evolution';
+
+// AWS Tools module (Tier 1 first-class AWS service integration)
+export * from './aws-tools';
