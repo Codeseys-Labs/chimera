@@ -113,5 +113,16 @@
 		"status": "active",
 		"createdAt": "2026-03-20T18:55:52.771Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-c5c5ffa9",
+		"name": "architecture-review-batch",
+		"memberIssueIds": [
+			"chimera-8717",
+			"chimera-63ab"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T20:54:44.000Z",
+		"completedAt": null
 	}
 ]
