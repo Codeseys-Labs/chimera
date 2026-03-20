@@ -163,3 +163,6 @@ export * from './well-architected';
 
 // Swarm module (autonomous problem-solving)
 export * from './swarm';
+
+// Multi-Account module (cross-account governance and management)
+export * from './multi-account';
