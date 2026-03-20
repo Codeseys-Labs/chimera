@@ -32,7 +32,17 @@
     "typecheck": "tsc --build",
     "clean": "bun run clean:packages && bun run clean:infra",
     "clean:packages": "rm -rf packages/*/dist packages/*/node_modules",
-    "clean:infra": "rm -rf infra/dist infra/cdk.out"
+    "clean:infra": "rm -rf infra/dist infra/cdk.out",
+    "dev": "cd packages/chat-gateway && bun run dev",
+    "dev:gateway": "cd packages/chat-gateway && bun run dev",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:clean": "docker-compose down -v",
+    "seed": "cd seed-data && bun run seed.ts",
+    "seed:tables": "cd seed-data && bun run seed.ts --create-tables",
+    "seed:data": "cd seed-data && bun run seed.ts --seed-data",
+    "seed:reset": "cd seed-data && bun run seed.ts --delete-tables && bun run seed.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
