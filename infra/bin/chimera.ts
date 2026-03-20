@@ -9,6 +9,7 @@ import { ObservabilityStack } from '../lib/observability-stack';
 import { ApiStack } from '../lib/api-stack';
 import { SkillPipelineStack } from '../lib/skill-pipeline-stack';
 import { ChatStack } from '../lib/chat-stack';
+import { EvolutionStack } from '../lib/evolution-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -114,8 +115,19 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 
+// --- Stack 8: Evolution Engine ---
+// Self-improvement mechanisms: prompt evolution, auto-skill generation, model routing optimization,
+// memory GC, cron self-scheduling. All changes are Cedar-bounded, audited, and reversible.
+const evolutionStack = new EvolutionStack(app, `${prefix}-Evolution`, {
+  env: envConfig,
+  description: 'Chimera evolution engine: prompt A/B testing, auto-skills, model routing, memory GC',
+  envName,
+  auditTable: dataStack.auditTable,
+});
+evolutionStack.addDependency(dataStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, evolutionStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -129,5 +141,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
 // SkillPipelineStack exports state machine ARN/name
 // ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
+// EvolutionStack exports evolution state table ARN/name, artifacts bucket ARN/name, state machine ARNs
 
 app.synth();
