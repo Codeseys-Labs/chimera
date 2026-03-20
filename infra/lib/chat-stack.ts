@@ -134,7 +134,7 @@ export class ChatStack extends cdk.Stack {
     // ======================================================================
     // Container Definition
     // Image: packages/chat-gateway built via Docker
-    // Port: 3000 (Express/Fastify)
+    // Port: 8080 (Express/Fastify)
     // Environment variables for runtime configuration
     // ======================================================================
     const container = this.taskDefinition.addContainer('ChatGatewayContainer', {
@@ -152,11 +152,11 @@ export class ChatStack extends cdk.Stack {
         TENANTS_TABLE_NAME: props.tenantsTable.tableName,
         SESSIONS_TABLE_NAME: props.sessionsTable.tableName,
         SKILLS_TABLE_NAME: props.skillsTable.tableName,
-        PORT: '3000',
+        PORT: '8080',
         LOG_LEVEL: isProd ? 'info' : 'debug',
       },
       healthCheck: {
-        command: ['CMD-SHELL', 'curl -f http://localhost:3000/health || exit 1'],
+        command: ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1'],
         interval: cdk.Duration.seconds(30),
         timeout: cdk.Duration.seconds(5),
         retries: 3,
@@ -165,7 +165,7 @@ export class ChatStack extends cdk.Stack {
     });
 
     container.addPortMappings({
-      containerPort: 3000,
+      containerPort: 8080,
       protocol: ecs.Protocol.TCP,
     });
 
@@ -201,14 +201,14 @@ export class ChatStack extends cdk.Stack {
 
     // ======================================================================
     // ALB Target Group
-    // Routes traffic to ECS tasks on port 3000
+    // Routes traffic to ECS tasks on port 8080
     // Health check: GET /health (200 OK)
     // Deregistration delay: 30s for graceful shutdown
     // ======================================================================
     this.targetGroup = new elbv2.ApplicationTargetGroup(this, 'ChatTargetGroup', {
       targetGroupName: `chimera-chat-${props.envName}`,
       vpc: props.vpc,
-      port: 3000,
+      port: 8080,
       protocol: elbv2.ApplicationProtocol.HTTP,
       targetType: elbv2.TargetType.IP,
       healthCheck: {
