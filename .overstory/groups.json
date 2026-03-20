@@ -71,5 +71,21 @@
 		"status": "active",
 		"createdAt": "2026-03-20T16:19:16.772Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-d8762c96",
+		"name": "aws-account-agent-research",
+		"memberIssueIds": [
+			"chimera-0064",
+			"chimera-9aa4",
+			"chimera-e81b",
+			"chimera-c487",
+			"chimera-bb57",
+			"chimera-83f9",
+			"chimera-17ff"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T17:02:32.056Z",
+		"completedAt": null
 	}
 ]
