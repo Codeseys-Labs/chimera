@@ -45,6 +45,7 @@ export class DataStack extends cdk.Stack {
     // Table 1: chimera-tenants
     // PK: TENANT#{id}, SK: META
     // GSI1: tier -> tenantId (query tenants by tier)
+    // GSI2: status -> tenantId (query tenants by lifecycle status)
     // Streams: NEW_AND_OLD_IMAGES for config change events
     // ======================================================================
     this.tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
@@ -62,11 +63,18 @@ export class DataStack extends cdk.Stack {
       sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
+    this.tenantsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2-status',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
 
     // ======================================================================
     // Table 2: chimera-sessions
     // PK: TENANT#{id}, SK: SESSION#{id}
     // GSI1: agentId -> lastActivity (find active agents)
+    // GSI2: userId -> lastActivity (find user sessions)
     // TTL: 24 hours after last activity
     // ======================================================================
     this.sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
@@ -82,6 +90,12 @@ export class DataStack extends cdk.Stack {
     this.sessionsTable.addGlobalSecondaryIndex({
       indexName: 'GSI1-agent-activity',
       partitionKey: { name: 'agentId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    this.sessionsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2-user-sessions',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
