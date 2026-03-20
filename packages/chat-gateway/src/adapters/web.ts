@@ -24,6 +24,11 @@ export class WebPlatformAdapter implements PlatformAdapter {
 
     const request = body as { messages?: unknown };
 
+    if (!request.messages) {
+      // Return empty array - let route handler check for empty messages
+      return [];
+    }
+
     if (!Array.isArray(request.messages)) {
       throw new Error('messages field must be an array');
     }

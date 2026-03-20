@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-obs-rev
-- **Task ID:** chimera-1912
+- **Agent Name:** builder-gateway-app
+- **Task ID:** chimera-9f14
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-obs-rev/chimera-1912
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-obs-rev
-- **Parent:** lead-observability
+- **Branch:** overstory/builder-gateway-app/chimera-9f14
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-app
+- **Parent:** lead-chat-gateway
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,23 +181,22 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-obs-rev`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-app`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-obs-rev`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-app`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-obs-rev`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-app`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `infra/lib/observability-stack.ts`
-- `infra/bin/chimera.ts`
+- `packages/chat-gateway/**`
 
 ## Expertise
 
@@ -209,26 +208,26 @@ No specific expertise domains configured
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-obs-rev**.
+Use `ov mail` for all communication. Your address is **builder-gateway-app**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-obs-rev
+ov mail check --agent builder-gateway-app
 
 # Send a status update to your parent
-ov mail send --to lead-observability --subject "status" \
-  --body "Progress update here" --type status --agent builder-obs-rev
+ov mail send --to lead-chat-gateway --subject "status" \
+  --body "Progress update here" --type status --agent builder-gateway-app
 
 # Ask a question
-ov mail send --to lead-observability --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-obs-rev
+ov mail send --to lead-chat-gateway --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-gateway-app
 
 # Report completion
-ov mail send --to lead-observability --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-obs-rev
+ov mail send --to lead-chat-gateway --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-gateway-app
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-obs-rev
+ov mail reply <message-id> --body "Your reply" --agent builder-gateway-app
 ```
 
 ## Spawning Sub-Workers
@@ -242,20 +241,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-obs-rev/chimera-1912)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-obs-rev` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-observability: `ov mail send --to lead-observability --subject "Worker done: chimera-1912" --body "Quality gates passed." --type worker_done --agent builder-obs-rev`
-7. **Close issue:** `sd close chimera-1912 --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-gateway-app/chimera-9f14)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-gateway-app` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-chat-gateway: `ov mail send --to lead-chat-gateway --subject "Worker done: chimera-9f14" --body "Quality gates passed." --type worker_done --agent builder-gateway-app`
+7. **Close issue:** `sd close chimera-9f14 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-obs-rev`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-app`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-obs-rev/chimera-1912
+- Commit only to your branch: overstory/builder-gateway-app/chimera-9f14
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
