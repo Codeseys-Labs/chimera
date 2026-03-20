@@ -288,7 +288,7 @@ MCP_TARGET_TYPES:
 
 **Skill Registry Integration**:
 
-Chimera's skill metadata table (`clawcore-skills`) should store the Gateway target type:
+Chimera's skill metadata table (`chimera-skills`) should store the Gateway target type:
 
 ```python
 # DynamoDB item: TENANT#acme / SKILL#code-review
@@ -458,12 +458,12 @@ The agent runtime can access these via `context.session.attributes` and enforce 
 
 Chimera proposes 6 tables:
 
-1. **clawcore-tenants**: Tenant metadata, config, features, models, tools
-2. **clawcore-sessions**: Session state, active agents
-3. **clawcore-skills**: Skill metadata, MCP endpoints
-4. **clawcore-rate-limits**: Token bucket rate limiting
-5. **clawcore-cost-tracking**: Per-tenant cost attribution
-6. **clawcore-audit**: Compliance logs
+1. **chimera-tenants**: Tenant metadata, config, features, models, tools
+2. **chimera-sessions**: Session state, active agents
+3. **chimera-skills**: Skill metadata, MCP endpoints
+4. **chimera-rate-limits**: Token bucket rate limiting
+5. **chimera-cost-tracking**: Per-tenant cost attribution
+6. **chimera-audit**: Compliance logs
 
 ### Validation
 
@@ -493,7 +493,7 @@ Chimera proposes 6 tables:
 
 ### Session Tracking
 
-**Chimera Gap**: `clawcore-sessions` table tracks session state, but AgentCore Runtime manages sessions internally.
+**Chimera Gap**: `chimera-sessions` table tracks session state, but AgentCore Runtime manages sessions internally.
 
 **Recommendation**: Use `sessions` table for **metadata only**:
 
@@ -1059,8 +1059,8 @@ The architecture is fundamentally sound and well-aligned with AWS AgentCore capa
 - [AgentCore Memory Session Manager](https://strandsagents.com/docs/community/session-managers/agentcore-memory/)
 
 ### Chimera Architecture Documents
-- [ClawCore Definitive Architecture](../architecture-reviews/ClawCore-Definitive-Architecture.md)
-- [ClawCore Multi-Tenant Architecture Review](../architecture-reviews/ClawCore-Architecture-Review-Multi-Tenant.md)
+- [Chimera Definitive Architecture](../architecture-reviews/Chimera-Definitive-Architecture.md)
+- [Chimera Multi-Tenant Architecture Review](../architecture-reviews/Chimera-Architecture-Review-Multi-Tenant.md)
 - [Data Stack Implementation](../../infra/lib/data-stack.ts)
 
 ---

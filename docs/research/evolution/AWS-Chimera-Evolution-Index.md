@@ -160,7 +160,7 @@ Results analyzed → Knowledge integrated → Deployed if successful
 ## Related Research
 
 - [[04-Self-Modifying-IaC-Patterns]] (enhancement series) — foundational IaC patterns
-- [[ClawCore-Self-Evolution-Engine]] (architecture reviews) — full evolution engine design
+- [[Chimera-Self-Evolution-Engine]] (architecture reviews) — full evolution engine design
 - [[05-Strands-Advanced-Memory-MultiAgent]] (agentcore-strands) — multi-agent coordination
 
 ## Next Steps

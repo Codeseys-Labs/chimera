@@ -1,7 +1,7 @@
 ---
 tags:
   - architecture-review
-  - clawcore
+  - chimera
   - integration
   - streaming
   - mcp
@@ -9,12 +9,12 @@ tags:
   - chat-sdk
   - agentcore
 date: 2026-03-19
-topic: ClawCore Integration & Communication Architecture Review
+topic: Chimera Integration & Communication Architecture Review
 status: complete
 reviewer: integration-architect
 ---
 
-# ClawCore Integration & Communication Architecture Review
+# Chimera Integration & Communication Architecture Review
 
 > **Reviewer:** Integration Architect
 > **Scope:** Data flow, streaming, protocols, identity, MCP ecosystem, LLM routing, webhook patterns, and migration path from OpenClaw Gateway
@@ -181,7 +181,7 @@ async def chat_endpoint(tenant_id: str, request: Request):
 
 ### 2.1 Protocol Specification
 
-The AI SDK Data Stream Protocol is SSE-based with typed JSON objects. Key event types for ClawCore:
+The AI SDK Data Stream Protocol is SSE-based with typed JSON objects. Key event types for Chimera:
 
 | Event Type | Purpose | When Emitted |
 |-----------|---------|-------------|
@@ -445,7 +445,7 @@ builder.add_edge("analyze", "report")
 
 ### 4.3 Cross-Service Agent Communication
 
-For ClawCore platform services that need agent intelligence:
+For Chimera platform services that need agent intelligence:
 
 ```python
 # Cron scheduler service calls an agent via A2A
@@ -498,7 +498,7 @@ permit(
 
 AG-UI (Agent-Generative UI) is a protocol for streaming structured UI updates from agents to frontends. AgentCore supports it natively via `serve_ag_ui`.
 
-### 5.2 AG-UI in ClawCore
+### 5.2 AG-UI in Chimera
 
 ```python
 from bedrock_agentcore.runtime import serve_ag_ui
@@ -562,7 +562,7 @@ Chat platforms cannot render arbitrary UI components. Map AG-UI events to platfo
 ### 6.1 Identity Model
 
 ```
-DynamoDB: clawcore-identities
+DynamoDB: chimera-identities
 
 PK                          SK                      Attributes
 TENANT#acme                 USER#u-001              displayName, email, role, created
@@ -742,7 +742,7 @@ Per-tenant model usage tracked via AgentCore observability + CloudWatch:
 ```python
 # Custom metric emitted after each invocation
 cloudwatch.put_metric_data(
-    Namespace='ClawCore/ModelUsage',
+    Namespace='Chimera/ModelUsage',
     MetricData=[{
         'MetricName': 'TokensConsumed',
         'Value': usage.total_tokens,
@@ -870,10 +870,10 @@ Agents can emit events for external systems:
 def notify_systems(event_type: str, payload: dict) -> str:
     """Emit an event to external systems via EventBridge."""
     eventbridge.put_events(Entries=[{
-        'Source': f'clawcore.tenant.{tenant_id}',
+        'Source': f'chimera.tenant.{tenant_id}',
         'DetailType': event_type,
         'Detail': json.dumps(payload),
-        'EventBusName': 'clawcore-events',
+        'EventBusName': 'chimera-events',
     }])
     return f"Event {event_type} emitted"
 ```
@@ -883,7 +883,7 @@ def notify_systems(event_type: str, payload: dict) -> str:
 ```python
 # EventBridge rule triggers agent via Step Functions
 {
-    "source": ["clawcore.cron", "clawcore.webhook", "clawcore.alert"],
+    "source": ["chimera.cron", "chimera.webhook", "chimera.alert"],
     "detail-type": ["scheduled-task", "github-push", "pagerduty-alert"],
     "detail": {
         "tenant_id": ["acme"]
@@ -916,9 +916,9 @@ All webhook secrets stored in AWS Secrets Manager, rotated via Lambda.
 
 ### 10.1 OpenClaw Gateway Component Mapping
 
-OpenClaw's Gateway daemon (Node.js, port 18789) provides 23+ channel adapters, session management, streaming, and routing in a single process. ClawCore replaces this with distributed AWS services:
+OpenClaw's Gateway daemon (Node.js, port 18789) provides 23+ channel adapters, session management, streaming, and routing in a single process. Chimera replaces this with distributed AWS services:
 
-| OpenClaw Gateway Component | ClawCore Replacement | Migration Complexity |
+| OpenClaw Gateway Component | Chimera Replacement | Migration Complexity |
 |---------------------------|---------------------|---------------------|
 | Channel Bridges (23+ adapters) | Chat SDK (8 adapters) + custom adapters | **Medium** - Chat SDK covers top 8; Signal, Matrix, iMessage need custom |
 | WebSocket Server (96+ RPC methods) | API Gateway WebSocket + SSE Bridge | **High** - Protocol translation required |

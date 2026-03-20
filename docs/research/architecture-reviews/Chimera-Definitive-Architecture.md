@@ -2,7 +2,7 @@
 tags:
   - research-rabbithole
   - architecture
-  - clawcore
+  - chimera
   - aws
   - definitive
   - openclaw
@@ -10,11 +10,11 @@ tags:
   - self-evolution
   - multi-tenant
 date: 2026-03-19
-topic: ClawCore Definitive Architecture
+topic: Chimera Definitive Architecture
 status: complete
 ---
 
-# ClawCore — Definitive Architecture
+# Chimera — Definitive Architecture
 
 > **The one document.** An AWS-native, multi-tenant, self-evolutionary agent platform
 > that reproduces the full capabilities of OpenClaw and NemoClaw using managed AWS
@@ -25,9 +25,9 @@ designs, 2 research indexes — produced by 30+ parallel agents across 3 team se
 
 ---
 
-## What Is ClawCore?
+## What Is Chimera?
 
-ClawCore is an **Agent-as-a-Service platform** where:
+Chimera is an **Agent-as-a-Service platform** where:
 
 - **Tenants** deploy AI agents that can chat across Slack/Teams/Discord/Telegram/WhatsApp/Web
 - **Agents** use skills, tools, memory, and subagents to accomplish tasks autonomously
@@ -36,7 +36,7 @@ ClawCore is an **Agent-as-a-Service platform** where:
 
 ### What It Preserves from OpenClaw
 
-| Capability | OpenClaw | ClawCore |
+| Capability | OpenClaw | Chimera |
 |-----------|---------|---------|
 | 4-tool minimalism | Pi runtime (read/write/edit/bash) | Strands agent (same 4 tools) |
 | Skills as markdown | SKILL.md with YAML frontmatter | SKILL.md v2 (same format, enhanced) |
@@ -194,7 +194,7 @@ Static analysis → Dependency audit → Sandbox execution → Permission valida
 
 ### Pillar 4: Self-Evolution Engine
 
-The defining feature — ClawCore improves itself:
+The defining feature — Chimera improves itself:
 
 ```mermaid
 graph LR
@@ -271,7 +271,7 @@ graph LR
 ## CDK Stack Structure
 
 ```
-ClawCore/
+Chimera/
 ├── lib/
 │   ├── network-stack.ts          # VPC, 3 subnet tiers, 9 endpoints
 │   ├── data-stack.ts             # 6 DynamoDB tables, 3 S3 buckets
@@ -287,7 +287,7 @@ ClawCore/
 ├── packages/
 │   ├── core/                     # Strands agent definitions
 │   ├── chat-gateway/             # Chat SDK + SSE bridge
-│   ├── cli/                      # clawcore CLI
+│   ├── cli/                      # chimera CLI
 │   ├── sdk-python/               # Skill author SDK (Python)
 │   ├── sdk-typescript/           # Skill author SDK (TS)
 │   └── shared/                   # Types, utils
@@ -315,14 +315,14 @@ ClawCore/
 
 ```bash
 # Zero to first agent in 5 minutes
-clawcore auth login
-clawcore agent init my-bot --template=chatbot
-clawcore agent run                         # Local dev, hot reload
-clawcore channel add slack --token=$TOKEN  # Add Slack
-clawcore agent deploy                      # Ship to AgentCore
+chimera auth login
+chimera agent init my-bot --template=chatbot
+chimera agent run                         # Local dev, hot reload
+chimera channel add slack --token=$TOKEN  # Add Slack
+chimera agent deploy                      # Ship to AgentCore
 
 # Migrate from OpenClaw (92% compatibility)
-clawcore migrate --from=openclaw --path=~/.openclaw
+chimera migrate --from=openclaw --path=~/.openclaw
 ```
 
 ---
@@ -372,16 +372,16 @@ clawcore migrate --from=openclaw --path=~/.openclaw
 | Document | Lines | Topic |
 |----------|------:|-------|
 | [[AWS-Native-OpenClaw-Architecture-Synthesis\|Synthesis]] | ~500 | Initial component mapping |
-| [[ClawCore-Architecture-Review-Security\|Security]] | 1,185 | STRIDE, 8-layer defense, Cedar |
-| [[ClawCore-Architecture-Review-Cost-Scale\|Cost]] | 731 | Pricing at 10/100/1000 tenants |
-| [[ClawCore-Architecture-Review-Integration\|Integration]] | 1,203 | Chat SDK, MCP, A2A, streaming |
-| [[ClawCore-Architecture-Review-Platform-IaC\|Platform]] | 1,307 | 8-stack CDK, GitOps, CI/CD |
-| [[ClawCore-Architecture-Review-Multi-Tenant\|Multi-Tenant]] | 1,258 | DDB schemas, GDPR, SLA |
-| [[ClawCore-Architecture-Review-DevEx\|DevEx]] | 1,111 | CLI, SDK, migration tools |
-| [[ClawCore-Self-Evolution-Engine\|Self-Evolution]] | 1,834 | Prompt/skill/model/memory evolution |
-| [[ClawCore-AWS-Component-Blueprint\|AWS Blueprint]] | 1,511 | Exact service configs, CDK code |
-| [[ClawCore-OpenSource-Module-Architecture\|OSS Modules]] | 1,119 | Strands/ChatSDK/Cedar composition |
-| [[ClawCore-Skill-Ecosystem-Design\|Skill Ecosystem]] | 1,516 | SKILL.md v2, marketplace, security |
+| [[Chimera-Architecture-Review-Security\|Security]] | 1,185 | STRIDE, 8-layer defense, Cedar |
+| [[Chimera-Architecture-Review-Cost-Scale\|Cost]] | 731 | Pricing at 10/100/1000 tenants |
+| [[Chimera-Architecture-Review-Integration\|Integration]] | 1,203 | Chat SDK, MCP, A2A, streaming |
+| [[Chimera-Architecture-Review-Platform-IaC\|Platform]] | 1,307 | 8-stack CDK, GitOps, CI/CD |
+| [[Chimera-Architecture-Review-Multi-Tenant\|Multi-Tenant]] | 1,258 | DDB schemas, GDPR, SLA |
+| [[Chimera-Architecture-Review-DevEx\|DevEx]] | 1,111 | CLI, SDK, migration tools |
+| [[Chimera-Self-Evolution-Engine\|Self-Evolution]] | 1,834 | Prompt/skill/model/memory evolution |
+| [[Chimera-AWS-Component-Blueprint\|AWS Blueprint]] | 1,511 | Exact service configs, CDK code |
+| [[Chimera-OpenSource-Module-Architecture\|OSS Modules]] | 1,119 | Strands/ChatSDK/Cedar composition |
+| [[Chimera-Skill-Ecosystem-Design\|Skill Ecosystem]] | 1,516 | SKILL.md v2, marketplace, security |
 
 **Total corpus: ~31,000 lines across 28+ documents.**
 

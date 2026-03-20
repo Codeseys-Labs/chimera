@@ -5,22 +5,22 @@ updated: 2026-03-19
 type: deep-dive
 status: complete
 tags:
-  - clawcore
+  - chimera
   - opensandbox
   - firecracker
   - wasm
   - security
   - code-interpreter
 related:
-  - "[[ClawCore-AWS-Component-Blueprint]]"
+  - "[[Chimera-AWS-Component-Blueprint]]"
   - "[[03-OpenFang-Community-Fork]]"
-  - "[[ClawCore-Architecture-Review-Security]]"
+  - "[[Chimera-Architecture-Review-Security]]"
 ---
 
 # OpenSandbox & Code Interpreter Deep Implementation Guide
 
 > [!abstract] Purpose
-> Comprehensive implementation guide for sandboxed code execution in ClawCore.
+> Comprehensive implementation guide for sandboxed code execution in Chimera.
 > Covers Firecracker microVMs, WASM runtimes, AgentCore Code Interpreter,
 > E2B cloud sandboxes, network/file I/O policies, and CDK integration patterns.
 
@@ -32,7 +32,7 @@ Running untrusted code -- whether LLM-generated, user-uploaded, or sourced from 
 community skill marketplace -- is the single highest-risk operation an AI agent platform
 performs. The 2025-2026 ClawHavoc incident demonstrated this conclusively: 1,184 malicious
 skills exploited OpenClaw's lack of sandboxing to exfiltrate credentials and open reverse
-shells. ClawCore **must** treat all code execution as hostile.
+shells. Chimera **must** treat all code execution as hostile.
 
 The sandboxing landscape in 2026 has stratified into four tiers:
 
@@ -43,7 +43,7 @@ The sandboxing landscape in 2026 has stratified into four tiers:
 | **Level 2** | WASM (Wasmtime/WasmEdge) | Capability-based sandbox | ~5ms | Lightweight skill isolation |
 | **Level 3** | Firecracker MicroVM | Hardware virtualization (KVM) | ~125ms | Untrusted code, gold standard |
 
-> [!tip] ClawCore Recommendation
+> [!tip] Chimera Recommendation
 > **Primary:** AgentCore Code Interpreter (managed Firecracker MicroVMs) for all
 > LLM-generated and marketplace skill code execution. Zero infrastructure to manage.
 >
@@ -201,7 +201,7 @@ PUT /snapshot/load  {
 PUT /vm  {"state": "Resumed"}
 ```
 
-> [!note] ClawCore Implication
+> [!note] Chimera Implication
 > AgentCore Code Interpreter handles snapshot/restore internally. For self-hosted
 > Firecracker deployments, pre-warming snapshots with common Python packages eliminates
 > cold-start latency for the most common code interpreter workloads.
@@ -212,12 +212,12 @@ PUT /vm  {"state": "Resumed"}
 
 Amazon Bedrock AgentCore Code Interpreter is a fully managed sandbox service that enables
 agents to write and execute code in isolated Firecracker MicroVM environments. It is the
-**primary sandbox recommendation for ClawCore** because it eliminates all MicroVM fleet
+**primary sandbox recommendation for Chimera** because it eliminates all MicroVM fleet
 management while providing hardware-level isolation.
 
 ### 3.1 Overview and Capabilities
 
-Key capabilities from the [[ClawCore-AWS-Component-Blueprint]]:
+Key capabilities from the [[Chimera-AWS-Component-Blueprint]]:
 
 - **Sandbox type:** Firecracker MicroVM (OpenSandbox)
 - **Fully managed:** No infrastructure to provision, patch, or scale
@@ -274,7 +274,7 @@ for file in response['executionOutput']['files']:
 
 ### 3.4 Limits and Pricing
 
-**Resource limits (from [[ClawCore-AWS-Component-Blueprint]]):**
+**Resource limits (from [[Chimera-AWS-Component-Blueprint]]):**
 
 | Limit | Basic Tier | Pro/Enterprise Tier |
 |-------|-----------|-------------------|
@@ -309,7 +309,7 @@ for file in response['executionOutput']['files']:
 
 ### 3.5 Integration with Strands Agents
 
-ClawCore uses Strands Agents as its agent framework. The Code Interpreter integrates as a
+Chimera uses Strands Agents as its agent framework. The Code Interpreter integrates as a
 Strands tool:
 
 ```python
@@ -357,7 +357,7 @@ response = agent("Analyze the sales data in s3://bucket/sales.csv")
 
 > [!important] Cedar Policy Integration
 > Every `execute_code` invocation passes through Cedar policy evaluation **before**
-> the sandbox executes. See [[ClawCore-Architecture-Review-Security#1.7 Elevation of Privilege Deep Dive]]
+> the sandbox executes. See [[Chimera-Architecture-Review-Security#1.7 Elevation of Privilege Deep Dive]]
 > for the Cedar policies that restrict marketplace skill code execution.
 
 ---
@@ -390,7 +390,7 @@ workloads via WASI (WebAssembly System Interface). Key properties for agent sand
 > isolation** of pre-compiled, self-contained tools.
 
 OpenFang's approach (see [[03-OpenFang-Community-Fork#WASM Sandbox Deep Dive]]) demonstrates
-WASM for agent sandboxing with dual metering (fuel + epoch interruption). ClawCore can
+WASM for agent sandboxing with dual metering (fuel + epoch interruption). Chimera can
 adopt a similar pattern for lightweight skill isolation.
 
 ### 4.2 Wasmtime
@@ -501,7 +501,7 @@ for WASM outside the browser. It provides a **capability-based security model**:
 
 ```
 +--------------------------------------------------+
-|              Host (ClawCore Runtime)              |
+|              Host (Chimera Runtime)              |
 |                                                  |
 |  Grants capabilities:                            |
 |  - fs: read("/workspace/data/")                  |
@@ -528,7 +528,7 @@ for WASM outside the browser. It provides a **capability-based security model**:
 - **WASI 0.3** (expected late 2026) -- full async support
 - **WASI 1.0** (expected 2027) -- stable, production-ready standard
 
-> [!tip] ClawCore WASM Strategy
+> [!tip] Chimera WASM Strategy
 > Use **Wasmtime** with WASI Preview 2 for skill-level isolation. Pre-compile
 > verified skills to WASM modules, distribute via the skill registry, and execute
 > with fuel metering + epoch interruption. Reserve Firecracker/AgentCore Code
@@ -622,7 +622,7 @@ sandbox.kill()
 | **S3 integration** | Native (direct S3 access) | Manual upload/download |
 | **VPC integration** | Native (PrivateLink) | No |
 
-> [!important] Why AgentCore over E2B for ClawCore
+> [!important] Why AgentCore over E2B for Chimera
 > 1. **Cost:** AgentCore bills only active CPU time; E2B bills full session duration.
 >    For IO-heavy agent workflows, AgentCore is ~3x cheaper.
 > 2. **IAM + Cedar:** Native AWS IAM integration with Cedar policy enforcement at the
@@ -726,7 +726,7 @@ graph TD
     style D fill:#6c757d,color:#fff
 ```
 
-**Decision rules for ClawCore:**
+**Decision rules for Chimera:**
 
 | Scenario | Recommended Technology | Rationale |
 |----------|----------------------|-----------|
@@ -774,7 +774,7 @@ This means:
 
 ### 7.2 Allowlist Patterns
 
-For skills that legitimately need network access (web search, API calls), ClawCore uses a
+For skills that legitimately need network access (web search, API calls), Chimera uses a
 **per-skill allowlist** defined in the skill manifest and enforced by Cedar policy:
 
 ```yaml
@@ -921,7 +921,7 @@ tenants' data or persist malicious artifacts).
 | **Persistent (EFS)** | Survives across sessions | Agent workspace, project files | Medium -- requires access control |
 | **Artifact (S3)** | Indefinite; managed lifecycle | Reports, visualizations, exports | Medium -- IAM-scoped per tenant |
 
-**ClawCore default:** Ephemeral filesystem within the MicroVM. All data is destroyed when
+**Chimera default:** Ephemeral filesystem within the MicroVM. All data is destroyed when
 the session terminates. Agents exchange files with the outside world only via:
 1. **S3 pre-signed URLs** -- for input data and output artifacts
 2. **Inline API transfer** -- for files under 100MB
@@ -993,7 +993,7 @@ across sandbox sessions (see [[01-EFS-Agent-Workspace-Storage]] for full details
 
 ### 8.4 S3-Based Artifact Exchange
 
-The primary file exchange pattern for ClawCore sandboxes:
+The primary file exchange pattern for Chimera sandboxes:
 
 ```python
 # Agent uploads data to sandbox via S3
@@ -1173,12 +1173,12 @@ Package Request
 ## 10. OpenFang's Security Model
 
 OpenFang (see [[03-OpenFang-Community-Fork]]) implements 16 discrete security layers -- the
-most comprehensive security model in the open-source agent ecosystem. ClawCore should adopt
+most comprehensive security model in the open-source agent ecosystem. Chimera should adopt
 relevant patterns where they strengthen the existing AgentCore + Cedar architecture.
 
 ### 10.1 The 16-Layer Security Model Overview
 
-| # | Layer | OpenFang Implementation | ClawCore Equivalent |
+| # | Layer | OpenFang Implementation | Chimera Equivalent |
 |---|-------|------------------------|-------------------|
 | 1 | WASM Dual-Metered Sandbox | Fuel metering + epoch interruption | AgentCore MicroVM (stronger) |
 | 2 | Merkle Hash-Chain Audit | Cryptographic audit trail | CloudTrail + DynamoDB audit table |
@@ -1206,7 +1206,7 @@ Six OpenFang layers directly apply to sandbox security:
 CPU-bound infinite loops and slow-drip resource exhaustion.
 
 ```
-OpenFang:                          ClawCore Equivalent:
+OpenFang:                          Chimera Equivalent:
 +------------------+               +------------------+
 | WASM Sandbox     |               | Firecracker VM   |
 | fuel: 10,000     |               | timeout: 300s    |
@@ -1215,22 +1215,22 @@ OpenFang:                          ClawCore Equivalent:
 +------------------+               +------------------+
 ```
 
-**Layer 3: Taint Tracking** -- This is ClawCore's most significant gap. OpenFang propagates
+**Layer 3: Taint Tracking** -- This is Chimera's most significant gap. OpenFang propagates
 labels through execution paths to track secrets. If a variable is tainted (contains an
 API key), any output derived from it is also tainted and cannot be sent to external
-endpoints. ClawCore should implement this at the Strands agent level.
+endpoints. Chimera should implement this at the Strands agent level.
 
 **Layer 5: SSRF Protection** -- Both systems block private IPs, but OpenFang also blocks
-cloud metadata endpoints (169.254.169.254). ClawCore inherits this from VPC security groups
+cloud metadata endpoints (169.254.169.254). Chimera inherits this from VPC security groups
 but should add an explicit check in the sandbox network policy.
 
 **Layer 12: Prompt Injection Scanner** -- OpenFang's scanner detects override attempts,
-data exfiltration patterns, and shell reference injection. ClawCore uses Bedrock Guardrails
+data exfiltration patterns, and shell reference injection. Chimera uses Bedrock Guardrails
 which covers similar ground but is reactive (post-invocation) rather than proactive
 (pre-invocation). Consider adding a pre-invocation scanner.
 
 **Layer 13: Loop Guard** -- OpenFang uses SHA256 hashing of tool call sequences to detect
-repetitive loops and triggers a circuit breaker. ClawCore should implement this in the
+repetitive loops and triggers a circuit breaker. Chimera should implement this in the
 agent runtime:
 
 ```python
@@ -1254,9 +1254,9 @@ def detect_tool_loop(tool_call_history: list[str]) -> bool:
     return False
 ```
 
-### 10.3 Adoption Recommendations for ClawCore
+### 10.3 Adoption Recommendations for Chimera
 
-| Priority | OpenFang Pattern | ClawCore Implementation | Effort |
+| Priority | OpenFang Pattern | Chimera Implementation | Effort |
 |----------|-----------------|------------------------|--------|
 | **P0** | Loop Guard (Layer 13) | SHA256 tool call dedup in Strands agent runtime | Low |
 | **P0** | SSRF Protection (Layer 5) | Explicit metadata endpoint blocking in sandbox network policy | Low |
@@ -1267,7 +1267,7 @@ def detect_tool_loop(tool_call_history: list[str]) -> bool:
 | **P3** | Secret Zeroization (Layer 6) | In-memory secret wiping in agent runtime | Low |
 
 > [!tip] Defense-in-Depth Stack
-> ClawCore's final security stack combines the best of both worlds:
+> Chimera's final security stack combines the best of both worlds:
 > - **Infrastructure:** Firecracker MicroVM (stronger than OpenFang's WASM)
 > - **Policy:** Cedar (more expressive than OpenFang's RBAC)
 > - **Content:** Bedrock Guardrails (managed, no maintenance)
@@ -1280,7 +1280,7 @@ def detect_tool_loop(tool_call_history: list[str]) -> bool:
 ## 11. Implementation Guide
 
 This section provides production-ready CDK code, Strands tool definitions, and integration
-patterns for deploying OpenSandbox in ClawCore.
+patterns for deploying OpenSandbox in Chimera.
 
 ### 11.1 CDK Infrastructure
 
@@ -1328,7 +1328,7 @@ export class SandboxInfrastructure extends Construct {
 
     // IAM Role for sandbox execution
     this.sandboxRole = new iam.Role(this, 'SandboxExecutionRole', {
-      roleName: 'clawcore-sandbox-execution',
+      roleName: 'chimera-sandbox-execution',
       assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
     });
 
@@ -1392,7 +1392,7 @@ export class SandboxInfrastructure extends Construct {
 
 ```python
 # tools/sandbox_tools.py
-"""Sandbox tools for ClawCore agents using AgentCore Code Interpreter."""
+"""Sandbox tools for Chimera agents using AgentCore Code Interpreter."""
 
 from strands import Agent
 from strands.tools import tool
@@ -1725,18 +1725,18 @@ Phase 4 (Security Hardening):
 | Wasmtime vs Wasmer 2026 | https://wasmruntime.com/en/compare/wasmtime-vs-wasmer |
 | Best Sandbox Runners 2026 | https://betterstack.com/community/comparisons/best-sandbox-runners/ |
 
-### ClawCore Internal References
+### Chimera Internal References
 
 | Document | Link |
 |----------|------|
-| AWS Component Blueprint | [[ClawCore-AWS-Component-Blueprint]] |
+| AWS Component Blueprint | [[Chimera-AWS-Component-Blueprint]] |
 | OpenFang Community Fork | [[03-OpenFang-Community-Fork]] |
-| Security Architecture Review | [[ClawCore-Architecture-Review-Security]] |
+| Security Architecture Review | [[Chimera-Architecture-Review-Security]] |
 | EFS Agent Workspace Storage | [[01-EFS-Agent-Workspace-Storage]] |
-| ClawCore Definitive Architecture | [[ClawCore-Definitive-Architecture]] |
+| Chimera Definitive Architecture | [[Chimera-Definitive-Architecture]] |
 
 ---
 
 *Deep dive completed 2026-03-19. Research covers Firecracker v1.14.2, AgentCore Code
 Interpreter (GA Feb 2026), E2B, Wasmtime/WasmEdge/Wasmer, and gVisor. All code examples
-are production-ready patterns for ClawCore Phase 1-3 deployment.*
+are production-ready patterns for Chimera Phase 1-3 deployment.*

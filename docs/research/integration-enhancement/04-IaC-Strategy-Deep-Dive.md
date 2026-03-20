@@ -27,7 +27,7 @@ Chimera uses **AWS CDK with TypeScript** as its Infrastructure as Code (IaC) sol
 Chimera uses a **three-tier stack architecture** with explicit dependencies:
 
 ```typescript
-// infra/bin/clawcore.ts
+// infra/bin/chimera.ts
 NetworkStack    → VPC, subnets, security groups, VPC endpoints
    ↓
 DataStack       → 6 DynamoDB tables, 3 S3 buckets
@@ -170,7 +170,7 @@ Recreating `TenantAgent` construct in HCL would look like:
 # 15+ resources × 50+ tenants = 750 resource blocks
 resource "aws_iam_role" "tenant" {
   for_each = var.tenants
-  name     = "clawcore-tenant-${each.key}"
+  name     = "chimera-tenant-${each.key}"
   # ...100+ lines of policy JSON...
 }
 
@@ -288,7 +288,7 @@ new TenantAgent(this, 'TenantAcme', {
 ```typescript
 // Agent writes to DynamoDB:
 await dynamodb.putItem({
-  TableName: 'clawcore-tenants-dev',
+  TableName: 'chimera-tenants-dev',
   Item: {
     PK: 'TENANT#acme',
     SK: 'META',
@@ -325,7 +325,7 @@ const handler = async (event: any) => {
 
   // Update DynamoDB config
   await dynamodb.updateItem({
-    TableName: 'clawcore-tenants-dev',
+    TableName: 'chimera-tenants-dev',
     Key: { PK: `TENANT#${tenantId}`, SK: 'META' },
     UpdateExpression: 'SET tier = :tier',
     ExpressionAttributeValues: { ':tier': 'basic' }
@@ -333,7 +333,7 @@ const handler = async (event: any) => {
 
   // Trigger CDK resynthesis → updates IAM role model permissions
   await codepipeline.startPipelineExecution({
-    name: 'clawcore-infra-pipeline'
+    name: 'chimera-infra-pipeline'
   });
 };
 ```
@@ -344,10 +344,10 @@ const handler = async (event: any) => {
 **Concept:** Stack synthesis reads from DynamoDB instead of hardcoded values
 
 ```typescript
-// infra/bin/clawcore.ts
+// infra/bin/chimera.ts
 const dynamodb = new AWS.DynamoDB.DocumentClient();
 const { Items: tenants } = await dynamodb.scan({
-  TableName: `clawcore-tenants-${envName}`,
+  TableName: `chimera-tenants-${envName}`,
   FilterExpression: 'SK = :meta',
   ExpressionAttributeValues: { ':meta': 'META' }
 }).promise();
@@ -511,8 +511,8 @@ if (cost.monthlyIncrease > 100) {
 **Continue with CDK, implement self-modifying patterns:**
 
 1. **Migrate tenant config to DynamoDB**
-   - Current: Hardcoded in `clawcore.ts`
-   - Target: DynamoDB table `clawcore-tenants-dev` drives synthesis
+   - Current: Hardcoded in `chimera.ts`
+   - Target: DynamoDB table `chimera-tenants-dev` drives synthesis
    - Timeline: 2 weeks
 
 2. **Add CDK synthesis Lambda**
@@ -523,7 +523,7 @@ if (cost.monthlyIncrease > 100) {
    - Risk: Low (only adds automation, doesn't change stacks)
 
 3. **Implement policy gates**
-   - Add `cdk-nag` to `infra/bin/clawcore.ts`
+   - Add `cdk-nag` to `infra/bin/chimera.ts`
    - Block deployment on security violations
    - Timeline: 3 days
 

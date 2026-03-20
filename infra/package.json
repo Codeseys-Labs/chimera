@@ -1,7 +1,7 @@
 {
-  "name": "clawcore-cdk",
+  "name": "chimera-cdk",
   "version": "0.1.0",
-  "description": "ClawCore multi-tenant agent platform - CDK infrastructure",
+  "description": "Chimera multi-tenant agent platform - CDK infrastructure",
   "private": true,
   "scripts": {
     "build": "tsc",

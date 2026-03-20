@@ -23,7 +23,7 @@ status: complete
 ## Executive Summary
 
 This document synthesizes 17 research documents (17,839 lines) across two research
-rabbitholes to architect **ClawCore** — an AWS-native multi-tenant agent platform
+rabbitholes to architect **Chimera** — an AWS-native multi-tenant agent platform
 that preserves OpenClaw's philosophy while leveraging managed AWS services for
 security, scale, and self-improvement.
 
@@ -191,7 +191,7 @@ agent = Agent(
 ```
 
 **Per-tenant customization:**
-- System prompt loaded from S3 (`s3://clawcore-tenants/{tenant_id}/system-prompt.md`)
+- System prompt loaded from S3 (`s3://chimera-tenants/{tenant_id}/system-prompt.md`)
 - Skills loaded from tenant's skill registry (DynamoDB + S3)
 - MCP tools from tenant's tool configuration
 - Model selection per tenant (some use Claude, some use Llama, some use Nova)
@@ -227,7 +227,7 @@ When asked to review code, analyze for:
 
 **Skill storage architecture:**
 ```
-S3: s3://clawcore-skills/
+S3: s3://chimera-skills/
   ├── global/              # Platform-provided skills (curated, audited)
   │   ├── code-review/
   │   │   ├── SKILL.md
@@ -239,7 +239,7 @@ S3: s3://clawcore-skills/
       └── {tenant-id}/
           └── {skill-name}/
 
-DynamoDB: clawcore-skill-metadata
+DynamoDB: chimera-skill-metadata
   PK: TENANT#{tenant_id}  SK: SKILL#{skill_name}
   Fields: version, author, tags, mcp_endpoint, trust_level, download_count
 ```
@@ -252,7 +252,7 @@ gateway_client.create_gateway(
     name=f"skill-{skill_name}",
     target_type="MCP_SERVER",
     target_config={
-        "uri": f"s3://clawcore-skills/tenants/{tenant_id}/{skill_name}/mcp-server",
+        "uri": f"s3://chimera-skills/tenants/{tenant_id}/{skill_name}/mcp-server",
         "transport": "STREAMABLE_HTTP"
     }
 )
@@ -281,7 +281,7 @@ email-digest and extract-tasks jobs):
     "job_name": "daily-digest",
     "schedule": "cron(0 8 ? * MON-FRI *)",  # Weekdays at 8am
     "agent_config": {
-        "system_prompt_key": "s3://clawcore-tenants/acme/prompts/digest.md",
+        "system_prompt_key": "s3://chimera-tenants/acme/prompts/digest.md",
         "skills": ["email-reader", "summarizer"],
         "mcp_tools": ["outlook", "slack"],
         "model": "us.anthropic.claude-sonnet-4-6-v1:0",
@@ -289,7 +289,7 @@ email-digest and extract-tasks jobs):
     },
     "output": {
         "type": "s3",
-        "path": "s3://clawcore-tenants/acme/outputs/digests/{date}.md"
+        "path": "s3://chimera-tenants/acme/outputs/digests/{date}.md"
     },
     "notifications": {
         "slack_channel": "#daily-digest",
@@ -418,7 +418,7 @@ agent = Agent(
 
 **Tenant memory isolation:**
 - Each tenant gets a separate AgentCore Memory namespace
-- S3 prefix isolation: `s3://clawcore-tenants/{tenant_id}/memory/`
+- S3 prefix isolation: `s3://chimera-tenants/{tenant_id}/memory/`
 - DynamoDB partition: `PK: TENANT#{tenant_id} SK: MEMORY#{key}`
 - No cross-tenant memory access (enforced by IAM + Cedar)
 
@@ -667,12 +667,12 @@ See: [[AWS Bedrock AgentCore and Strands Agents/03-AgentCore-Multi-Tenancy-Deplo
 
 ```bash
 # Platform deployment
-npx cdk deploy ClawCorePlatformStack \
+npx cdk deploy ChimeraPlatformStack \
   --context environment=prod \
   --context region=us-west-2
 
 # Tenant onboarding
-npx cdk deploy ClawCoreTenantStack \
+npx cdk deploy ChimeraTenantStack \
   --context tenantId=acme \
   --context tier=premium \
   --context models=claude-sonnet,nova-lite
@@ -688,7 +688,7 @@ pulumi up --stack acme-tenant
 
 ## What This Architecture Preserves from OpenClaw
 
-| OpenClaw Feature | ClawCore Equivalent | Fidelity |
+| OpenClaw Feature | Chimera Equivalent | Fidelity |
 |-----------------|---------------------|----------|
 | Pi's 4-tool minimalism | Strands agent with read/write/edit/shell | High |
 | SKILL.md format | Same format, stored in S3 | Exact |

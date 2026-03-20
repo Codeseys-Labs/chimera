@@ -2,30 +2,30 @@
 tags:
   - research-rabbithole
   - architecture
-  - clawcore
+  - chimera
   - aws
   - implementation-plan
   - openclaw
   - bedrock
   - agentcore
 date: 2026-03-19
-topic: ClawCore Final Architecture Plan
+topic: Chimera Final Architecture Plan
 status: complete
 ---
 
-# ClawCore — Final Architecture Plan
+# Chimera — Final Architecture Plan
 
 > The definitive plan for building an AWS-native multi-tenant agent platform
 > that reproduces OpenClaw/NemoClaw capabilities using managed AWS services
 > and open-source components.
 
 This plan incorporates feedback from 6 specialist architecture reviews:
-- [[ClawCore-Architecture-Review-Security|Security Review]] — STRIDE threat model, 8-layer defense-in-depth
-- [[ClawCore-Architecture-Review-Cost-Scale|Cost & Scale Review]] — Pricing at 10/100/1000 tenants
-- [[ClawCore-Architecture-Review-Integration|Integration Review]] — Chat SDK, MCP, A2A, streaming
-- [[ClawCore-Architecture-Review-Platform-IaC|Platform & IaC Review]] — 8-stack CDK, GitOps, CI/CD
-- [[ClawCore-Architecture-Review-Multi-Tenant|Multi-Tenant Review]] — Silo/Pool/Hybrid, DynamoDB schemas
-- [[ClawCore-Architecture-Review-DevEx|Developer Experience Review]] — CLI, SDK, migration tools
+- [[Chimera-Architecture-Review-Security|Security Review]] — STRIDE threat model, 8-layer defense-in-depth
+- [[Chimera-Architecture-Review-Cost-Scale|Cost & Scale Review]] — Pricing at 10/100/1000 tenants
+- [[Chimera-Architecture-Review-Integration|Integration Review]] — Chat SDK, MCP, A2A, streaming
+- [[Chimera-Architecture-Review-Platform-IaC|Platform & IaC Review]] — 8-stack CDK, GitOps, CI/CD
+- [[Chimera-Architecture-Review-Multi-Tenant|Multi-Tenant Review]] — Silo/Pool/Hybrid, DynamoDB schemas
+- [[Chimera-Architecture-Review-DevEx|Developer Experience Review]] — CLI, SDK, migration tools
 
 Based on research across:
 - [[OpenClaw NemoClaw OpenFang/OpenClaw NemoClaw OpenFang Research Index|OpenClaw Research]] (8 docs, 6,991 lines)
@@ -60,7 +60,7 @@ Based on research across:
 ## 2. CDK Stack Architecture (from Platform Review)
 
 ```
-ClawCore/
+Chimera/
 ├── lib/
 │   ├── network-stack.ts          # VPC, subnets, NAT, VPC endpoints
 │   ├── data-stack.ts             # DynamoDB tables (6), S3 buckets, ElastiCache
@@ -74,7 +74,7 @@ ClawCore/
 │   ├── tenant-agent.ts           # L3: AgentCore + skills + cron + memory
 │   └── agent-observability.ts    # L3: per-tenant dashboards + alarms
 ├── bin/
-│   └── clawcore.ts               # App entry point
+│   └── chimera.ts               # App entry point
 └── cdk.json
 ```
 
@@ -101,17 +101,17 @@ graph TD
 
 | Table | PK | SK | Purpose |
 |-------|----|----|---------|
-| `clawcore-tenants` | `TENANT#{id}` | `META` | Tenant config, tier, feature flags |
-| `clawcore-sessions` | `TENANT#{id}` | `SESSION#{id}` | Active sessions, last activity |
-| `clawcore-skills` | `TENANT#{id}` | `SKILL#{name}` | Installed skills, versions, MCP endpoints |
-| `clawcore-rate-limits` | `TENANT#{id}` | `WINDOW#{timestamp}` | Token bucket state, request counts |
-| `clawcore-cost-tracking` | `TENANT#{id}` | `PERIOD#{yyyy-mm}` | Monthly cost accumulation per tenant |
-| `clawcore-audit` | `TENANT#{id}` | `EVENT#{timestamp}` | Security events, compliance audit trail |
+| `chimera-tenants` | `TENANT#{id}` | `META` | Tenant config, tier, feature flags |
+| `chimera-sessions` | `TENANT#{id}` | `SESSION#{id}` | Active sessions, last activity |
+| `chimera-skills` | `TENANT#{id}` | `SKILL#{name}` | Installed skills, versions, MCP endpoints |
+| `chimera-rate-limits` | `TENANT#{id}` | `WINDOW#{timestamp}` | Token bucket state, request counts |
+| `chimera-cost-tracking` | `TENANT#{id}` | `PERIOD#{yyyy-mm}` | Monthly cost accumulation per tenant |
+| `chimera-audit` | `TENANT#{id}` | `EVENT#{timestamp}` | Security events, compliance audit trail |
 
 ### Global Secondary Indexes
-- `clawcore-tenants` GSI1: `tier` → `tenantId` (query tenants by tier)
-- `clawcore-sessions` GSI1: `agentId` → `lastActivity` (find active agents)
-- `clawcore-skills` GSI1: `skillName` → `tenantId` (find skill usage across tenants)
+- `chimera-tenants` GSI1: `tier` → `tenantId` (query tenants by tier)
+- `chimera-sessions` GSI1: `agentId` → `lastActivity` (find active agents)
+- `chimera-skills` GSI1: `skillName` → `tenantId` (find skill usage across tenants)
 
 ---
 
@@ -165,34 +165,34 @@ Author submits skill
 
 ## 6. Developer Experience (from DevEx Review)
 
-### CLI: `clawcore`
+### CLI: `chimera`
 
 ```bash
 # Getting started (zero to first agent in 5 min)
-clawcore auth login
-clawcore agent init my-agent --template=chatbot
-clawcore agent run                    # Local dev with hot reload
-clawcore agent deploy --env=staging   # Deploy to AgentCore
+chimera auth login
+chimera agent init my-agent --template=chatbot
+chimera agent run                    # Local dev with hot reload
+chimera agent deploy --env=staging   # Deploy to AgentCore
 
 # Skills
-clawcore skill create my-skill
-clawcore skill test                   # Run in sandbox
-clawcore skill publish --marketplace  # Publish to marketplace
+chimera skill create my-skill
+chimera skill test                   # Run in sandbox
+chimera skill publish --marketplace  # Publish to marketplace
 
 # Cron jobs
-clawcore cron create daily-digest --schedule="0 8 * * MON-FRI"
-clawcore cron list
-clawcore cron logs daily-digest
+chimera cron create daily-digest --schedule="0 8 * * MON-FRI"
+chimera cron list
+chimera cron logs daily-digest
 
 # Channels
-clawcore channel add slack --token=$SLACK_TOKEN
-clawcore channel add discord --token=$DISCORD_TOKEN
-clawcore channel list
+chimera channel add slack --token=$SLACK_TOKEN
+chimera channel add discord --token=$DISCORD_TOKEN
+chimera channel list
 
 # Tenant management (admin)
-clawcore tenant create acme --tier=standard
-clawcore tenant config acme --model=claude-sonnet-4.6
-clawcore tenant usage acme
+chimera tenant create acme --tier=standard
+chimera tenant config acme --model=claude-sonnet-4.6
+chimera tenant usage acme
 ```
 
 ### Agent Definition (YAML-first, code escape hatch)
@@ -234,11 +234,11 @@ cron:
 
 ```bash
 # One-command migration (92% compatibility)
-clawcore migrate --from=openclaw --path=~/.openclaw
+chimera migrate --from=openclaw --path=~/.openclaw
 
 # Converts:
 # - openclaw.json → agent.yaml
-# - SKILL.md files → ClawCore skill format (identical)
+# - SKILL.md files → Chimera skill format (identical)
 # - MEMORY.md → AgentCore Memory import
 # - Channel configs → Chat SDK adapter configs
 # - Cron jobs → EventBridge schedules
@@ -285,7 +285,7 @@ User (Slack) → Chat SDK Bot (ECS Fargate)
 - [ ] Strands agent with 4 core tools (read, write, edit, shell)
 - [ ] AgentCore Memory integration (STM + LTM)
 - [ ] Basic SKILL.md loader from S3
-- [ ] `clawcore agent init/run/deploy` CLI commands
+- [ ] `chimera agent init/run/deploy` CLI commands
 - [ ] Local development mode with hot reload
 
 ### Phase 2: Chat Gateway (Week 5-6)
@@ -299,7 +299,7 @@ User (Slack) → Chat SDK Bot (ECS Fargate)
 ### Phase 3: Skills & Tools (Week 7-8)
 - [ ] Skill registry (S3 + DynamoDB metadata)
 - [ ] AgentCore Gateway MCP targets for skill tools
-- [ ] `clawcore skill create/test/publish` CLI
+- [ ] `chimera skill create/test/publish` CLI
 - [ ] Skill security pipeline (static analysis + sandbox test + signing)
 - [ ] 10 built-in skills (code-review, web-search, file-manager, etc.)
 
@@ -309,14 +309,14 @@ User (Slack) → Chat SDK Bot (ECS Fargate)
 - [ ] Cedar policy engine (tenant isolation)
 - [ ] Rate limiting (token bucket per tenant)
 - [ ] Cost tracking per tenant
-- [ ] `clawcore tenant create/config/usage` CLI
+- [ ] `chimera tenant create/config/usage` CLI
 - [ ] Tenant onboarding automation (Step Functions)
 
 ### Phase 5: Cron & Orchestration (Week 11-12)
 - [ ] EventBridge Scheduler for tenant cron jobs
 - [ ] Step Functions workflow for cron execution
 - [ ] Multi-agent patterns (Agents-as-Tools, Swarm)
-- [ ] `clawcore cron create/list/logs` CLI
+- [ ] `chimera cron create/list/logs` CLI
 - [ ] Self-scheduling agent capability (with Cedar guardrails)
 
 ### Phase 6: Self-Improving Infrastructure (Week 13-14)
@@ -384,12 +384,12 @@ User (Slack) → Chat SDK Bot (ECS Fargate)
 - [[AWS-Native-OpenClaw-Architecture-Synthesis|Architecture Synthesis]]
 
 ### Architecture Reviews
-- [[ClawCore-Architecture-Review-Security|Security Review]]
-- [[ClawCore-Architecture-Review-Cost-Scale|Cost & Scale Review]]
-- [[ClawCore-Architecture-Review-Integration|Integration Review]]
-- [[ClawCore-Architecture-Review-Platform-IaC|Platform & IaC Review]]
-- [[ClawCore-Architecture-Review-Multi-Tenant|Multi-Tenant Review]]
-- [[ClawCore-Architecture-Review-DevEx|Developer Experience Review]]
+- [[Chimera-Architecture-Review-Security|Security Review]]
+- [[Chimera-Architecture-Review-Cost-Scale|Cost & Scale Review]]
+- [[Chimera-Architecture-Review-Integration|Integration Review]]
+- [[Chimera-Architecture-Review-Platform-IaC|Platform & IaC Review]]
+- [[Chimera-Architecture-Review-Multi-Tenant|Multi-Tenant Review]]
+- [[Chimera-Architecture-Review-DevEx|Developer Experience Review]]
 
 ---
 

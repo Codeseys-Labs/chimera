@@ -2,30 +2,30 @@
 tags:
   - research-rabbithole
   - architecture
-  - clawcore
+  - chimera
   - skills
   - marketplace
   - security
   - ecosystem
 date: 2026-03-19
-topic: ClawCore Skill Ecosystem & Marketplace Design
+topic: Chimera Skill Ecosystem & Marketplace Design
 status: complete
 reviewer: Skill Ecosystem Designer
 ---
 
-# ClawCore Skill Ecosystem & Marketplace Design
+# Chimera Skill Ecosystem & Marketplace Design
 
-> Complete design for the ClawCore skill ecosystem: authoring format, lifecycle management,
+> Complete design for the Chimera skill ecosystem: authoring format, lifecycle management,
 > marketplace architecture, security pipeline, trust model, MCP integration, auto-generation,
 > cross-tenant sharing, and analytics. Incorporates lessons from ClawHavoc (1,184 malicious
 > skills) and OpenFang's WASM sandbox approach.
 >
 > Related: [[OpenClaw NemoClaw OpenFang/04-Skill-System-Tool-Creation|04-Skill-System-Tool-Creation]]
-> | [[ClawCore-Architecture-Review-Security]] | [[ClawCore-Architecture-Review-DevEx]]
+> | [[Chimera-Architecture-Review-Security]] | [[Chimera-Architecture-Review-DevEx]]
 
 ## Executive Summary
 
-The skill ecosystem is ClawCore's primary extensibility mechanism. Skills are self-contained
+The skill ecosystem is Chimera's primary extensibility mechanism. Skills are self-contained
 capability packages that extend agent behavior through instructions, tool definitions,
 and MCP server integrations. This design addresses three competing demands:
 
@@ -43,7 +43,7 @@ enforced by Cedar policies at runtime.
 
 ### 1.1 Format Overview
 
-Every ClawCore skill is defined by a `SKILL.md` file -- markdown with enhanced YAML frontmatter.
+Every Chimera skill is defined by a `SKILL.md` file -- markdown with enhanced YAML frontmatter.
 The format is backward-compatible with OpenClaw's SKILL.md (v1 skills load without modification)
 while adding security, testing, and dependency declarations.
 
@@ -95,7 +95,7 @@ dependencies:
 mcp_server:
   transport: stdio
   command: "python"
-  args: ["-m", "clawcore_skill_code_review"]
+  args: ["-m", "chimera_skill_code_review"]
   tools:
     - name: review_file
       description: "Review a single file for issues"
@@ -218,7 +218,7 @@ OpenClaw v1 SKILL.md files work without modification:
 - Missing `mcp_server` means instruction-only skill (no tool implementations)
 - `tools` field (v1) maps to `permissions.shell.allowed` + inferred tool list
 
-Migration tool: `clawcore skill migrate-v1 ./old-skill/SKILL.md`
+Migration tool: `chimera skill migrate-v1 ./old-skill/SKILL.md`
 
 ---
 
@@ -228,21 +228,21 @@ Migration tool: `clawcore skill migrate-v1 ./old-skill/SKILL.md`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Author: clawcore skill init
-    Author --> Test: clawcore skill test
+    [*] --> Author: chimera skill init
+    Author --> Test: chimera skill test
     Test --> Author: Tests fail
-    Test --> Review: clawcore skill publish --marketplace
+    Test --> Review: chimera skill publish --marketplace
     Review --> Author: Review rejected
     Review --> Published: Approved
-    Test --> Private: clawcore skill publish (tenant-only)
-    Private --> Published: clawcore skill publish --marketplace
-    Published --> Installed: clawcore skill install
+    Test --> Private: chimera skill publish (tenant-only)
+    Private --> Published: chimera skill publish --marketplace
+    Published --> Installed: chimera skill install
     Installed --> Running: Agent loads skill
     Running --> Installed: Session ends
     Published --> Updated: New version published
     Updated --> Review: Re-review triggered
-    Published --> Deprecated: clawcore skill deprecate
-    Deprecated --> [*]: clawcore skill delete
+    Published --> Deprecated: chimera skill deprecate
+    Deprecated --> [*]: chimera skill delete
 ```
 
 ### 2.2 Stage Details
@@ -251,7 +251,7 @@ stateDiagram-v2
 
 ```bash
 # Initialize from template
-clawcore skill init my-skill --template tool-skill
+chimera skill init my-skill --template tool-skill
 # Creates:
 #   skills/my-skill/
 #     SKILL.md              <- Skill definition
@@ -274,7 +274,7 @@ clawcore skill init my-skill --template tool-skill
 
 ```bash
 # Run automated tests
-clawcore skill test my-skill
+chimera skill test my-skill
 # > Running 3 test cases against us.anthropic.claude-sonnet-4-6-v1:0...
 # > [PASS] basic_review (4.2s, $0.003)
 # > [PASS] security_scan (3.8s, $0.004)
@@ -282,13 +282,13 @@ clawcore skill test my-skill
 # > 2/3 passed | Total: $0.011
 
 # Interactive testing (chat with agent that has only this skill)
-clawcore skill test my-skill --interactive
+chimera skill test my-skill --interactive
 
 # Test with a different model
-clawcore skill test my-skill --model us.amazon.nova-pro-v1:0
+chimera skill test my-skill --model us.amazon.nova-pro-v1:0
 
 # Permission validation (check declared vs actual permissions used)
-clawcore skill verify my-skill
+chimera skill verify my-skill
 # > Declared permissions:
 # >   filesystem.read: ["**/*.py"]
 # >   shell.allowed: ["grep", "wc"]
@@ -302,7 +302,7 @@ clawcore skill verify my-skill
 
 ```bash
 # Submit for marketplace review
-clawcore skill publish my-skill --marketplace
+chimera skill publish my-skill --marketplace
 # > Submitting code-review@2.1.0 for marketplace review...
 # > Stage 1/7: Static analysis ............ PASS
 # > Stage 2/7: Dependency audit ........... PASS
@@ -313,7 +313,7 @@ clawcore skill publish my-skill --marketplace
 # > Stage 7/7: Community review ........... QUEUED
 # >
 # > Skill queued for human review. Estimated: 24-48 hours.
-# > Track status: clawcore skill status my-skill --marketplace
+# > Track status: chimera skill status my-skill --marketplace
 ```
 
 #### Stage 4: Published
@@ -330,16 +330,16 @@ Published skills appear in the marketplace with metadata:
 
 ```bash
 # Install latest
-clawcore skill install code-review
+chimera skill install code-review
 
 # Install specific version
-clawcore skill install code-review@2.1.0
+chimera skill install code-review@2.1.0
 
 # Install from tenant registry (private)
-clawcore skill install code-review --source tenant
+chimera skill install code-review --source tenant
 
 # List installed skills
-clawcore skill list
+chimera skill list
 # NAME            VERSION   TRUST      SOURCE        UPDATED
 # code-review     2.1.0     verified   marketplace   2d ago
 # acme-policies   1.0.0     private    tenant        5h ago
@@ -360,29 +360,29 @@ Cedar policies enforce declared permissions at every tool invocation.
 
 ```bash
 # Check for updates
-clawcore skill outdated
+chimera skill outdated
 # NAME          CURRENT   LATEST   TRUST
 # code-review   2.0.0     2.1.0    verified
 # email-reader  3.2.0     3.2.1    platform
 
 # Update single skill
-clawcore skill update code-review
+chimera skill update code-review
 
 # Update all (respects version pins)
-clawcore skill update --all
+chimera skill update --all
 
 # Pin version (prevent auto-update)
-clawcore skill pin code-review@2.1.0
+chimera skill pin code-review@2.1.0
 ```
 
 #### Stage 8: Deprecate
 
 ```bash
 # Deprecate (soft -- warns installers, existing installs continue)
-clawcore skill deprecate my-skill --message "Use code-review-v2 instead"
+chimera skill deprecate my-skill --message "Use code-review-v2 instead"
 
 # Delete (hard -- requires all tenants to uninstall first)
-clawcore skill delete my-skill --confirm
+chimera skill delete my-skill --confirm
 ```
 
 ### 2.3 Lifecycle API Endpoints
@@ -452,7 +452,7 @@ graph TB
 
 ### 3.2 DynamoDB Table Designs
 
-#### Skills Table (`clawcore-skills`)
+#### Skills Table (`chimera-skills`)
 
 | Attribute | Type | Key | Description |
 |-----------|------|-----|-------------|
@@ -492,7 +492,7 @@ graph TB
 - PK: `TRUST#{trust_level}`, SK: `UPDATED#{iso-timestamp}`
 - Use: List skills by trust tier, sorted by recency
 
-#### Skill Installs Table (`clawcore-skill-installs`)
+#### Skill Installs Table (`chimera-skill-installs`)
 
 | Attribute | Type | Key | Description |
 |-----------|------|-----|-------------|
@@ -506,7 +506,7 @@ graph TB
 | last_used | S | | Last invocation timestamp |
 | use_count | N | | Total invocations |
 
-#### Skill Reviews Table (`clawcore-skill-reviews`)
+#### Skill Reviews Table (`chimera-skill-reviews`)
 
 | Attribute | Type | Key | Description |
 |-----------|------|-----|-------------|
@@ -519,7 +519,7 @@ graph TB
 ### 3.3 S3 Bucket Structure
 
 ```
-clawcore-skill-bundles/
+chimera-skill-bundles/
   skills/
     {name}/
       {version}/
@@ -540,7 +540,7 @@ Skill discovery uses a two-tier search strategy:
 **Tier 1: Semantic search** via Bedrock Knowledge Base
 - Skill descriptions and SKILL.md content are embedded using Titan Embeddings V2
 - Natural language queries return semantically relevant results
-- Powers the `clawcore skill search "natural language query"` experience
+- Powers the `chimera skill search "natural language query"` experience
 
 **Tier 2: Full-text search** via OpenSearch
 - Name, tag, and category matching
@@ -549,18 +549,18 @@ Skill discovery uses a two-tier search strategy:
 
 ```bash
 # Semantic search
-clawcore skill search "review code for security vulnerabilities"
+chimera skill search "review code for security vulnerabilities"
 # > code-review        v2.1.0  verified   "Automated code review with security scanning"
 # > security-scanner   v1.4.0  verified   "SAST/DAST security analysis"
 # > owasp-checker      v0.9.0  community  "OWASP Top 10 vulnerability detection"
 
 # Filtered search
-clawcore skill search "email" --category communication --trust verified
+chimera skill search "email" --category communication --trust verified
 # > email-reader       v3.2.1  verified   "Read and summarize emails"
 # > email-composer     v2.0.0  verified   "Draft and send emails"
 
 # Browse by category
-clawcore skill browse --category developer-tools --sort downloads
+chimera skill browse --category developer-tools --sort downloads
 ```
 
 ### 3.5 Skill Categories (Fixed Taxonomy)
@@ -716,7 +716,7 @@ Dual-signature chain:
 ```
 
 **Key management:**
-- Author keys: Ed25519 keypair generated at `clawcore auth generate-key`, public key registered with account
+- Author keys: Ed25519 keypair generated at `chimera auth generate-key`, public key registered with account
 - Platform key: AWS KMS-backed Ed25519 key, rotated quarterly
 - Signature verification is mandatory for marketplace skills, optional for tenant-private skills
 
@@ -744,7 +744,7 @@ Post-publication monitoring:
 
 ```bash
 # Report a suspicious skill
-clawcore skill report code-review --reason "Attempts to read ~/.ssh/id_rsa"
+chimera skill report code-review --reason "Attempts to read ~/.ssh/id_rsa"
 
 # Report flow:
 # 1. Report logged to DynamoDB with reporter ID
@@ -844,7 +844,7 @@ clawcore skill report code-review --reason "Attempts to read ~/.ssh/id_rsa"
 
 ```
 Tier 0: PLATFORM
-  |  Built-in skills maintained by ClawCore team
+  |  Built-in skills maintained by Chimera team
   |  Full access to all tools and memory
   |  Audited, signed by platform key
   |  Examples: file-io, shell, memory-manager
@@ -986,7 +986,7 @@ forbid(
 graph LR
     EXP[Experimental] -->|Automated scan passes| COM[Community]
     COM -->|Human review + 100 installs + 30 days| VER[Verified]
-    VER -.->|ClawCore team adoption| PLAT[Platform]
+    VER -.->|Chimera team adoption| PLAT[Platform]
 
     VER -->|Scan regression| COM
     COM -->|Malicious report confirmed| QUAR[Quarantined]
@@ -999,7 +999,7 @@ graph LR
 **Promotion criteria:**
 - Experimental -> Community: All 7 scan stages pass
 - Community -> Verified: 100+ installs, 30+ days published, 4.0+ rating, human security review passes
-- Verified -> Platform: ClawCore team decides to adopt and maintain (rare)
+- Verified -> Platform: Chimera team decides to adopt and maintain (rare)
 - Demotion: Any scan regression, confirmed malicious report, or author key compromise
 
 ---
@@ -1014,7 +1014,7 @@ is discoverable and invocable via standard MCP.
 
 ```mermaid
 sequenceDiagram
-    participant Agent as ClawCore Agent
+    participant Agent as Chimera Agent
     participant GW as AgentCore Gateway
     participant REG as Skill Registry
     participant MCP as Skill MCP Server
@@ -1128,7 +1128,7 @@ class PatternDetector:
             tenant_id=tenant_id,
             message=f"I noticed you frequently {summarize_patterns(patterns)}. "
                     f"I've drafted a skill to automate this. "
-                    f"Review it: `clawcore skill review-proposal {skill_md.name}`",
+                    f"Review it: `chimera skill review-proposal {skill_md.name}`",
         )
 ```
 
@@ -1136,22 +1136,22 @@ class PatternDetector:
 
 ```bash
 # List pending skill proposals
-clawcore skill proposals
+chimera skill proposals
 # NAME                  CONFIDENCE   PATTERN COUNT   PROPOSED
 # csv-data-pipeline     92%          7 occurrences   2h ago
 # weekly-report-gen     85%          4 occurrences   1d ago
 
 # Review a proposal
-clawcore skill review-proposal csv-data-pipeline
+chimera skill review-proposal csv-data-pipeline
 # > Proposed SKILL.md:
 # > (displays generated SKILL.md for review)
 # >
 # > Accept? [y/n/edit]
 
 # Accept and install
-clawcore skill accept-proposal csv-data-pipeline
+chimera skill accept-proposal csv-data-pipeline
 # > Skill "csv-data-pipeline" created in skills/ directory
-# > Run `clawcore skill test csv-data-pipeline` to validate
+# > Run `chimera skill test csv-data-pipeline` to validate
 ```
 
 ### 7.3 Self-Evolution Integration
@@ -1246,10 +1246,10 @@ For multi-tenant organizations (e.g., a company with separate tenants per team):
 
 ```bash
 # Share skill within organization
-clawcore skill share acme-policies --org acme-corp
+chimera skill share acme-policies --org acme-corp
 
 # Organization members can install without marketplace review
-clawcore skill install acme-policies --source org
+chimera skill install acme-policies --source org
 ```
 
 ---
@@ -1300,7 +1300,7 @@ def calculate_quality_score(skill_name: str) -> int:
 Skill authors see analytics via CLI or web UI:
 
 ```bash
-clawcore skill analytics code-review
+chimera skill analytics code-review
 # code-review v2.1.0 | Trust: Verified | Quality: 87/100
 #
 # Installs:       1,247 total | 892 active (30d)
@@ -1335,7 +1335,7 @@ Platform operators see:
 name: aws-well-architected
 version: 1.0.0
 description: "Guide conversations using AWS Well-Architected Framework pillars"
-author: clawcore-team
+author: chimera-team
 tags: [aws, architecture, best-practices]
 category: cloud-ops
 permissions:
@@ -1399,7 +1399,7 @@ permissions:
   memory:
     read: true
     write: ["repository_context"]
-  secrets: ["/clawcore/tenant-*/github-pat"]
+  secrets: ["/chimera/tenant-*/github-pat"]
 dependencies:
   mcp_servers:
     - name: github-mcp
@@ -1506,11 +1506,11 @@ Activate when users want an end-to-end code quality pipeline.
 ## Related Documents
 
 - [[OpenClaw NemoClaw OpenFang/04-Skill-System-Tool-Creation|04-Skill-System-Tool-Creation]] -- OpenClaw skill system and ClawHavoc incident
-- [[ClawCore-Architecture-Review-Security]] -- Security architecture including skill trust tiers
-- [[ClawCore-Architecture-Review-DevEx]] -- Developer experience including skill authoring workflow
+- [[Chimera-Architecture-Review-Security]] -- Security architecture including skill trust tiers
+- [[Chimera-Architecture-Review-DevEx]] -- Developer experience including skill authoring workflow
 - [[AWS-Native-OpenClaw-Architecture-Synthesis]] -- Full platform architecture
 
 ---
 
-*Skill ecosystem design completed 2026-03-19 by Skill Ecosystem Designer agent on team clawcore-synthesis.*
+*Skill ecosystem design completed 2026-03-19 by Skill Ecosystem Designer agent on team chimera-synthesis.*
 *Incorporates lessons from: ClawHavoc (Koi Security), OpenFang IronClaw, NemoClaw OpenShell, AWS Well-Architected Security Pillar.*

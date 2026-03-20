@@ -1988,5 +1988,5 @@ class EvolutionMonitor:
 
 **Related Documents:**
 - [[05-Self-Modifying-Infra-Swarm]] — infrastructure evolution patterns
-- [[ClawCore-Self-Evolution-Engine]] (architecture reviews) — complete evolution engine design
+- [[Chimera-Self-Evolution-Engine]] (architecture reviews) — complete evolution engine design
 - [[04-Self-Modifying-IaC-Patterns]] (enhancement series) — IaC evolution foundations
