@@ -259,7 +259,12 @@ import { Construct } from 'constructs';
 
 interface PlatformRuntimeStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
-  platformTable: dynamodb.ITable;
+  tenantsTable: dynamodb.ITable;
+  sessionsTable: dynamodb.ITable;
+  skillsTable: dynamodb.ITable;
+  rateLimitsTable: dynamodb.ITable;
+  costTrackingTable: dynamodb.ITable;
+  auditTable: dynamodb.ITable;
   tenantBucket: s3.IBucket;
   skillsBucket: s3.IBucket;
 }
@@ -303,7 +308,12 @@ export class PlatformRuntimeStack extends cdk.Stack {
     });
 
     // Grant runtime access to data stores
-    props.platformTable.grantReadWriteData(this.agentRuntime);
+    props.tenantsTable.grantReadWriteData(this.agentRuntime);
+    props.sessionsTable.grantReadWriteData(this.agentRuntime);
+    props.skillsTable.grantReadWriteData(this.agentRuntime);
+    props.rateLimitsTable.grantReadWriteData(this.agentRuntime);
+    props.costTrackingTable.grantReadWriteData(this.agentRuntime);
+    props.auditTable.grantReadWriteData(this.agentRuntime);
     props.tenantBucket.grantReadWrite(this.agentRuntime);
     props.skillsBucket.grantRead(this.agentRuntime);
   }
@@ -337,7 +347,12 @@ export interface TenantAgentProps {
   skills?: string[];
   cronJobs?: CronJobConfig[];
   memoryStrategies?: ('SUMMARY' | 'SEMANTIC_MEMORY' | 'USER_PREFERENCE')[];
-  platformTable: dynamodb.ITable;
+  tenantsTable: dynamodb.ITable;
+  sessionsTable: dynamodb.ITable;
+  skillsTable: dynamodb.ITable;
+  rateLimitsTable: dynamodb.ITable;
+  costTrackingTable: dynamodb.ITable;
+  auditTable: dynamodb.ITable;
   tenantBucket: s3.IBucket;
   poolRuntime: agentcore.Runtime;
   eventBus: events.IEventBus;
@@ -367,15 +382,27 @@ export class TenantAgent extends Construct {
     });
 
     // DynamoDB access scoped to tenant's partition key prefix
-    props.platformTable.grant(this.tenantRole,
-      'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:UpdateItem',
-      'dynamodb:DeleteItem',
-    );
+    const tables = [
+      props.tenantsTable,
+      props.sessionsTable,
+      props.skillsTable,
+      props.rateLimitsTable,
+      props.costTrackingTable,
+      props.auditTable,
+    ];
+
+    tables.forEach(table => {
+      table.grant(this.tenantRole,
+        'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+      );
+    });
+
     // Condition: PK must start with TENANT#{tenantId}
     (this.tenantRole as iam.Role).addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.DENY,
       actions: ['dynamodb:*'],
-      resources: [props.platformTable.tableArn],
+      resources: tables.map(t => t.tableArn),
       conditions: {
         'ForAllValues:StringNotLike': {
           'dynamodb:LeadingKeys': [`TENANT#${props.tenantId}*`],
@@ -751,7 +778,12 @@ const dataStack = new DataStack(app, `Chimera-${env}-Data`, { vpc: networkStack.
 const securityStack = new SecurityStack(app, `Chimera-${env}-Security`, { env: envConfig });
 const runtimeStack = new PlatformRuntimeStack(app, `Chimera-${env}-Runtime`, {
   vpc: networkStack.vpc,
-  platformTable: dataStack.platformTable,
+  tenantsTable: dataStack.tenantsTable,
+  sessionsTable: dataStack.sessionsTable,
+  skillsTable: dataStack.skillsTable,
+  rateLimitsTable: dataStack.rateLimitsTable,
+  costTrackingTable: dataStack.costTrackingTable,
+  auditTable: dataStack.auditTable,
   tenantBucket: dataStack.tenantBucket,
   skillsBucket: dataStack.skillsBucket,
   env: envConfig,
@@ -762,7 +794,12 @@ for (const file of tenantFiles) {
   const config = yaml.parse(fs.readFileSync(path.join(tenantsDir, file), 'utf8'));
   new TenantStack(app, `Chimera-${env}-Tenant-${config.tenantId}`, {
     tenantConfig: config,
-    platformTable: dataStack.platformTable,
+    tenantsTable: dataStack.tenantsTable,
+    sessionsTable: dataStack.sessionsTable,
+    skillsTable: dataStack.skillsTable,
+    rateLimitsTable: dataStack.rateLimitsTable,
+    costTrackingTable: dataStack.costTrackingTable,
+    auditTable: dataStack.auditTable,
     tenantBucket: dataStack.tenantBucket,
     poolRuntime: runtimeStack.agentRuntime,
     eventBus: runtimeStack.eventBus,
@@ -1106,7 +1143,12 @@ plan.addRule(new backup.BackupPlanRule({
 // Protect DynamoDB and EFS
 plan.addSelection('DataResources', {
   resources: [
-    backup.BackupResource.fromDynamoDbTable(platformTable),
+    backup.BackupResource.fromDynamoDbTable(tenantsTable),
+    backup.BackupResource.fromDynamoDbTable(sessionsTable),
+    backup.BackupResource.fromDynamoDbTable(skillsTable),
+    backup.BackupResource.fromDynamoDbTable(rateLimitsTable),
+    backup.BackupResource.fromDynamoDbTable(costTrackingTable),
+    backup.BackupResource.fromDynamoDbTable(auditTable),
     backup.BackupResource.fromEfsFileSystem(agentWorkspace),
   ],
 });
@@ -1157,14 +1199,16 @@ Secondary: us-east-1 (warm standby)
 
 ```typescript
 // DataStack modification for multi-region
-const platformTable = new dynamodb.Table(this, 'PlatformTable', {
-  tableName: 'chimera-platform',
+// Example: TenantsTable with global replication (apply same pattern to all 6 tables)
+const tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
+  tableName: 'chimera-tenants',
   partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
   sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
   billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
   replicationRegions: ['us-east-1'],  // Global tables for DR
   pointInTimeRecovery: true,
 });
+// Apply same replicationRegions to sessionsTable, skillsTable, rateLimitsTable, costTrackingTable, auditTable
 ```
 
 ### Failover Procedure
