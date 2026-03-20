@@ -1,0 +1,119 @@
+[
+  {
+    "tenantId": "tenant-acme-001",
+    "profile": {
+      "name": "ACME Corporation",
+      "tier": "advanced",
+      "billingEmail": "billing@acme.corp",
+      "technicalContact": "admin@acme.corp",
+      "createdAt": "2026-01-15T10:00:00Z",
+      "status": "ACTIVE"
+    },
+    "config": {
+      "defaultModel": "us.anthropic.claude-sonnet-4-6-v1:0",
+      "memoryStrategy": ["SUMMARY", "USER_PREFERENCE", "SEMANTIC_MEMORY"],
+      "rateLimitRpm": 500,
+      "monthlyQuotaUsd": 5000,
+      "regions": ["us-east-1", "us-west-2"],
+      "features": {
+        "multiAgentOrchestration": true,
+        "skillMarketplace": true,
+        "evolutionModule": false,
+        "customModels": true
+      }
+    },
+    "billing": {
+      "plan": "advanced",
+      "monthlySpend": 1247.32,
+      "spendLimit": 5000,
+      "alertThresholds": [3000, 4000, 4500],
+      "paymentMethod": "invoice"
+    },
+    "quota": {
+      "monthlyTokens": 50000000,
+      "tokensUsed": 12340000,
+      "concurrentSessions": 100,
+      "activeSessions": 12,
+      "skillInstalls": 50,
+      "skillsInstalled": 23
+    }
+  },
+  {
+    "tenantId": "tenant-startup-002",
+    "profile": {
+      "name": "StartupCo",
+      "tier": "basic",
+      "billingEmail": "founders@startup.co",
+      "technicalContact": "dev@startup.co",
+      "createdAt": "2026-02-01T14:30:00Z",
+      "status": "ACTIVE"
+    },
+    "config": {
+      "defaultModel": "us.anthropic.claude-haiku-4-5-20251001",
+      "memoryStrategy": ["SUMMARY"],
+      "rateLimitRpm": 100,
+      "monthlyQuotaUsd": 500,
+      "regions": ["us-east-1"],
+      "features": {
+        "multiAgentOrchestration": false,
+        "skillMarketplace": true,
+        "evolutionModule": false,
+        "customModels": false
+      }
+    },
+    "billing": {
+      "plan": "basic",
+      "monthlySpend": 87.45,
+      "spendLimit": 500,
+      "alertThresholds": [300, 400, 450],
+      "paymentMethod": "credit_card"
+    },
+    "quota": {
+      "monthlyTokens": 5000000,
+      "tokensUsed": 872000,
+      "concurrentSessions": 10,
+      "activeSessions": 3,
+      "skillInstalls": 10,
+      "skillsInstalled": 7
+    }
+  },
+  {
+    "tenantId": "tenant-test-001",
+    "profile": {
+      "name": "Test Tenant (Local Dev)",
+      "tier": "advanced",
+      "billingEmail": "test@example.com",
+      "technicalContact": "dev@example.com",
+      "createdAt": "2026-03-20T00:00:00Z",
+      "status": "ACTIVE"
+    },
+    "config": {
+      "defaultModel": "us.anthropic.claude-sonnet-4-6-v1:0",
+      "memoryStrategy": ["SUMMARY", "USER_PREFERENCE", "SEMANTIC_MEMORY"],
+      "rateLimitRpm": 1000,
+      "monthlyQuotaUsd": 10000,
+      "regions": ["us-east-1"],
+      "features": {
+        "multiAgentOrchestration": true,
+        "skillMarketplace": true,
+        "evolutionModule": true,
+        "customModels": true
+      }
+    },
+    "billing": {
+      "plan": "test",
+      "monthlySpend": 0,
+      "spendLimit": 10000,
+      "alertThresholds": [5000, 7500, 9000],
+      "paymentMethod": "none"
+    },
+    "quota": {
+      "monthlyTokens": 100000000,
+      "tokensUsed": 0,
+      "concurrentSessions": 1000,
+      "activeSessions": 0,
+      "skillInstalls": 1000,
+      "skillsInstalled": 0
+    }
+  }
+]

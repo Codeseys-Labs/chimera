@@ -1,0 +1,62 @@
+# AWS Chimera - mise (formerly rtx) configuration
+# Tool version management for consistent development environments
+# https://mise.jdx.dev/
+
+[tools]
+# Node.js (required for AWS CDK and some tooling)
+node = "20.11.0"
+
+# Bun (primary runtime and package manager)
+bun = "1.1.3"
+
+# AWS CLI (for LocalStack and production deployment)
+awscli = "latest"
+
+# Terraform (optional, for IaC comparison)
+# terraform = "1.7.0"
+
+[env]
+# Project root
+_.file = ".env"
+
+# Bun environment
+BUN_INSTALL = "$HOME/.bun"
+
+# AWS LocalStack settings (for local development)
+AWS_ENDPOINT_URL = "http://localhost:4566"
+AWS_ACCESS_KEY_ID = "test"
+AWS_SECRET_ACCESS_KEY = "test"
+AWS_DEFAULT_REGION = "us-east-1"
+
+# DynamoDB Local
+DYNAMODB_ENDPOINT = "http://localhost:8000"
+
+[tasks.setup]
+description = "Initial project setup"
+run = [
+    "bun install",
+    "cp .env.example .env",
+    "echo '✅ Setup complete. Run: make start'"
+]
+
+[tasks.dev]
+description = "Start local development environment"
+run = "make start && make dev"
+
+[tasks.test]
+description = "Run all tests"
+run = "bun run test:all"
+
+[tasks.check]
+description = "Run quality gates (lint + typecheck + test)"
+run = "make check"
+
+[tasks.clean]
+description = "Clean build artifacts and dependencies"
+run = [
+    "rm -rf node_modules",
+    "rm -rf packages/*/dist",
+    "rm -rf packages/*/node_modules",
+    "rm -rf infra/cdk.out",
+    "make clean"
+]
