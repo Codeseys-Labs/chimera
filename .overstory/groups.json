@@ -23,5 +23,17 @@
 		"status": "active",
 		"createdAt": "2026-03-20T00:06:47.420Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-2947bf59",
+		"name": "phase0-infra-batch",
+		"memberIssueIds": [
+			"chimera-f636",
+			"chimera-bd8e",
+			"chimera-1912"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T04:15:56.508Z",
+		"completedAt": null
 	}
 ]
