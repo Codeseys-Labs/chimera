@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
 import { NetworkStack } from '../lib/network-stack';
@@ -10,6 +8,7 @@ import { ApiStack } from '../lib/api-stack';
 import { SkillPipelineStack } from '../lib/skill-pipeline-stack';
 import { ChatStack } from '../lib/chat-stack';
 import { PipelineStack } from '../lib/pipeline-stack';
+import { OrchestrationStack } from '../lib/orchestration-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -115,7 +114,19 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 
-// --- Stack 8: CI/CD Pipeline ---
+// --- Stack 8: Orchestration ---
+// EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
+// Supports swarm, workflow, and graph orchestration patterns.
+// Depends on SecurityStack for KMS encryption.
+const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
+  env: envConfig,
+  description: 'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
+  envName,
+  platformKey: securityStack.platformKey,
+});
+orchestrationStack.addDependency(securityStack);
+
+// --- Stack 9: CI/CD Pipeline ---
 // CodePipeline with multi-stage canary deployment: GitHub source -> Build/Test -> Canary -> Progressive Rollout.
 // Independent stack, can be deployed separately from application stacks.
 const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
@@ -128,7 +139,7 @@ const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
 });
 
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, pipelineStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, pipelineStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -142,6 +153,7 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
 // SkillPipelineStack exports state machine ARN/name
 // ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
+// OrchestrationStack exports event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN
 // PipelineStack exports pipeline ARN/name, artifact bucket name, orchestration state machine ARN, alarm topic ARN
 
 app.synth();
