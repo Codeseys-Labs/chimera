@@ -1,9 +1,9 @@
 ---
-title: "ClawCore Enhancement: Self-Modifying IaC Patterns"
-tags: [clawcore, iac, cdk, opentofu, pulumi, self-modifying, cedar]
+title: "Chimera Enhancement: Self-Modifying IaC Patterns"
+tags: [chimera, iac, cdk, opentofu, pulumi, self-modifying, cedar]
 created: 2026-03-19
 status: complete
-series: ClawCore Enhancement Series
+series: Chimera Enhancement Series
 part: 4
 ---
 
@@ -13,11 +13,11 @@ part: 4
 
 Traditional Infrastructure as Code assumes a human writes the definitions, reviews the diff, and deploys the change. Agent platforms break this assumption: the agents themselves need infrastructure -- new DynamoDB tables for memory, EventBridge rules for cron jobs, Lambda functions for tools, S3 prefixes for artifacts -- and those needs change at runtime based on tenant behavior, skill installation, and self-evolution decisions.
 
-**Self-modifying IaC** is the pattern where agents propose, validate, and (within policy bounds) apply changes to their own infrastructure definitions through a GitOps workflow. This document provides the complete implementation blueprint for ClawCore's self-modification pipeline.
+**Self-modifying IaC** is the pattern where agents propose, validate, and (within policy bounds) apply changes to their own infrastructure definitions through a GitOps workflow. This document provides the complete implementation blueprint for Chimera's self-modification pipeline.
 
 ### Why This Matters
 
-| Traditional IaC | Self-Modifying IaC (ClawCore) |
+| Traditional IaC | Self-Modifying IaC (Chimera) |
 |----------------|-------------------------------|
 | Human writes CDK/HCL, reviews PR, deploys | Agent generates YAML config change, Cedar validates, pipeline deploys |
 | Change frequency: weekly/monthly | Change frequency: per-tenant, potentially daily |
@@ -34,13 +34,13 @@ Traditional Infrastructure as Code assumes a human writes the definitions, revie
 5. **Everything is auditable and reversible.** Pre-change snapshots in S3, audit events in DynamoDB, automatic rollback on health check failure.
 
 > [!tip] Related Documents
-> - [[ClawCore-Self-Evolution-Engine]] -- full evolution engine design including prompt/model/memory evolution
+> - [[Chimera-Self-Evolution-Engine]] -- full evolution engine design including prompt/model/memory evolution
 > - [[AWS Bedrock AgentCore and Strands Agents/08-IaC-Patterns-Agent-Platforms]] -- CDK, OpenTofu, Pulumi comparison
-> - [[ClawCore-Architecture-Review-Platform-IaC]] -- stack decomposition and pipeline design
+> - [[Chimera-Architecture-Review-Platform-IaC]] -- stack decomposition and pipeline design
 
 ## 2. Three IaC Layers
 
-ClawCore separates infrastructure into three layers with distinct ownership, change frequency, and approval gates. This separation is the foundation that makes self-modification safe.
+Chimera separates infrastructure into three layers with distinct ownership, change frequency, and approval gates. This separation is the foundation that makes self-modification safe.
 
 ```mermaid
 graph TB
@@ -297,14 +297,14 @@ def manage_infrastructure(
     # 2. Cedar policy authorization
     avp = boto3.client("verifiedpermissions")
     auth_result = avp.is_authorized(
-        policyStoreId="clawcore-policies",
-        principal={"entityType": "ClawCore::Agent", "entityId": tenant_id},
+        policyStoreId="chimera-policies",
+        principal={"entityType": "Chimera::Agent", "entityId": tenant_id},
         action={
-            "actionType": "ClawCore::Action",
+            "actionType": "Chimera::Action",
             "actionId": "propose_infra_change",
         },
         resource={
-            "entityType": "ClawCore::TenantConfig",
+            "entityType": "Chimera::TenantConfig",
             "entityId": f"{tenant_id}/config",
         },
         context={
@@ -331,7 +331,7 @@ def manage_infrastructure(
     codecommit = boto3.client("codecommit")
     try:
         file_resp = codecommit.get_file(
-            repositoryName="clawcore-infra",
+            repositoryName="chimera-infra",
             filePath=f"tenants/{tenant_id}.yaml",
         )
         current_yaml = yaml.safe_load(file_resp["fileContent"].decode())
@@ -370,11 +370,11 @@ def manage_infrastructure(
         }
 
     # 9. Create branch, commit, open PR
-    main_head = _get_main_head(codecommit, "clawcore-infra")
+    main_head = _get_main_head(codecommit, "chimera-infra")
     branch_name = f"tenant/{tenant_id}/{action}/{int(time.time())}"
 
     codecommit.create_branch(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         branchName=branch_name,
         commitId=main_head,
     )
@@ -386,7 +386,7 @@ def manage_infrastructure(
     )
 
     codecommit.put_file(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         branchName=branch_name,
         fileContent=yaml.dump(proposed_yaml).encode(),
         filePath=f"tenants/{tenant_id}.yaml",
@@ -403,7 +403,7 @@ def manage_infrastructure(
 
     if can_auto_merge:
         codecommit.merge_branches_by_fast_forward(
-            repositoryName="clawcore-infra",
+            repositoryName="chimera-infra",
             sourceCommitSpecifier=branch_name,
             destinationCommitSpecifier="main",
         )
@@ -426,7 +426,7 @@ def manage_infrastructure(
                 f"```diff\n{diff}\n```"
             ),
             targets=[{
-                "repositoryName": "clawcore-infra",
+                "repositoryName": "chimera-infra",
                 "sourceReference": branch_name,
                 "destinationReference": "main",
             }],
@@ -519,7 +519,7 @@ for (const file of tenantFiles) {
     fs.readFileSync(path.join(tenantsDir, file), 'utf8')
   );
 
-  new TenantStack(app, `ClawCore-${env}-Tenant-${config.tenantId}`, {
+  new TenantStack(app, `Chimera-${env}-Tenant-${config.tenantId}`, {
     tenantConfig: config,
     platformTable: dataStack.platformTable,
     tenantBucket: dataStack.tenantBucket,
@@ -530,11 +530,11 @@ for (const file of tenantFiles) {
 }
 ```
 
-This means the pipeline only needs to `cdk deploy ClawCore-prod-Tenant-acme` when `tenants/acme.yaml` changes -- other tenant stacks are untouched.
+This means the pipeline only needs to `cdk deploy Chimera-prod-Tenant-acme` when `tenants/acme.yaml` changes -- other tenant stacks are untouched.
 
 ## 4. OpenTofu/Pulumi Alternatives
 
-While ClawCore's primary recommendation is AWS CDK (for first-class AgentCore L2 construct support), the self-modification pattern works with any IaC tool. This section evaluates OpenTofu and Pulumi as alternatives, with specific attention to how each handles the self-modification workflow.
+While Chimera's primary recommendation is AWS CDK (for first-class AgentCore L2 construct support), the self-modification pattern works with any IaC tool. This section evaluates OpenTofu and Pulumi as alternatives, with specific attention to how each handles the self-modification workflow.
 
 ### Comparison Matrix
 
@@ -609,10 +609,10 @@ budget_limit_monthly_usd = 500
 # backend.tf
 terraform {
   backend "s3" {
-    bucket         = "clawcore-tofu-state"
+    bucket         = "chimera-tofu-state"
     key            = "tenants/${var.tenant_id}/terraform.tfstate"
     region         = "us-west-2"
-    dynamodb_table = "clawcore-tofu-locks"
+    dynamodb_table = "chimera-tofu-locks"
     encrypt        = true
   }
 }
@@ -669,10 +669,10 @@ flowchart TD
     D -->|No| CDK
 ```
 
-> [!note] ClawCore Recommendation
+> [!note] Chimera Recommendation
 > **CDK for the primary path.** AgentCore alpha L2 constructs, CloudFormation's built-in rollback, and CDK Assertions for testing make it the lowest-risk choice for an AWS-native agent platform. The self-modification pattern (YAML -> CDK synth) works cleanly with CloudFormation's change sets.
 >
-> **OpenTofu for multi-cloud extensions.** If ClawCore needs to deploy tools or MCP servers to non-AWS environments, OpenTofu modules can be composed alongside CDK using CDKTF/CDK Terrain.
+> **OpenTofu for multi-cloud extensions.** If Chimera needs to deploy tools or MCP servers to non-AWS environments, OpenTofu modules can be composed alongside CDK using CDKTF/CDK Terrain.
 >
 > **Pulumi for teams that want AI-native IaC.** If the team is already using Pulumi, Neo provides the most seamless self-modification experience -- the IaC tool itself is an AI agent.
 
@@ -684,7 +684,7 @@ Cedar policies are the non-negotiable authorization layer for self-modifying IaC
 
 ```cedar
 // Entity types
-namespace ClawCore {
+namespace Chimera {
   entity Agent in [Role] {
     tenant_id: String,
     agent_id: String,
@@ -726,10 +726,10 @@ namespace ClawCore {
 // ============================================================
 
 forbid(
-    principal in ClawCore::Role::"agent",
+    principal in Chimera::Role::"agent",
     action in [
-        ClawCore::Action::"propose_infra_change",
-        ClawCore::Action::"apply_infra_change"
+        Chimera::Action::"propose_infra_change",
+        Chimera::Action::"apply_infra_change"
     ],
     resource
 )
@@ -742,8 +742,8 @@ when {
 // ============================================================
 
 permit(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -766,8 +766,8 @@ when {
 // ============================================================
 
 permit(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"apply_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"apply_infra_change",
     resource
 )
 when {
@@ -790,8 +790,8 @@ when {
 
 // Max 10 cron jobs per tenant
 forbid(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -805,8 +805,8 @@ when {
 
 // Max 20 skills per tenant (basic tier)
 forbid(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -817,8 +817,8 @@ when {
 
 // Max 50 skills per tenant (pro/enterprise tier)
 forbid(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -833,8 +833,8 @@ when {
 
 // Cannot adjust budget above the tier maximum
 forbid(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -848,10 +848,10 @@ when {
 
 // Cannot make changes when monthly budget is 90%+ consumed
 forbid(
-    principal in ClawCore::Role::"agent",
+    principal in Chimera::Role::"agent",
     action in [
-        ClawCore::Action::"propose_infra_change",
-        ClawCore::Action::"apply_infra_change"
+        Chimera::Action::"propose_infra_change",
+        Chimera::Action::"apply_infra_change"
     ],
     resource
 )
@@ -867,8 +867,8 @@ when {
 
 // No more than 10 proposals per day
 forbid(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -877,8 +877,8 @@ when {
 
 // No more than 30 proposals per week
 forbid(
-    principal in ClawCore::Role::"agent",
-    action == ClawCore::Action::"propose_infra_change",
+    principal in Chimera::Role::"agent",
+    action == Chimera::Action::"propose_infra_change",
     resource
 )
 when {
@@ -890,10 +890,10 @@ when {
 // ============================================================
 
 forbid(
-    principal in ClawCore::Role::"agent",
+    principal in Chimera::Role::"agent",
     action in [
-        ClawCore::Action::"propose_infra_change",
-        ClawCore::Action::"apply_infra_change"
+        Chimera::Action::"propose_infra_change",
+        Chimera::Action::"apply_infra_change"
     ],
     resource
 )
@@ -932,30 +932,30 @@ flowchart LR
 
 ## 6. Drift Detection
 
-Drift -- when actual infrastructure state diverges from IaC definitions -- is especially dangerous in a self-modifying system. An agent could make a change through the `manage_infrastructure` tool while a manual console change simultaneously alters the same resource, creating inconsistency. ClawCore implements drift detection at three levels.
+Drift -- when actual infrastructure state diverges from IaC definitions -- is especially dangerous in a self-modifying system. An agent could make a change through the `manage_infrastructure` tool while a manual console change simultaneously alters the same resource, creating inconsistency. Chimera implements drift detection at three levels.
 
 ### Level 1: CloudFormation Drift Detection (Built-in)
 
-CloudFormation can detect drift for all resources in a stack. ClawCore schedules daily drift checks via a CodeBuild project:
+CloudFormation can detect drift for all resources in a stack. Chimera schedules daily drift checks via a CodeBuild project:
 
 ```yaml
 # buildspec-drift-detection.yml
 version: 0.2
 env:
   variables:
-    ALERT_TOPIC: "arn:aws:sns:us-west-2:ACCOUNT:clawcore-drift-alerts"
-    SLACK_WEBHOOK_PARAM: "/clawcore/slack-webhook-drift"
+    ALERT_TOPIC: "arn:aws:sns:us-west-2:ACCOUNT:chimera-drift-alerts"
+    SLACK_WEBHOOK_PARAM: "/chimera/slack-webhook-drift"
 phases:
   install:
     commands:
       - npm ci
   build:
     commands:
-      # Detect drift for all ClawCore stacks
+      # Detect drift for all Chimera stacks
       - |
         STACKS=$(aws cloudformation list-stacks \
           --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-          --query "StackSummaries[?starts_with(StackName, 'ClawCore-prod')].StackName" \
+          --query "StackSummaries[?starts_with(StackName, 'Chimera-prod')].StackName" \
           --output text)
       - |
         DRIFTED_STACKS=""
@@ -991,7 +991,7 @@ phases:
       - |
         if [ -n "$DRIFTED_STACKS" ]; then
           aws sns publish --topic-arn "$ALERT_TOPIC" \
-            --subject "ClawCore Drift Detected: $DRIFTED_STACKS" \
+            --subject "Chimera Drift Detected: $DRIFTED_STACKS" \
             --message file://drift-report.json
           echo "DRIFT DETECTED in:$DRIFTED_STACKS"
           exit 1
@@ -1018,10 +1018,10 @@ export class DriftDetection extends Construct {
     super(scope, id);
 
     const project = new codebuild.Project(this, 'DriftCheck', {
-      projectName: 'clawcore-drift-detection',
+      projectName: 'chimera-drift-detection',
       source: codebuild.Source.codeCommit({
         repository: codebuild.Repository.fromRepositoryName(
-          this, 'Repo', 'clawcore-infra'
+          this, 'Repo', 'chimera-infra'
         ),
       }),
       environment: {
@@ -1061,14 +1061,14 @@ def check_tenant_config_integrity(
     # Load from Git (source of truth)
     codecommit = boto3.client("codecommit")
     file_resp = codecommit.get_file(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         filePath=f"tenants/{tenant_id}.yaml",
     )
     git_config = yaml.safe_load(file_resp["fileContent"].decode())
 
     # Load from DynamoDB (deployed state)
     dynamodb = boto3.resource("dynamodb")
-    table = dynamodb.Table("clawcore-platform")
+    table = dynamodb.Table("chimera-platform")
     item = table.get_item(
         Key={"PK": f"TENANT#{tenant_id}", "SK": "CONFIG"}
     ).get("Item", {})
@@ -1134,7 +1134,7 @@ def check_tenant_config_integrity(
 
 ## 7. Rollback Patterns
 
-Self-modifying infrastructure demands robust rollback. Every change must be reversible, ideally automatically. ClawCore implements rollback at four levels: CloudFormation automatic, pipeline-triggered, snapshot-based, and agent-initiated.
+Self-modifying infrastructure demands robust rollback. Every change must be reversible, ideally automatically. Chimera implements rollback at four levels: CloudFormation automatic, pipeline-triggered, snapshot-based, and agent-initiated.
 
 ### Rollback Architecture
 
@@ -1173,7 +1173,7 @@ CloudFormation rolls back automatically when a stack update fails (resource crea
 
 ```typescript
 // CDK: Configure stack-level rollback settings
-new TenantStack(app, `ClawCore-prod-Tenant-${tenantId}`, {
+new TenantStack(app, `Chimera-prod-Tenant-${tenantId}`, {
   tenantConfig: config,
   // ... other props
   synthesizer: new cdk.DefaultStackSynthesizer(),
@@ -1234,7 +1234,7 @@ def _snapshot_pre_change_state(
     key = f"snapshots/{tenant_id}/{timestamp}-pre-{action}.json"
 
     s3.put_object(
-        Bucket="clawcore-evolution-artifacts",
+        Bucket="chimera-evolution-artifacts",
         Key=key,
         Body=json.dumps({
             "tenant_id": tenant_id,
@@ -1267,24 +1267,24 @@ def _rollback_from_snapshot(
 
     # Load snapshot
     obj = s3.get_object(
-        Bucket="clawcore-evolution-artifacts",
+        Bucket="chimera-evolution-artifacts",
         Key=snapshot_s3_key,
     )
     snapshot = json.loads(obj["Body"].read())
     restored_yaml = snapshot["config_yaml"]
 
     # Commit restored YAML to Git
-    main_head = _get_main_head(codecommit, "clawcore-infra")
+    main_head = _get_main_head(codecommit, "chimera-infra")
     branch = f"rollback/{tenant_id}/{int(time.time())}"
 
     codecommit.create_branch(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         branchName=branch,
         commitId=main_head,
     )
 
     codecommit.put_file(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         branchName=branch,
         fileContent=yaml.dump(restored_yaml).encode(),
         filePath=f"tenants/{tenant_id}.yaml",
@@ -1297,7 +1297,7 @@ def _rollback_from_snapshot(
 
     # Auto-merge rollbacks (they restore known-good state)
     codecommit.merge_branches_by_fast_forward(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         sourceCommitSpecifier=branch,
         destinationCommitSpecifier="main",
     )
@@ -1312,7 +1312,7 @@ def _rollback_from_snapshot(
 
 ### Level 4: Agent-Initiated Rollback
 
-The evolution engine's rollback tool (from [[ClawCore-Self-Evolution-Engine#8. Safety Guardrails for Self-Evolution]]) integrates with the IaC rollback:
+The evolution engine's rollback tool (from [[Chimera-Self-Evolution-Engine#8. Safety Guardrails for Self-Evolution]]) integrates with the IaC rollback:
 
 ```python
 @tool
@@ -1325,7 +1325,7 @@ def rollback_infrastructure_change(
     import boto3
 
     dynamodb = boto3.resource("dynamodb")
-    audit_table = dynamodb.Table("clawcore-audit")
+    audit_table = dynamodb.Table("chimera-audit")
 
     # Load the audit event
     event = audit_table.get_item(
@@ -1372,7 +1372,7 @@ def rollback_infrastructure_change(
 
 ## 8. Cost Guardrails
 
-Self-modifying infrastructure can cause cost explosions: an agent adds 10 cron jobs running Opus every hour, or provisions a DynamoDB table with provisioned capacity it doesn't need. ClawCore enforces cost controls at four enforcement points.
+Self-modifying infrastructure can cause cost explosions: an agent adds 10 cron jobs running Opus every hour, or provisions a DynamoDB table with provisioned capacity it doesn't need. Chimera enforces cost controls at four enforcement points.
 
 ### Cost Control Architecture
 
@@ -1407,7 +1407,7 @@ flowchart TD
 
 ### Enforcement Point 1: Cost Estimation at Proposal Time
 
-The `manage_infrastructure` tool estimates monthly cost impact before any change is committed. The cost model uses known rates for ClawCore's resource types:
+The `manage_infrastructure` tool estimates monthly cost impact before any change is committed. The cost model uses known rates for Chimera's resource types:
 
 ```python
 # Cost model for tenant resources (USD/month estimates)
@@ -1533,7 +1533,7 @@ export class TenantBudgetGuardrail extends Construct {
     // AWS Budget with three thresholds
     new budgets.CfnBudget(this, 'TenantBudget', {
       budget: {
-        budgetName: `clawcore-${props.tenantId}-monthly`,
+        budgetName: `chimera-${props.tenantId}-monthly`,
         budgetType: 'COST',
         timeUnit: 'MONTHLY',
         budgetLimit: {
@@ -1602,7 +1602,7 @@ def handler(event, context):
         scheduler = boto3.client('scheduler')
         # List and disable non-essential cron jobs
         paginator = scheduler.get_paginator('list_schedules')
-        for page in paginator.paginate(NamePrefix=f'clawcore-{tenant_id}-'):
+        for page in paginator.paginate(NamePrefix=f'chimera-{tenant_id}-'):
             for schedule in page['Schedules']:
                 if schedule['State'] == 'ENABLED':
                     scheduler.update_schedule(
@@ -1628,7 +1628,7 @@ def handler(event, context):
       resources: ['*'],
       conditions: {
         StringLike: {
-          'scheduler:ScheduleName': `clawcore-${props.tenantId}-*`,
+          'scheduler:ScheduleName': `chimera-${props.tenantId}-*`,
         },
       },
     }));
@@ -1666,7 +1666,7 @@ agent_invocation_params = {
 
 ## 9. Per-Tenant IaC Isolation
 
-The self-modification pattern requires that one tenant's infrastructure changes cannot affect another tenant. ClawCore achieves this through stack-level isolation, IAM boundary enforcement, and GitOps concurrency controls.
+The self-modification pattern requires that one tenant's infrastructure changes cannot affect another tenant. Chimera achieves this through stack-level isolation, IAM boundary enforcement, and GitOps concurrency controls.
 
 ### Tiered Isolation Model
 
@@ -1762,7 +1762,7 @@ export class TenantStack extends cdk.Stack {
     // --- IAM: Scoped role for this tenant ---
     const tenantRole = new iam.Role(this, 'TenantRole', {
       assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
-      description: `ClawCore tenant role: ${tc.tenantId}`,
+      description: `Chimera tenant role: ${tc.tenantId}`,
     });
 
     // DynamoDB: Allow access only to this tenant's partition keys
@@ -1787,7 +1787,7 @@ export class TenantStack extends cdk.Stack {
     // --- Enterprise: Dedicated AgentCore Runtime ---
     if (tc.tier === 'enterprise') {
       const dedicatedRuntime = new agentcore.Runtime(this, 'DedicatedRuntime', {
-        runtimeName: `clawcore-${tc.tenantId}`,
+        runtimeName: `chimera-${tc.tenantId}`,
         agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
           './agent-code'
         ),
@@ -1800,7 +1800,7 @@ export class TenantStack extends cdk.Stack {
     // --- Cron Jobs: EventBridge + Step Functions ---
     for (const job of tc.cronJobs) {
       const stateMachine = new sfn.StateMachine(this, `Cron-${job.name}`, {
-        stateMachineName: `clawcore-${tc.tenantId}-${job.name}`,
+        stateMachineName: `chimera-${tc.tenantId}-${job.name}`,
         definitionBody: sfn.DefinitionBody.fromChainable(
           new sfn.Pass(this, `${job.name}-Start`, {
             comment: `Cron: ${job.name} for ${tc.tenantId}`,
@@ -1840,7 +1840,7 @@ export class TenantStack extends cdk.Stack {
     // Tag all resources for cost allocation
     cdk.Tags.of(this).add('tenant_id', tc.tenantId);
     cdk.Tags.of(this).add('tier', tc.tier);
-    cdk.Tags.of(this).add('managed_by', 'clawcore');
+    cdk.Tags.of(this).add('managed_by', 'chimera');
   }
 }
 ```
@@ -1853,7 +1853,7 @@ Multiple agents (or the same agent) must not create conflicting PRs for the same
 def _find_open_prs(codecommit_client, tenant_id: str) -> list:
     """Check for existing open PRs from this tenant."""
     prs = codecommit_client.list_pull_requests(
-        repositoryName="clawcore-infra",
+        repositoryName="chimera-infra",
         pullRequestStatus="OPEN",
     )
 
@@ -1888,7 +1888,7 @@ CHANGED_TENANTS=$(git diff HEAD~1 --name-only | \
 
 for TENANT in $CHANGED_TENANTS; do
   echo "Deploying TenantStack for: $TENANT"
-  npx cdk deploy "ClawCore-prod-Tenant-$TENANT" \
+  npx cdk deploy "Chimera-prod-Tenant-$TENANT" \
     --require-approval never \
     --exclusively
 done
@@ -1925,7 +1925,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
     super(scope, id, props);
 
     const repo = codecommit.Repository.fromRepositoryName(
-      this, 'InfraRepo', 'clawcore-infra'
+      this, 'InfraRepo', 'chimera-infra'
     );
 
     // -------------------------------------------------------
@@ -1944,7 +1944,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
     // Stage 2: Detect Changes -- identify which tenants changed
     // -------------------------------------------------------
     const detectProject = new codebuild.PipelineProject(this, 'DetectChanges', {
-      projectName: 'clawcore-detect-tenant-changes',
+      projectName: 'chimera-detect-tenant-changes',
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
       },
@@ -1974,7 +1974,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
     // Stage 3: Validate -- schema check, cdk-nag, cost estimate
     // -------------------------------------------------------
     const validateProject = new codebuild.PipelineProject(this, 'Validate', {
-      projectName: 'clawcore-validate-tenant-changes',
+      projectName: 'chimera-validate-tenant-changes',
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
       },
@@ -2001,7 +2001,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
               'TENANTS=$(cat changed-tenants.txt | tr "," " ")',
               'for T in $TENANTS; do',
               '  echo "=== CDK diff for $T ==="',
-              '  npx cdk diff "ClawCore-prod-Tenant-$T" || true',
+              '  npx cdk diff "Chimera-prod-Tenant-$T" || true',
               'done',
             ],
           },
@@ -2013,7 +2013,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
     // Stage 4: Deploy -- selective tenant stack deployment
     // -------------------------------------------------------
     const deployProject = new codebuild.PipelineProject(this, 'DeployTenants', {
-      projectName: 'clawcore-deploy-tenant-stacks',
+      projectName: 'chimera-deploy-tenant-stacks',
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
         privileged: true, // Required for Docker (CDK asset bundling)
@@ -2029,7 +2029,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
               'FAILED=""',
               'for T in $TENANTS; do',
               '  echo "Deploying TenantStack for: $T"',
-              '  if npx cdk deploy "ClawCore-prod-Tenant-$T" \\',
+              '  if npx cdk deploy "Chimera-prod-Tenant-$T" \\',
               '    --require-approval never --exclusively; then',
               '    DEPLOYED="$DEPLOYED $T"',
               '  else',
@@ -2065,7 +2065,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
     // -------------------------------------------------------
     const healthCheckProject = new codebuild.PipelineProject(
       this, 'HealthCheck', {
-        projectName: 'clawcore-post-deploy-health-check',
+        projectName: 'chimera-post-deploy-health-check',
         environment: {
           buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
         },
@@ -2109,7 +2109,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
     // Assemble the pipeline
     // -------------------------------------------------------
     const pipeline = new codepipeline.Pipeline(this, 'TenantPipeline', {
-      pipelineName: 'clawcore-tenant-deploy',
+      pipelineName: 'chimera-tenant-deploy',
       restartExecutionOnUpdate: true,
     });
 
@@ -2175,7 +2175,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
       threshold: 1,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      alarmDescription: 'ClawCore tenant pipeline failed -- check for rollback',
+      alarmDescription: 'Chimera tenant pipeline failed -- check for rollback',
     });
 
     pipelineFailAlarm.addAlarmAction(
@@ -2189,7 +2189,7 @@ export class SelfModificationPipelineStack extends cdk.Stack {
 
 ```python
 # scripts/validate-tenant-yaml.py
-"""Validate a tenant YAML file against the ClawCore tenant schema."""
+"""Validate a tenant YAML file against the Chimera tenant schema."""
 import sys
 import json
 import yaml
@@ -2292,7 +2292,7 @@ if __name__ == "__main__":
 ### Monorepo Directory Structure
 
 ```
-clawcore-infra/
+chimera-infra/
   bin/
     app.ts                      # CDK entry: reads tenants/*.yaml, creates stacks
   lib/
@@ -2375,7 +2375,7 @@ sequenceDiagram
     V->>V: cdk-nag: PASS
     V->>V: CDK diff: +1 EventBridge rule, +1 Step Functions
 
-    P->>D: Deploy ClawCore-prod-Tenant-acme
+    P->>D: Deploy Chimera-prod-Tenant-acme
     D->>D: cdk deploy --exclusively
     D-->>P: Stack updated successfully
 
@@ -2392,12 +2392,12 @@ sequenceDiagram
 
 ## Related Documents
 
-- [[ClawCore-Self-Evolution-Engine]] -- Full evolution engine: prompts, skills, memory, model routing, cron scheduling, feedback loops, safety guardrails
+- [[Chimera-Self-Evolution-Engine]] -- Full evolution engine: prompts, skills, memory, model routing, cron scheduling, feedback loops, safety guardrails
 - [[AWS Bedrock AgentCore and Strands Agents/08-IaC-Patterns-Agent-Platforms]] -- CDK, OpenTofu, Pulumi deep comparison with code examples
-- [[ClawCore-Architecture-Review-Platform-IaC]] -- 8-stack CDK decomposition, pipeline design, testing strategy, DR/multi-region
-- [[ClawCore-Architecture-Review-Security]] -- STRIDE threat model, Cedar policy architecture
-- [[ClawCore-Architecture-Review-Cost-Scale]] -- Cost model, per-tenant budgeting, optimization strategies
-- [[ClawCore-Final-Architecture-Plan]] -- Overall architecture and implementation phases
+- [[Chimera-Architecture-Review-Platform-IaC]] -- 8-stack CDK decomposition, pipeline design, testing strategy, DR/multi-region
+- [[Chimera-Architecture-Review-Security]] -- STRIDE threat model, Cedar policy architecture
+- [[Chimera-Architecture-Review-Cost-Scale]] -- Cost model, per-tenant budgeting, optimization strategies
+- [[Chimera-Final-Architecture-Plan]] -- Overall architecture and implementation phases
 
 ---
 

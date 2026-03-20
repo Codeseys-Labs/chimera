@@ -1,33 +1,33 @@
 ---
 tags:
-  - clawcore
+  - chimera
   - testing
   - quality-assurance
   - ci-cd
   - security-testing
   - performance
 date: 2026-03-19
-topic: ClawCore Testing Strategy
+topic: Chimera Testing Strategy
 status: complete
 ---
 
-# ClawCore Testing Strategy
+# Chimera Testing Strategy
 
-> Comprehensive testing plan for the ClawCore multi-tenant AI agent platform.
+> Comprehensive testing plan for the Chimera multi-tenant AI agent platform.
 > Covers unit, integration, end-to-end, performance, security, and cost testing
-> across all layers of the [[ClawCore-Final-Architecture-Plan|architecture]].
+> across all layers of the [[Chimera-Final-Architecture-Plan|architecture]].
 
 **Related documents:**
-- [[ClawCore-Final-Architecture-Plan]] -- Technology decisions, phases
-- [[ClawCore-AWS-Component-Blueprint]] -- AWS service specifications
-- [[ClawCore-Architecture-Review-Security]] -- STRIDE threat model, attack trees
-- [[ClawCore-Architecture-Review-Cost-Scale]] -- Cost model, scaling targets
+- [[Chimera-Final-Architecture-Plan]] -- Technology decisions, phases
+- [[Chimera-AWS-Component-Blueprint]] -- AWS service specifications
+- [[Chimera-Architecture-Review-Security]] -- STRIDE threat model, attack trees
+- [[Chimera-Architecture-Review-Cost-Scale]] -- Cost model, scaling targets
 
 ---
 
 ## 1. Testing Philosophy
 
-ClawCore is an AI agent platform where **non-determinism is inherent**. LLM outputs
+Chimera is an AI agent platform where **non-determinism is inherent**. LLM outputs
 vary across runs, tools may produce different results, and multi-agent interactions
 create emergent behavior. The testing strategy must account for this:
 
@@ -124,7 +124,7 @@ class MockModel(Model):
 # tests/unit/test_chatbot_agent.py
 import pytest
 from unittest.mock import AsyncMock, patch
-from clawcore.agents.chatbot import create_chatbot_agent
+from chimera.agents.chatbot import create_chatbot_agent
 from tests.mocks.mock_model import MockModel
 
 @pytest.fixture
@@ -132,15 +132,15 @@ def mock_model():
     return MockModel(responses=[
         {"text": "I'll look that up for you.", "tool_calls": [
             {"id": "tc_1", "name": "web_search",
-             "input": {"query": "ClawCore documentation"}}
+             "input": {"query": "Chimera documentation"}}
         ]},
-        {"text": "Here's what I found about ClawCore..."},
+        {"text": "Here's what I found about Chimera..."},
     ])
 
 @pytest.fixture
 def mock_tools():
     web_search = AsyncMock(return_value={
-        "results": [{"title": "ClawCore Docs", "url": "https://example.com"}]
+        "results": [{"title": "Chimera Docs", "url": "https://example.com"}]
     })
     web_search.__name__ = "web_search"
     web_search.tool_spec = {
@@ -160,7 +160,7 @@ def test_chatbot_invokes_search_tool(mock_model, mock_tools):
         tools=mock_tools,
         system_prompt="You are a helpful assistant.",
     )
-    result = agent("Tell me about ClawCore")
+    result = agent("Tell me about Chimera")
     assert "found" in str(result).lower()
     assert mock_model.call_history[0]["tools"] is not None
     mock_tools[0].assert_called_once()
@@ -169,10 +169,10 @@ def test_chatbot_respects_system_prompt(mock_model, mock_tools):
     agent = create_chatbot_agent(
         model=mock_model,
         tools=mock_tools,
-        system_prompt="You are a ClawCore support agent.",
+        system_prompt="You are a Chimera support agent.",
     )
     agent("Hello")
-    mock_model.assert_called_with_system_prompt("ClawCore support agent")
+    mock_model.assert_called_with_system_prompt("Chimera support agent")
 
 def test_chatbot_handles_empty_tool_result(mock_model):
     empty_tool = AsyncMock(return_value={"results": []})
@@ -202,7 +202,7 @@ independently from the agent that calls it.
 # tests/unit/tools/test_skill_loader.py
 import pytest
 from unittest.mock import MagicMock
-from clawcore.tools.skill_loader import load_skill, validate_skill_manifest
+from chimera.tools.skill_loader import load_skill, validate_skill_manifest
 
 def test_load_skill_from_s3(mock_s3_client):
     mock_s3_client.get_object.return_value = {
@@ -212,7 +212,7 @@ def test_load_skill_from_s3(mock_s3_client):
     assert skill.name == "code-review"
     assert "Do things" in skill.instructions
     mock_s3_client.get_object.assert_called_once_with(
-        Bucket="clawcore-skills-123456-us-west-2",
+        Bucket="chimera-skills-123456-us-west-2",
         Key="skills/tenant/acme/code-review/SKILL.md",
     )
 
@@ -306,14 +306,14 @@ describe('DataStack', () => {
 
   test('tenants table has PITR enabled', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
-      TableName: 'clawcore-tenants',
+      TableName: 'chimera-tenants',
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
     });
   });
 
   test('audit table uses CMK encryption', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
-      TableName: 'clawcore-audit',
+      TableName: 'chimera-audit',
       SSESpecification: {
         SSEEnabled: true,
         SSEType: 'KMS',
@@ -323,7 +323,7 @@ describe('DataStack', () => {
 
   test('rate-limits table has DESTROY removal policy', () => {
     template.hasResource('AWS::DynamoDB::Table', {
-      Properties: { TableName: 'clawcore-rate-limits' },
+      Properties: { TableName: 'chimera-rate-limits' },
       DeletionPolicy: 'Delete',
     });
   });
@@ -344,8 +344,8 @@ describe('DataStack', () => {
   });
 
   test('all retained tables have RETAIN deletion policy', () => {
-    const tables = ['clawcore-tenants', 'clawcore-sessions', 'clawcore-skills',
-                    'clawcore-cost-tracking', 'clawcore-audit'];
+    const tables = ['chimera-tenants', 'chimera-sessions', 'chimera-skills',
+                    'chimera-cost-tracking', 'chimera-audit'];
     for (const name of tables) {
       template.hasResource('AWS::DynamoDB::Table', {
         Properties: { TableName: name },
@@ -419,7 +419,7 @@ full end-to-end flows. They catch interface drift early.
 # tests/contract/test_tool_contracts.py
 import jsonschema
 import pytest
-from clawcore.tools import TOOL_REGISTRY
+from chimera.tools import TOOL_REGISTRY
 
 TOOL_CONTRACTS = {
     "web_search": {
@@ -492,7 +492,7 @@ def test_tool_output_validates_against_contract(tool_name, contract):
 
 ```python
 # tests/contract/test_api_contracts.py
-from clawcore.api.schemas import (
+from chimera.api.schemas import (
     CreateSessionRequest, CreateSessionResponse,
     SendMessageRequest, StreamMessageResponse,
 )
@@ -534,7 +534,7 @@ import boto3
 import pytest
 import time
 
-RUNTIME_NAME = "clawcore-pool-test"
+RUNTIME_NAME = "chimera-pool-test"
 ENDPOINT_NAME = "test"
 
 @pytest.fixture(scope="module")
@@ -598,7 +598,7 @@ class TestAgentCoreRuntime:
 # tests/integration/test_dynamodb_tenant_isolation.py
 import boto3
 import pytest
-from clawcore.data.tenant_repository import TenantRepository
+from chimera.data.tenant_repository import TenantRepository
 
 @pytest.fixture
 def dynamodb_resource():
@@ -607,7 +607,7 @@ def dynamodb_resource():
 @pytest.fixture
 def tenant_repo(dynamodb_resource):
     return TenantRepository(
-        table=dynamodb_resource.Table("clawcore-tenants-test"),
+        table=dynamodb_resource.Table("chimera-tenants-test"),
     )
 
 class TestTenantIsolation:
@@ -641,12 +641,12 @@ class TestTenantIsolation:
 ```python
 # tests/integration/test_skill_storage.py
 import pytest
-from clawcore.skills.storage import SkillStorage
+from chimera.skills.storage import SkillStorage
 
 @pytest.fixture
 def skill_storage(s3_client_staging):
     return SkillStorage(
-        bucket="clawcore-skills-test",
+        bucket="chimera-skills-test",
         s3_client=s3_client_staging,
     )
 
@@ -690,12 +690,12 @@ AgentCore Runtime -> Strands Agent -> LLM -> tool execution -> response.
 import pytest
 import httpx
 import asyncio
-from clawcore.testing import TestTenant, E2EClient
+from chimera.testing import TestTenant, E2EClient
 
 @pytest.fixture(scope="session")
 def e2e_config():
     return {
-        "api_url": "https://api.clawcore-staging.example.com",
+        "api_url": "https://api.chimera-staging.example.com",
         "cognito_pool_id": "us-west-2_TestPool",
         "cognito_client_id": "test-client-id",
         "max_budget_usd": 0.50,  # Hard cap per test run
@@ -855,9 +855,9 @@ skill authors can validate their skills before publishing.
 ### 6.1 Skill Test Harness
 
 ```python
-# clawcore/testing/skill_harness.py
+# chimera/testing/skill_harness.py
 from dataclasses import dataclass
-from clawcore.skills.loader import SkillDefinition
+from chimera.skills.loader import SkillDefinition
 from tests.mocks.mock_model import MockModel
 
 @dataclass
@@ -879,7 +879,7 @@ class SkillTestHarness:
         self._tool_calls = []
 
     def invoke(self, user_message: str, **kwargs) -> SkillTestResult:
-        from clawcore.agents.factory import create_agent_with_skill
+        from chimera.agents.factory import create_agent_with_skill
         agent = create_agent_with_skill(
             skill=self.skill,
             model=self.model,
@@ -921,8 +921,8 @@ class SkillTestHarness:
 
 ```python
 # skills/my-skill/tests/test_my_skill.py
-"""Test template generated by `clawcore skill create --with-tests`."""
-from clawcore.testing import SkillTestHarness
+"""Test template generated by `chimera skill create --with-tests`."""
+from chimera.testing import SkillTestHarness
 
 def test_skill_loads_without_error():
     harness = SkillTestHarness("./skills/my-skill")
@@ -957,9 +957,9 @@ from locust import HttpUser, task, between
 import json
 import random
 
-class ClawCoreUser(HttpUser):
+class ChimeraUser(HttpUser):
     wait_time = between(1, 5)
-    host = "https://api.clawcore-staging.example.com"
+    host = "https://api.chimera-staging.example.com"
 
     def on_start(self):
         # Authenticate and get token
@@ -1084,7 +1084,7 @@ def test_cold_start_under_target(agentcore_client, runtime_endpoint):
 ## 8. Security Testing
 
 Security testing follows the STRIDE threat model from the
-[[ClawCore-Architecture-Review-Security|Security Review]].
+[[Chimera-Architecture-Review-Security|Security Review]].
 
 ### 8.1 Automated Security Test Suite
 
@@ -1157,7 +1157,7 @@ class TestCrossTenantAttacks:
         """Agent IAM role should not permit Scan operations."""
         import botocore
         with pytest.raises(botocore.exceptions.ClientError) as exc:
-            direct_dynamodb_client.scan(TableName="clawcore-tenants")
+            direct_dynamodb_client.scan(TableName="chimera-tenants")
         assert "AccessDeniedException" in str(exc.value)
 
     @pytest.mark.security
@@ -1166,7 +1166,7 @@ class TestCrossTenantAttacks:
         import botocore
         with pytest.raises(botocore.exceptions.ClientError):
             direct_s3_client.get_object(
-                Bucket="clawcore-tenants-123456-us-west-2",
+                Bucket="chimera-tenants-123456-us-west-2",
                 Key="tenants/other-tenant/secrets.json",
             )
 ```
@@ -1214,7 +1214,7 @@ billing accuracy.
 ```python
 # tests/cost/test_cost_regression.py
 import pytest
-from clawcore.testing import CostTracker
+from chimera.testing import CostTracker
 
 @pytest.fixture
 def cost_tracker():
@@ -1281,13 +1281,13 @@ async def test_cost_attributed_to_correct_tenant(
 
 ```yaml
 # .github/workflows/test-pipeline.yml (conceptual -- maps to CodePipeline)
-name: ClawCore Test Pipeline
+name: Chimera Test Pipeline
 
 stages:
   # Stage 1: Fast feedback (< 3 minutes)
   lint-and-type-check:
     - ruff check .
-    - mypy clawcore/
+    - mypy chimera/
     - eslint lib/
     - tsc --noEmit
 
@@ -1437,7 +1437,7 @@ def cleanup_test_data():
     """Clean up all test data after the test suite completes."""
     yield
     # Cleanup runs after all tests
-    from clawcore.testing.cleanup import purge_test_tenants
+    from chimera.testing.cleanup import purge_test_tenants
     purge_test_tenants(prefix="test-", dry_run=False)
     purge_test_tenants(prefix="e2e-test-", dry_run=False)
     purge_test_tenants(prefix="load-test-", dry_run=False)
@@ -1449,7 +1449,7 @@ def cleanup_test_data():
 
 Beyond functional testing, agents need quality evaluation. This uses the
 AgentCore Evaluations service defined in the
-[[ClawCore-AWS-Component-Blueprint|Component Blueprint]].
+[[Chimera-AWS-Component-Blueprint|Component Blueprint]].
 
 ### 12.1 Evaluation Dimensions
 
@@ -1538,13 +1538,13 @@ def handler(event, context):
 
 ## Related Documents
 
-- [[ClawCore-Final-Architecture-Plan]] -- Architecture decisions this strategy validates
-- [[ClawCore-AWS-Component-Blueprint]] -- AWS service specs tested against
-- [[ClawCore-Architecture-Review-Security]] -- STRIDE model driving security tests
-- [[ClawCore-Architecture-Review-Cost-Scale]] -- Cost targets for cost regression tests
+- [[Chimera-Final-Architecture-Plan]] -- Architecture decisions this strategy validates
+- [[Chimera-AWS-Component-Blueprint]] -- AWS service specs tested against
+- [[Chimera-Architecture-Review-Security]] -- STRIDE model driving security tests
+- [[Chimera-Architecture-Review-Cost-Scale]] -- Cost targets for cost regression tests
 - [[07-Operational-Runbook]] -- Operational procedures validated by E2E tests
 
 ---
 
-*Testing strategy authored 2026-03-19 by Ops Author agent on team clawcore-enhance.*
-*Covers unit, integration, E2E, security, performance, cost, and evaluation testing across all ClawCore layers.*
+*Testing strategy authored 2026-03-19 by Ops Author agent on team chimera-enhance.*
+*Covers unit, integration, E2E, security, performance, cost, and evaluation testing across all Chimera layers.*

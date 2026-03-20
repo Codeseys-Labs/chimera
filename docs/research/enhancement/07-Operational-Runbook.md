@@ -1,6 +1,6 @@
 ---
 tags:
-  - clawcore
+  - chimera
   - operations
   - runbook
   - monitoring
@@ -8,21 +8,21 @@ tags:
   - deployment
   - disaster-recovery
 date: 2026-03-19
-topic: ClawCore Operational Runbook
+topic: Chimera Operational Runbook
 status: complete
 ---
 
-# ClawCore Operational Runbook
+# Chimera Operational Runbook
 
-> Operational procedures for running the ClawCore multi-tenant AI agent platform
+> Operational procedures for running the Chimera multi-tenant AI agent platform
 > in production. Covers deployment, monitoring, alerting, incident response,
 > tenant lifecycle, disaster recovery, and capacity planning.
 
 **Related documents:**
-- [[ClawCore-Final-Architecture-Plan]] -- Architecture decisions
-- [[ClawCore-AWS-Component-Blueprint]] -- AWS service specifications
-- [[ClawCore-Architecture-Review-Security]] -- Security controls and threat model
-- [[ClawCore-Architecture-Review-Cost-Scale]] -- Cost model and scaling analysis
+- [[Chimera-Final-Architecture-Plan]] -- Architecture decisions
+- [[Chimera-AWS-Component-Blueprint]] -- AWS service specifications
+- [[Chimera-Architecture-Review-Security]] -- Security controls and threat model
+- [[Chimera-Architecture-Review-Cost-Scale]] -- Cost model and scaling analysis
 - [[06-Testing-Strategy]] -- Test pipeline that validates these procedures
 
 ---
@@ -31,7 +31,7 @@ status: complete
 
 ### 1.1 Deployment Strategy Overview
 
-ClawCore uses a **canary deployment** model for agent runtime changes and
+Chimera uses a **canary deployment** model for agent runtime changes and
 **blue-green** for infrastructure (CDK stack) changes.
 
 | Component | Strategy | Rollback Time | Risk |
@@ -54,7 +54,7 @@ CodePipeline triggers
         v
 Stage 1: Build
   - Docker image built from agent-code/
-  - Pushed to ECR: clawcore-agent-runtime:{git-sha}
+  - Pushed to ECR: chimera-agent-runtime:{git-sha}
   - Unit + contract tests run
         |
         v
@@ -101,17 +101,17 @@ npx cdk-nag                           # Security rule validation
 # Review CloudFormation changeset in console
 
 # Deploy with rollback protection
-npx cdk deploy ClawCore-prod-Network \
+npx cdk deploy Chimera-prod-Network \
   --require-approval broadening \
   --rollback true \
   --change-set-name "deploy-$(date +%Y%m%d-%H%M%S)"
 
 # Deploy stacks in dependency order
-npx cdk deploy ClawCore-prod-Data --require-approval broadening
-npx cdk deploy ClawCore-prod-Security --require-approval broadening
-npx cdk deploy ClawCore-prod-Observability
-npx cdk deploy ClawCore-prod-Runtime --require-approval broadening
-npx cdk deploy ClawCore-prod-Chat
+npx cdk deploy Chimera-prod-Data --require-approval broadening
+npx cdk deploy Chimera-prod-Security --require-approval broadening
+npx cdk deploy Chimera-prod-Observability
+npx cdk deploy Chimera-prod-Runtime --require-approval broadening
+npx cdk deploy Chimera-prod-Chat
 ```
 
 **Stack deployment order (mandatory):**
@@ -135,15 +135,15 @@ graph TD
 ```bash
 # Revert canary to previous stable image
 aws bedrock-agent-runtime update-agent-runtime-endpoint \
-  --runtime-name clawcore-pool \
+  --runtime-name chimera-pool \
   --endpoint-name canary \
-  --agent-runtime-artifact "ecr://clawcore-agent-runtime:latest-stable"
+  --agent-runtime-artifact "ecr://chimera-agent-runtime:latest-stable"
 
 # If production is affected, revert production endpoint too
 aws bedrock-agent-runtime update-agent-runtime-endpoint \
-  --runtime-name clawcore-pool \
+  --runtime-name chimera-pool \
   --endpoint-name production \
-  --agent-runtime-artifact "ecr://clawcore-agent-runtime:latest-stable"
+  --agent-runtime-artifact "ecr://chimera-agent-runtime:latest-stable"
 ```
 
 **CDK stack rollback (< 10 minutes):**
@@ -152,12 +152,12 @@ aws bedrock-agent-runtime update-agent-runtime-endpoint \
 # CloudFormation automatic rollback on failure is enabled by default
 # For manual rollback to previous version:
 aws cloudformation rollback-stack \
-  --stack-name ClawCore-prod-Runtime \
+  --stack-name Chimera-prod-Runtime \
   --client-request-token "rollback-$(date +%s)"
 
 # Monitor rollback progress
 aws cloudformation describe-stack-events \
-  --stack-name ClawCore-prod-Runtime \
+  --stack-name Chimera-prod-Runtime \
   --query 'StackEvents[?ResourceStatus==`ROLLBACK_COMPLETE`]'
 ```
 
@@ -166,9 +166,9 @@ aws cloudformation describe-stack-events \
 ```bash
 # Force new deployment with previous task definition
 aws ecs update-service \
-  --cluster clawcore-chat \
+  --cluster chimera-chat \
   --service chat-sdk \
-  --task-definition clawcore-chat-sdk:PREVIOUS_REVISION \
+  --task-definition chimera-chat-sdk:PREVIOUS_REVISION \
   --force-new-deployment
 ```
 
@@ -178,7 +178,7 @@ aws ecs update-service \
 
 ### 2.1 Platform Dashboard
 
-The platform dashboard provides a single-pane-of-glass view of ClawCore health.
+The platform dashboard provides a single-pane-of-glass view of Chimera health.
 
 **CloudWatch Dashboard JSON:**
 
@@ -256,9 +256,9 @@ The platform dashboard provides a single-pane-of-glass view of ClawCore health.
       "properties": {
         "title": "DynamoDB Throttles",
         "metrics": [
-          ["AWS/DynamoDB", "ThrottledRequests", "TableName", "clawcore-tenants", {"stat": "Sum"}],
-          ["AWS/DynamoDB", "ThrottledRequests", "TableName", "clawcore-sessions", {"stat": "Sum"}],
-          ["AWS/DynamoDB", "ThrottledRequests", "TableName", "clawcore-rate-limits", {"stat": "Sum"}]
+          ["AWS/DynamoDB", "ThrottledRequests", "TableName", "chimera-tenants", {"stat": "Sum"}],
+          ["AWS/DynamoDB", "ThrottledRequests", "TableName", "chimera-sessions", {"stat": "Sum"}],
+          ["AWS/DynamoDB", "ThrottledRequests", "TableName", "chimera-rate-limits", {"stat": "Sum"}]
         ],
         "period": 300,
         "view": "timeSeries"
@@ -270,8 +270,8 @@ The platform dashboard provides a single-pane-of-glass view of ClawCore health.
       "properties": {
         "title": "Chat SDK (ECS) Health",
         "metrics": [
-          ["AWS/ECS", "CPUUtilization", "ServiceName", "chat-sdk", "ClusterName", "clawcore-chat", {"stat": "Average"}],
-          ["AWS/ECS", "MemoryUtilization", "ServiceName", "chat-sdk", "ClusterName", "clawcore-chat", {"stat": "Average"}]
+          ["AWS/ECS", "CPUUtilization", "ServiceName", "chat-sdk", "ClusterName", "chimera-chat", {"stat": "Average"}],
+          ["AWS/ECS", "MemoryUtilization", "ServiceName", "chat-sdk", "ClusterName", "chimera-chat", {"stat": "Average"}]
         ],
         "period": 300,
         "view": "timeSeries"
@@ -297,7 +297,7 @@ The platform dashboard provides a single-pane-of-glass view of ClawCore health.
 ### 2.2 Per-Tenant Dashboard Template
 
 Each tenant gets an auto-generated dashboard created by the `AgentObservability`
-CDK construct in [[ClawCore-AWS-Component-Blueprint|TenantStack]].
+CDK construct in [[Chimera-AWS-Component-Blueprint|TenantStack]].
 
 | Widget | Metric | Purpose |
 |--------|--------|---------|
@@ -314,13 +314,13 @@ CDK construct in [[ClawCore-AWS-Component-Blueprint|TenantStack]].
 
 | Log Group | Content | Retention |
 |-----------|---------|-----------|
-| `/clawcore/prod/agent-runtime` | Agent execution logs (structured JSON via EMF) | 1 year |
-| `/clawcore/prod/tenant/{tenantId}` | Per-tenant filtered logs | 1 year |
-| `/clawcore/prod/chat-sdk` | Chat gateway access + error logs | 90 days |
-| `/clawcore/prod/api-gateway` | API Gateway access logs | 90 days |
-| `/clawcore/prod/cedar-audit` | Cedar policy evaluation decisions | 1 year |
-| `/clawcore/prod/guardrails` | Bedrock Guardrails intervention logs | 1 year |
-| `/aws/codepipeline/clawcore` | Deployment pipeline logs | 90 days |
+| `/chimera/prod/agent-runtime` | Agent execution logs (structured JSON via EMF) | 1 year |
+| `/chimera/prod/tenant/{tenantId}` | Per-tenant filtered logs | 1 year |
+| `/chimera/prod/chat-sdk` | Chat gateway access + error logs | 90 days |
+| `/chimera/prod/api-gateway` | API Gateway access logs | 90 days |
+| `/chimera/prod/cedar-audit` | Cedar policy evaluation decisions | 1 year |
+| `/chimera/prod/guardrails` | Bedrock Guardrails intervention logs | 1 year |
+| `/aws/codepipeline/chimera` | Deployment pipeline logs | 90 days |
 
 **Useful CloudWatch Logs Insights queries:**
 
@@ -360,10 +360,10 @@ fields @timestamp, tenant_id, cost_usd
 
 | Severity | Response Time | Notification | Escalation |
 |----------|--------------|-------------|------------|
-| **SEV1 - Critical** | <15 minutes | PagerDuty + Slack #clawcore-incidents | VP after 30 min |
-| **SEV2 - High** | <1 hour | Slack #clawcore-alerts + email | Manager after 2 hours |
-| **SEV3 - Medium** | <4 hours | Slack #clawcore-alerts | Triage in daily standup |
-| **SEV4 - Low** | Next business day | Slack #clawcore-ops | Weekly review |
+| **SEV1 - Critical** | <15 minutes | PagerDuty + Slack #chimera-incidents | VP after 30 min |
+| **SEV2 - High** | <1 hour | Slack #chimera-alerts + email | Manager after 2 hours |
+| **SEV3 - Medium** | <4 hours | Slack #chimera-alerts | Triage in daily standup |
+| **SEV4 - Low** | Next business day | Slack #chimera-ops | Weekly review |
 
 ### 3.2 CloudWatch Alarms
 
@@ -372,7 +372,7 @@ fields @timestamp, tenant_id, cost_usd
 ```json
 [
   {
-    "AlarmName": "ClawCore-CRITICAL-PlatformDown",
+    "AlarmName": "Chimera-CRITICAL-PlatformDown",
     "MetricName": "Invocations",
     "Namespace": "AgentPlatform",
     "Statistic": "Sum",
@@ -384,7 +384,7 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV1: Zero invocations for 10 minutes -- platform may be down"
   },
   {
-    "AlarmName": "ClawCore-CRITICAL-TenantIsolationBreach",
+    "AlarmName": "Chimera-CRITICAL-TenantIsolationBreach",
     "MetricName": "CrossTenantAccessAttempt",
     "Namespace": "AgentPlatform",
     "Statistic": "Sum",
@@ -395,7 +395,7 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV1: Cross-tenant data access detected"
   },
   {
-    "AlarmName": "ClawCore-CRITICAL-DataExfiltration",
+    "AlarmName": "Chimera-CRITICAL-DataExfiltration",
     "MetricName": "SkillExfiltrationAttempt",
     "Namespace": "AgentPlatform",
     "Statistic": "Sum",
@@ -413,7 +413,7 @@ fields @timestamp, tenant_id, cost_usd
 ```json
 [
   {
-    "AlarmName": "ClawCore-HIGH-ErrorRateSpike",
+    "AlarmName": "Chimera-HIGH-ErrorRateSpike",
     "MetricName": "Errors",
     "Namespace": "AgentPlatform",
     "Statistic": "Sum",
@@ -424,7 +424,7 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV2: >50 errors in 5-min window for 15 minutes"
   },
   {
-    "AlarmName": "ClawCore-HIGH-LatencyDegradation",
+    "AlarmName": "Chimera-HIGH-LatencyDegradation",
     "MetricName": "InvocationDuration",
     "Namespace": "AgentPlatform",
     "Statistic": "p99",
@@ -435,10 +435,10 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV2: P99 latency >60s for 15 minutes"
   },
   {
-    "AlarmName": "ClawCore-HIGH-DynamoDBThrottling",
+    "AlarmName": "Chimera-HIGH-DynamoDBThrottling",
     "MetricName": "ThrottledRequests",
     "Namespace": "AWS/DynamoDB",
-    "Dimensions": [{"Name": "TableName", "Value": "clawcore-sessions"}],
+    "Dimensions": [{"Name": "TableName", "Value": "chimera-sessions"}],
     "Statistic": "Sum",
     "Period": 300,
     "EvaluationPeriods": 2,
@@ -447,7 +447,7 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV2: DynamoDB throttling >100 requests in 5 minutes"
   },
   {
-    "AlarmName": "ClawCore-HIGH-GuardrailSurge",
+    "AlarmName": "Chimera-HIGH-GuardrailSurge",
     "MetricName": "GuardrailTriggered",
     "Namespace": "AgentPlatform",
     "Statistic": "Sum",
@@ -465,7 +465,7 @@ fields @timestamp, tenant_id, cost_usd
 ```json
 [
   {
-    "AlarmName": "ClawCore-MEDIUM-TenantBudgetWarning",
+    "AlarmName": "Chimera-MEDIUM-TenantBudgetWarning",
     "MetricName": "CostAccumulated",
     "Namespace": "AgentPlatform",
     "Statistic": "Maximum",
@@ -476,7 +476,7 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV3: Tenant approaching 90% of monthly budget"
   },
   {
-    "AlarmName": "ClawCore-MEDIUM-CronJobFailure",
+    "AlarmName": "Chimera-MEDIUM-CronJobFailure",
     "MetricName": "ExecutionsFailed",
     "Namespace": "AWS/States",
     "Statistic": "Sum",
@@ -487,7 +487,7 @@ fields @timestamp, tenant_id, cost_usd
     "AlarmDescription": "SEV3: >3 cron job failures in 1 hour"
   },
   {
-    "AlarmName": "ClawCore-MEDIUM-HighTokenUsage",
+    "AlarmName": "Chimera-MEDIUM-HighTokenUsage",
     "MetricName": "TokensUsed",
     "Namespace": "AgentPlatform",
     "Statistic": "Sum",
@@ -504,10 +504,10 @@ fields @timestamp, tenant_id, cost_usd
 
 ```json
 {
-  "AlarmName": "ClawCore-COMPOSITE-PlatformHealth",
-  "AlarmRule": "ALARM(ClawCore-HIGH-ErrorRateSpike) OR ALARM(ClawCore-HIGH-LatencyDegradation) OR ALARM(ClawCore-CRITICAL-PlatformDown)",
+  "AlarmName": "Chimera-COMPOSITE-PlatformHealth",
+  "AlarmRule": "ALARM(Chimera-HIGH-ErrorRateSpike) OR ALARM(Chimera-HIGH-LatencyDegradation) OR ALARM(Chimera-CRITICAL-PlatformDown)",
   "AlarmDescription": "Composite: Platform health degraded -- check individual alarms",
-  "AlarmActions": ["arn:aws:sns:us-west-2:123456:clawcore-pagerduty"]
+  "AlarmActions": ["arn:aws:sns:us-west-2:123456:chimera-pagerduty"]
 }
 ```
 
@@ -549,7 +549,7 @@ fields @timestamp, tenant_id, cost_usd
 ```bash
 # Step 2: Quarantine the skill
 aws dynamodb update-item \
-  --table-name clawcore-skills \
+  --table-name chimera-skills \
   --key '{"PK": {"S": "TENANT#GLOBAL"}, "SK": {"S": "SKILL#malicious-skill"}}' \
   --update-expression "SET #status = :quarantined, quarantinedAt = :now" \
   --expression-attribute-names '{"#status": "status"}' \
@@ -557,7 +557,7 @@ aws dynamodb update-item \
 
 # Step 3: Find and terminate affected sessions
 aws dynamodb query \
-  --table-name clawcore-sessions \
+  --table-name chimera-sessions \
   --index-name GSI1-agent-activity \
   --key-condition-expression "begins_with(SK, :skill)" \
   --expression-attribute-values '{":skill": {"S": "SKILL#malicious-skill"}}' \
@@ -594,7 +594,7 @@ aws dynamodb query \
 # Switch to cross-region inference profile
 # Update tenant config in DynamoDB
 dynamodb.update_item(
-    TableName="clawcore-tenants",
+    TableName="chimera-tenants",
     Key={"PK": {"S": "TENANT#acme"}, "SK": {"S": "META"}},
     UpdateExpression="SET modelId = :model",
     ExpressionAttributeValues={
@@ -619,15 +619,15 @@ dynamodb.update_item(
 ```bash
 # Step 3: Throttle tenant
 aws dynamodb update-item \
-  --table-name clawcore-tenants \
+  --table-name chimera-tenants \
   --key '{"PK": {"S": "TENANT#expensive-corp"}, "SK": {"S": "META"}}' \
   --update-expression "SET rateLimitPerMinute = :limit, #status = :throttled" \
   --expression-attribute-names '{"#status": "accountStatus"}' \
   --expression-attribute-values '{":limit": {"N": "1"}, ":throttled": {"S": "throttled"}}'
 
 # Step 4: Disable cron jobs
-aws events disable-rule --name "clawcore-expensive-corp-daily-digest"
-aws events disable-rule --name "clawcore-expensive-corp-weekly-report"
+aws events disable-rule --name "chimera-expensive-corp-daily-digest"
+aws events disable-rule --name "chimera-expensive-corp-weekly-report"
 ```
 
 ---
@@ -637,15 +637,15 @@ aws events disable-rule --name "clawcore-expensive-corp-weekly-report"
 ### 5.1 Tenant Onboarding
 
 ```
-Admin runs: clawcore tenant create acme --tier=standard
+Admin runs: chimera tenant create acme --tier=standard
         |
         v
 Step Functions workflow triggers:
   1. Create Cognito user group for tenant
-  2. Insert tenant record in clawcore-tenants DynamoDB
+  2. Insert tenant record in chimera-tenants DynamoDB
   3. Create tenant IAM role (scoped to partition)
   4. Create S3 prefix structure in tenant bucket
-  5. Register default skills in clawcore-skills table
+  5. Register default skills in chimera-skills table
   6. Create AgentCore Memory namespace
   7. Create per-tenant CloudWatch dashboard
   8. Create per-tenant CloudWatch alarms
@@ -661,15 +661,15 @@ Tenant active in ~2 minutes (pool model)
 | # | Step | Automated | Verification |
 |---|------|-----------|-------------|
 | 1 | Cognito group created | Yes | `aws cognito-idp list-groups` |
-| 2 | DynamoDB tenant record | Yes | Query `clawcore-tenants` |
+| 2 | DynamoDB tenant record | Yes | Query `chimera-tenants` |
 | 3 | IAM role created | Yes | `aws iam get-role` |
 | 4 | S3 prefix exists | Yes | `aws s3 ls s3://bucket/tenants/{id}/` |
-| 5 | Skills registered | Yes | Query `clawcore-skills` |
+| 5 | Skills registered | Yes | Query `chimera-skills` |
 | 6 | Memory namespace | Yes | AgentCore Memory API |
 | 7 | Dashboard created | Yes | CloudWatch console |
 | 8 | Alarms active | Yes | `aws cloudwatch describe-alarms` |
 | 9 | Welcome sent | Yes | Check Chat SDK logs |
-| 10 | Audit logged | Yes | Query `clawcore-audit` |
+| 10 | Audit logged | Yes | Query `chimera-audit` |
 
 ### 5.2 Tenant Tier Changes
 
@@ -696,9 +696,9 @@ Tenant active in ~2 minutes (pool model)
 
 ```bash
 # Tenant offboarding procedure
-clawcore tenant suspend acme          # Stop all activity
-clawcore tenant export acme --to s3   # Export data for tenant
-clawcore tenant delete acme --confirm # Schedule deletion
+chimera tenant suspend acme          # Stop all activity
+chimera tenant export acme --to s3   # Export data for tenant
+chimera tenant delete acme --confirm # Schedule deletion
 ```
 
 ---
@@ -757,7 +757,7 @@ Human review queue (optional, for Tier 1 "verified"):
 ### 7.1 Anomaly Detection Rules
 
 ```python
-# Lambda: clawcore-cost-anomaly-detector
+# Lambda: chimera-cost-anomaly-detector
 # Runs hourly via EventBridge
 
 def detect_anomalies(event, context):
@@ -816,7 +816,7 @@ def detect_anomalies(event, context):
 **Weekly cost report (generated by EventBridge cron + Step Functions):**
 
 ```markdown
-## ClawCore Weekly Cost Report - Week of 2026-03-15
+## Chimera Weekly Cost Report - Week of 2026-03-15
 
 ### Platform Summary
 | Metric | This Week | Last Week | Change |
@@ -879,14 +879,14 @@ RECOVERY_TIME="2026-03-19T14:30:00Z"
 
 # Step 2: Restore to a new table
 aws dynamodb restore-table-to-point-in-time \
-  --source-table-name clawcore-tenants \
-  --target-table-name clawcore-tenants-restored \
+  --source-table-name chimera-tenants \
+  --target-table-name chimera-tenants-restored \
   --restore-date-time "$RECOVERY_TIME" \
   --no-use-latest-restorable-time
 
 # Step 3: Verify restored data
 aws dynamodb scan \
-  --table-name clawcore-tenants-restored \
+  --table-name chimera-tenants-restored \
   --select COUNT
 
 # Step 4: Swap tables (rename approach via CDK)
@@ -1024,7 +1024,7 @@ Primary Region (us-west-2)          DR Region (us-east-1)
 | 3 | Cognito user group exists | `aws cognito-idp list-groups` |
 | 4 | First user created and can authenticate | Test login |
 | 5 | Agent responds to "Hello" | Manual test |
-| 6 | Skills visible in tenant skill list | `clawcore skill list` |
+| 6 | Skills visible in tenant skill list | `chimera skill list` |
 | 7 | Dashboard shows data | CloudWatch console |
 | 8 | Budget alarm configured | `aws cloudwatch describe-alarms` |
 | 9 | Cron jobs scheduled (if any) | `aws events list-rules` |
@@ -1036,7 +1036,7 @@ Primary Region (us-west-2)          DR Region (us-east-1)
 |---|------|--------|
 | 1 | **Detect** | Alarm fires or report received |
 | 2 | **Assess** | Determine severity (SEV1-4) |
-| 3 | **Communicate** | Post in #clawcore-incidents with initial assessment |
+| 3 | **Communicate** | Post in #chimera-incidents with initial assessment |
 | 4 | **Contain** | Isolate affected component (rollback, throttle, quarantine) |
 | 5 | **Investigate** | CloudWatch Logs, X-Ray traces, CloudTrail, VPC Flow Logs |
 | 6 | **Remediate** | Fix root cause; deploy fix via canary pipeline |
@@ -1075,27 +1075,27 @@ L3: VP Engineering + AWS TAM (for AWS service issues)
 
 | Tool | Purpose | Access |
 |------|---------|--------|
-| AWS Console | Dashboard, logs, alarms | IAM role: `clawcore-oncall-role` |
+| AWS Console | Dashboard, logs, alarms | IAM role: `chimera-oncall-role` |
 | CloudWatch Logs Insights | Log search and analysis | Same IAM role |
 | X-Ray | Distributed tracing | Same IAM role |
-| `clawcore` CLI | Tenant management, skill ops | Installed on ops laptop |
+| `chimera` CLI | Tenant management, skill ops | Installed on ops laptop |
 | PagerDuty | Incident management | Team account |
-| Slack #clawcore-incidents | Incident communication | Team channel |
+| Slack #chimera-incidents | Incident communication | Team channel |
 | Grafana (optional) | Alternative dashboards | If configured |
 
 ### 11.4 First 5 Minutes Triage Script
 
 ```bash
 #!/bin/bash
-# clawcore-triage.sh -- Run this first when paged
+# chimera-triage.sh -- Run this first when paged
 
-echo "=== ClawCore Platform Triage ==="
+echo "=== Chimera Platform Triage ==="
 echo "Time: $(date -u)"
 echo ""
 
 echo "--- Active Alarms ---"
 aws cloudwatch describe-alarms \
-  --alarm-name-prefix "ClawCore" \
+  --alarm-name-prefix "Chimera" \
   --state-value ALARM \
   --query 'MetricAlarms[].{Name:AlarmName,State:StateValue,Reason:StateReason}' \
   --output table
@@ -1125,7 +1125,7 @@ aws cloudwatch get-metric-statistics \
 echo ""
 echo "--- ECS Chat SDK Tasks ---"
 aws ecs describe-services \
-  --cluster clawcore-chat \
+  --cluster chimera-chat \
   --services chat-sdk \
   --query 'services[0].{Running:runningCount,Desired:desiredCount,Pending:pendingCount}' \
   --output table
@@ -1133,13 +1133,13 @@ aws ecs describe-services \
 echo ""
 echo "--- Recent Deployments (last 24h) ---"
 aws codepipeline list-pipeline-executions \
-  --pipeline-name clawcore-deploy \
+  --pipeline-name chimera-deploy \
   --query 'pipelineExecutionSummaries[?lastUpdateTime>=`'"$(date -u -v-24H +%Y-%m-%dT%H:%M:%S)"'`].{Status:status,Time:lastUpdateTime}' \
   --output table
 
 echo ""
 echo "--- DynamoDB Throttles ---"
-for table in clawcore-tenants clawcore-sessions clawcore-skills clawcore-rate-limits; do
+for table in chimera-tenants chimera-sessions chimera-skills chimera-rate-limits; do
   throttles=$(aws cloudwatch get-metric-statistics \
     --namespace AWS/DynamoDB \
     --metric-name ThrottledRequests \
@@ -1177,7 +1177,7 @@ done
 Emergency maintenance (unplanned patching, security fixes) follows this process:
 
 1. Assess: Is it exploitable now? If yes, proceed immediately
-2. Communicate: Post to #clawcore-ops with ETA and impact
+2. Communicate: Post to #chimera-ops with ETA and impact
 3. Test: Deploy fix to staging and run security test suite
 4. Deploy: Use canary pipeline with shortened bake time (10 min)
 5. Verify: Run synthetic canary + targeted tests
@@ -1187,13 +1187,13 @@ Emergency maintenance (unplanned patching, security fixes) follows this process:
 
 ## Related Documents
 
-- [[ClawCore-Final-Architecture-Plan]] -- Architecture this runbook operates
-- [[ClawCore-AWS-Component-Blueprint]] -- AWS service details referenced throughout
-- [[ClawCore-Architecture-Review-Security]] -- Security incident response procedures
-- [[ClawCore-Architecture-Review-Cost-Scale]] -- Cost thresholds and optimization
+- [[Chimera-Final-Architecture-Plan]] -- Architecture this runbook operates
+- [[Chimera-AWS-Component-Blueprint]] -- AWS service details referenced throughout
+- [[Chimera-Architecture-Review-Security]] -- Security incident response procedures
+- [[Chimera-Architecture-Review-Cost-Scale]] -- Cost thresholds and optimization
 - [[06-Testing-Strategy]] -- Test suites used for deployment validation
 
 ---
 
-*Operational runbook authored 2026-03-19 by Ops Author agent on team clawcore-enhance.*
+*Operational runbook authored 2026-03-19 by Ops Author agent on team chimera-enhance.*
 *Covers deployment, monitoring, alerting, incident response, tenant lifecycle, DR, and capacity planning.*

@@ -1,6 +1,6 @@
 ---
 tags:
-  - clawcore
+  - chimera
   - llm
   - multi-provider
   - strands
@@ -14,18 +14,18 @@ status: complete
 # 05 — Multi-Provider LLM Implementation Guide
 
 > Detailed implementation patterns for integrating multiple LLM providers into the
-> ClawCore platform using Strands Agents, LiteLLM, and direct provider SDKs.
+> Chimera platform using Strands Agents, LiteLLM, and direct provider SDKs.
 > Covers Bedrock (primary), Anthropic direct, OpenAI/Azure OpenAI, Ollama,
 > model routing algorithms, per-tenant configuration, fallback chains,
 > cost tracking, and provider health monitoring.
 
-Related: [[ClawCore-Final-Architecture-Plan]] | [[ClawCore-Self-Evolution-Engine]] | [[../AWS Bedrock AgentCore and Strands Agents/09-Multi-Provider-LLM-Support]] | [[../AWS Bedrock AgentCore and Strands Agents/04-Strands-Agents-Core]]
+Related: [[Chimera-Final-Architecture-Plan]] | [[Chimera-Self-Evolution-Engine]] | [[../AWS Bedrock AgentCore and Strands Agents/09-Multi-Provider-LLM-Support]] | [[../AWS Bedrock AgentCore and Strands Agents/04-Strands-Agents-Core]]
 
 ---
 
 ## 1. Architecture Overview
 
-ClawCore uses a layered approach to multi-provider LLM support:
+Chimera uses a layered approach to multi-provider LLM support:
 
 ```
                           +--------------------------+
@@ -139,7 +139,7 @@ pip install 'strands-agents[all]'         # Everything
 
 ## 3. Bedrock as Primary Provider
 
-Bedrock is ClawCore's default provider because it offers managed access to multiple model families through a single API, with built-in features critical for production multi-tenant platforms.
+Bedrock is Chimera's default provider because it offers managed access to multiple model families through a single API, with built-in features critical for production multi-tenant platforms.
 
 ### BedrockModel Configuration
 
@@ -173,7 +173,7 @@ model = BedrockModel(
     },
 
     # Guardrails (optional, per-tenant)
-    guardrail_id="clawcore-content-filter",
+    guardrail_id="chimera-content-filter",
     guardrail_version="1",
 
     # Additional Bedrock-specific fields
@@ -184,7 +184,7 @@ model = BedrockModel(
 
 agent = Agent(
     model=model,
-    system_prompt="You are a ClawCore agent.",
+    system_prompt="You are a Chimera agent.",
     tools=[...],
 )
 ```
@@ -201,7 +201,7 @@ Cross-region profiles are the primary mechanism for production throughput. They 
 | `global.` | All commercial | All commercial regions worldwide | Maximum throughput |
 
 ```python
-# ClawCore model factory -- select profile based on tenant geography
+# Chimera model factory -- select profile based on tenant geography
 def create_bedrock_model(tenant_config: dict) -> BedrockModel:
     """Create a BedrockModel with the appropriate inference profile."""
     geography = tenant_config.get("geography", "us")
@@ -251,13 +251,13 @@ def create_tenant_inference_profile(
     bedrock = boto3.client("bedrock", region_name="us-east-1")
 
     response = bedrock.create_inference_profile(
-        inferenceProfileName=f"clawcore-{tenant_id}",
+        inferenceProfileName=f"chimera-{tenant_id}",
         modelSource={
             "copyFrom": f"arn:aws:bedrock:us-east-1::inference-profile/{model_id}"
         },
         tags=[
             {"key": "tenant_id", "value": tenant_id},
-            {"key": "platform", "value": "clawcore"},
+            {"key": "platform", "value": "chimera"},
         ],
     )
 
@@ -330,7 +330,7 @@ model = AnthropicModel(
 
 agent = Agent(
     model=model,
-    system_prompt="You are a ClawCore agent using direct Anthropic API.",
+    system_prompt="You are a Chimera agent using direct Anthropic API.",
     tools=[...],
 )
 ```
@@ -346,9 +346,9 @@ agent = Agent(
 | **Guardrails** | Bedrock Guardrails integration | Must build custom |
 | **Cost tracking** | Application inference profiles | Manual |
 | **Extended thinking** | Supported | Supported |
-| **Best for ClawCore** | Production (default) | Fallback, latest features |
+| **Best for Chimera** | Production (default) | Fallback, latest features |
 
-### ClawCore Integration: Anthropic as Fallback
+### Chimera Integration: Anthropic as Fallback
 
 ```python
 def create_anthropic_fallback(tenant_config: dict) -> AnthropicModel:
@@ -358,7 +358,7 @@ def create_anthropic_fallback(tenant_config: dict) -> AnthropicModel:
     # Retrieve API key from Secrets Manager (not env vars in multi-tenant)
     secrets = boto3.client("secretsmanager")
     api_key = secrets.get_secret_value(
-        SecretId=f"clawcore/{tenant_config['tenant_id']}/anthropic-api-key"
+        SecretId=f"chimera/{tenant_config['tenant_id']}/anthropic-api-key"
     )["SecretString"]
 
     return AnthropicModel(
@@ -444,7 +444,7 @@ agent = Agent(model=model, tools=[...])
 | **Enterprise compliance** | SOC 2 | Azure compliance suite | SOC 2 |
 | **Tool calling** | Native | Native | Native |
 | **Streaming** | Full | Full | Full |
-| **ClawCore use** | Dev/testing | Enterprise tenants | General fallback |
+| **Chimera use** | Dev/testing | Enterprise tenants | General fallback |
 
 ---
 
@@ -472,7 +472,7 @@ model = OllamaModel(
 
 agent = Agent(
     model=model,
-    system_prompt="You are a ClawCore agent running locally.",
+    system_prompt="You are a Chimera agent running locally.",
     tools=[...],
 )
 ```
@@ -490,7 +490,7 @@ Ollama supports tool calling (function calling) with these model families as of 
 | Qwen 2.5 Coder | 1.5B-32B | Yes | 128K | Code-specific tasks |
 | Mistral Small | 24B | Yes | 128K | Fast, efficient |
 
-### ClawCore Local Development Profile
+### Chimera Local Development Profile
 
 ```python
 # config/dev-local.py -- Development profile using Ollama
@@ -506,14 +506,14 @@ def create_dev_agent(tools: list) -> Agent:
             max_tokens=4096,
             temperature=0.3,
         ),
-        system_prompt="You are a ClawCore agent (dev mode).",
+        system_prompt="You are a Chimera agent (dev mode).",
         tools=tools,
     )
 ```
 
 ### Ollama for Edge Deployment
 
-For ClawCore tenants running on-premise or in air-gapped environments:
+For Chimera tenants running on-premise or in air-gapped environments:
 
 ```python
 # Edge deployment: Ollama on customer hardware
@@ -533,7 +533,7 @@ EDGE_CONFIG = {
 
 ## 7. LiteLLM as Universal Proxy
 
-LiteLLM provides access to 100+ providers through a single OpenAI-compatible interface. ClawCore uses it in two modes: as a Strands model provider (SDK) and as a standalone proxy server (gateway).
+LiteLLM provides access to 100+ providers through a single OpenAI-compatible interface. Chimera uses it in two modes: as a Strands model provider (SDK) and as a standalone proxy server (gateway).
 
 ### Mode 1: LiteLLM as Strands Provider (SDK)
 
@@ -586,7 +586,7 @@ For centralized control, deploy LiteLLM as a proxy that all agents route through
 #### Proxy Configuration (`litellm_config.yaml`)
 
 ```yaml
-# ClawCore LiteLLM Proxy Configuration
+# Chimera LiteLLM Proxy Configuration
 model_list:
   # === Tier 1: Complex Reasoning ===
   - model_name: "reasoning"
@@ -686,7 +686,7 @@ litellm_settings:
 | **Caching** | Per-process | Shared across all agents |
 | **Best for** | Simple setups, <10 agents | Production, multi-tenant, governance |
 
-### ClawCore Recommendation
+### Chimera Recommendation
 
 - **Phase 1-4:** Use Strands BedrockModel directly (simplest)
 - **Phase 5+:** Add LiteLLM proxy for centralized cost tracking and budget enforcement
@@ -745,7 +745,7 @@ def classify_task(user_message: str) -> TaskCategory:
 
 ### Bayesian Multi-Armed Bandit Router
 
-The full router from [[ClawCore-Self-Evolution-Engine#4. Model Routing Evolution]] uses Thompson Sampling to learn optimal model-per-category:
+The full router from [[Chimera-Self-Evolution-Engine#4. Model Routing Evolution]] uses Thompson Sampling to learn optimal model-per-category:
 
 ```python
 import random
@@ -856,7 +856,7 @@ class BayesianModelRouter:
     def save_state(self):
         """Persist routing state to DynamoDB."""
         dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table("clawcore-evolution-state")
+        table = dynamodb.Table("chimera-evolution-state")
 
         state = {}
         for cat, arms in self.arms.items():
@@ -876,7 +876,7 @@ class BayesianModelRouter:
     def load_state(cls, tenant_id: str) -> "BayesianModelRouter":
         """Load routing state from DynamoDB."""
         dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table("clawcore-evolution-state")
+        table = dynamodb.Table("chimera-evolution-state")
 
         item = table.get_item(
             Key={"PK": f"TENANT#{tenant_id}", "SK": "MODEL_ROUTING"}
@@ -911,8 +911,8 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 
 
-class ClawCoreModelRouter:
-    """Full model routing pipeline for ClawCore."""
+class ChimeraModelRouter:
+    """Full model routing pipeline for Chimera."""
 
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
@@ -973,7 +973,7 @@ class ClawCoreModelRouter:
 ### DynamoDB Schema
 
 ```
-Table: clawcore-tenants
+Table: chimera-tenants
 PK: TENANT#{tenant_id}
 SK: MODEL_CONFIG
 
@@ -1018,7 +1018,7 @@ def load_tenant_model(
 ) -> Model:
     """Load the appropriate model for a tenant, optionally per task."""
     dynamodb = boto3.resource("dynamodb")
-    table = dynamodb.Table("clawcore-tenants")
+    table = dynamodb.Table("chimera-tenants")
 
     item = table.get_item(
         Key={"PK": f"TENANT#{tenant_id}", "SK": "MODEL_CONFIG"}
@@ -1221,7 +1221,7 @@ class FallbackChain:
         }
 
 
-# ClawCore default fallback chain
+# Chimera default fallback chain
 def create_default_fallback_chain(tenant_config: dict) -> FallbackChain:
     """Create a fallback chain based on tenant configuration."""
     chain_config = tenant_config.get("fallback_chain", [
@@ -1332,7 +1332,7 @@ def record_usage(
     period = now.strftime("%Y-%m")
 
     dynamodb = boto3.resource("dynamodb")
-    table = dynamodb.Table("clawcore-cost-tracking")
+    table = dynamodb.Table("chimera-cost-tracking")
 
     # Atomic increment of monthly totals
     table.update_item(
@@ -1371,8 +1371,8 @@ def record_usage(
 def check_budget(tenant_id: str) -> dict:
     """Check if a tenant is within budget before model invocation."""
     dynamodb = boto3.resource("dynamodb")
-    tenants_table = dynamodb.Table("clawcore-tenants")
-    cost_table = dynamodb.Table("clawcore-cost-tracking")
+    tenants_table = dynamodb.Table("chimera-tenants")
+    cost_table = dynamodb.Table("chimera-cost-tracking")
 
     now = datetime.utcnow()
     period = now.strftime("%Y-%m")
@@ -1542,7 +1542,7 @@ class ProviderHealthMonitor:
 
         for key, health in self.providers.items():
             cloudwatch.put_metric_data(
-                Namespace="ClawCore/ProviderHealth",
+                Namespace="Chimera/ProviderHealth",
                 MetricData=[
                     {
                         "MetricName": "SuccessRate",
@@ -1606,7 +1606,7 @@ def create_provider_alarms(stack: cdk.Stack):
     cw.Alarm(
         stack, "ProviderSuccessRateAlarm",
         metric=cw.Metric(
-            namespace="ClawCore/ProviderHealth",
+            namespace="Chimera/ProviderHealth",
             metric_name="SuccessRate",
             statistic="Average",
             period=cdk.Duration.minutes(5),
@@ -1621,7 +1621,7 @@ def create_provider_alarms(stack: cdk.Stack):
     cw.Alarm(
         stack, "ProviderLatencyAlarm",
         metric=cw.Metric(
-            namespace="ClawCore/ProviderHealth",
+            namespace="Chimera/ProviderHealth",
             metric_name="AvgLatencyMs",
             statistic="p99",
             period=cdk.Duration.minutes(5),
@@ -1643,7 +1643,7 @@ def create_provider_alarms(stack: cdk.Stack):
 1. User sends message via Chat SDK
 2. API Gateway routes to tenant's AgentCore runtime
 3. Strands Agent receives the message
-4. ClawCoreModelRouter:
+4. ChimeraModelRouter:
    a. classify_task() → task_category (via Nova Micro, ~$0.001)
    b. check_budget() → verify tenant within budget
    c. bayesian_router.select_model() → optimal model for category
@@ -1697,7 +1697,7 @@ Did the primary model fail?
 
 ---
 
-## 15. Implementation Phases for ClawCore
+## 15. Implementation Phases for Chimera
 
 | Phase | What | Models | Routing |
 |-------|------|--------|---------|
@@ -1712,11 +1712,11 @@ Did the primary model fail?
 
 ## Related Documents
 
-- [[ClawCore-Final-Architecture-Plan]] -- Overall architecture and phases
-- [[ClawCore-Self-Evolution-Engine]] -- Model routing evolution with Bayesian optimization
+- [[Chimera-Final-Architecture-Plan]] -- Overall architecture and phases
+- [[Chimera-Self-Evolution-Engine]] -- Model routing evolution with Bayesian optimization
 - [[../AWS Bedrock AgentCore and Strands Agents/09-Multi-Provider-LLM-Support]] -- Research on all provider options
 - [[../AWS Bedrock AgentCore and Strands Agents/04-Strands-Agents-Core]] -- Strands framework deep dive
-- [[ClawCore-Architecture-Review-Cost-Scale]] -- Cost model and pricing analysis
+- [[Chimera-Architecture-Review-Cost-Scale]] -- Cost model and pricing analysis
 
 ---
 

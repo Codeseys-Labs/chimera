@@ -4,17 +4,17 @@ tags:
   - architecture
   - security
   - openclaw
-  - clawcore
+  - chimera
   - threat-model
   - stride
   - review
 date: 2026-03-19
-topic: ClawCore Security Architecture Review
+topic: Chimera Security Architecture Review
 status: complete
 reviewer: Security Architect
 ---
 
-# ClawCore Security Architecture Review
+# Chimera Security Architecture Review
 
 > Security architecture review of the AWS-Native OpenClaw Architecture Synthesis.
 > Covers STRIDE threat modeling, ClawHavoc lessons, defense-in-depth analysis,
@@ -24,7 +24,7 @@ reviewer: Security Architect
 
 ## Executive Assessment
 
-The ClawCore architecture demonstrates a **mature security posture** by design. The
+The Chimera architecture demonstrates a **mature security posture** by design. The
 8-layer defense-in-depth model addresses the major threat surfaces of a multi-tenant
 agent platform. The architecture correctly learns from ClawHavoc (1,184 malicious
 skills, 3 CVEs) and builds verification, sandboxing, and policy enforcement into every
@@ -51,7 +51,7 @@ need explicit mitigations before production deployment.
 
 ### 1.1 Threat Matrix
 
-| STRIDE Category | Threat | Severity | Attack Surface | ClawCore Exposure |
+| STRIDE Category | Threat | Severity | Attack Surface | Chimera Exposure |
 |----------------|--------|----------|----------------|-------------------|
 | **Spoofing** | Tenant impersonation via forged JWT | Critical | API Gateway, Cognito | Medium -- mitigated by Cognito JWT validation but JWT must never pass through LLM reasoning |
 | **Spoofing** | Skill author impersonation on marketplace | High | S3 skill registry | High -- ClawHavoc showed 12 malicious author IDs published 1,184 skills |
@@ -134,7 +134,7 @@ forbid(
 def write_memory(tenant_id, key, value, previous_hash):
     entry_hash = sha256(f"{previous_hash}:{key}:{value}")
     dynamodb.put_item(
-        TableName="clawcore-memory-audit",
+        TableName="chimera-memory-audit",
         Item={
             "PK": f"TENANT#{tenant_id}",
             "SK": f"AUDIT#{timestamp}",
@@ -158,7 +158,7 @@ def write_memory(tenant_id, key, value, previous_hash):
         {
             "Effect": "Allow",
             "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query"],
-            "Resource": "arn:aws:dynamodb:*:*:table/clawcore-*",
+            "Resource": "arn:aws:dynamodb:*:*:table/chimera-*",
             "Condition": {
                 "ForAllValues:StringLike": {
                     "dynamodb:LeadingKeys": ["TENANT#${aws:PrincipalTag/tenantId}#*"]
@@ -168,7 +168,7 @@ def write_memory(tenant_id, key, value, previous_hash):
         {
             "Effect": "Deny",
             "Action": ["dynamodb:Scan", "dynamodb:BatchGetItem"],
-            "Resource": "arn:aws:dynamodb:*:*:table/clawcore-*",
+            "Resource": "arn:aws:dynamodb:*:*:table/chimera-*",
             "Condition": {
                 "StringNotEquals": {
                     "aws:PrincipalTag/TenantRole": "platform-admin"
@@ -188,12 +188,12 @@ def write_memory(tenant_id, key, value, previous_hash):
         {
             "Effect": "Allow",
             "Action": ["s3:GetObject", "s3:PutObject"],
-            "Resource": "arn:aws:s3:::clawcore-tenants/${aws:PrincipalTag/tenantId}/*"
+            "Resource": "arn:aws:s3:::chimera-tenants/${aws:PrincipalTag/tenantId}/*"
         },
         {
             "Effect": "Deny",
             "Action": "s3:ListBucket",
-            "Resource": "arn:aws:s3:::clawcore-tenants",
+            "Resource": "arn:aws:s3:::chimera-tenants",
             "Condition": {
                 "StringNotLike": {
                     "s3:prefix": "${aws:PrincipalTag/tenantId}/*"
@@ -372,7 +372,7 @@ forbid(
 
 ### 3.1 ClawHavoc Impact Summary
 
-| Metric | Value | Implication for ClawCore |
+| Metric | Value | Implication for Chimera |
 |--------|-------|-------------------------|
 | Malicious skills published | 1,184+ | Mandatory automated scanning required |
 | Registry compromise rate | ~12% at peak | Cannot trust community content without verification |
@@ -384,7 +384,7 @@ forbid(
 
 ### 3.2 Root Cause to Mitigation Mapping
 
-| Root Cause | OpenClaw | ClawCore Mitigation | Residual Risk |
+| Root Cause | OpenClaw | Chimera Mitigation | Residual Risk |
 |-----------|----------|---------------------|---------------|
 | No code review | Published freely | Static + dynamic analysis pipeline | Sophisticated obfuscation |
 | SKILL.md in system prompt | Direct prompt injection | Isolated context loading; Cedar restricts capabilities | LLM still influenced by content |
@@ -771,7 +771,7 @@ def pii_preprocess_interceptor(event):
 
 ```
 Secrets Manager                    Agent Runtime (MicroVM)
-/clawcore/tenant-acme/            +--------------------------+
+/chimera/tenant-acme/            +--------------------------+
   api-keys/                       | Session-scoped env vars  |
     slack-bot-token  -----------> | $SLACK_TOKEN             |
     github-pat       -----------> | $GITHUB_TOKEN            |
@@ -790,7 +790,7 @@ permit(
     action == Action::"read_secret",
     resource
 ) when {
-    resource.path.startsWith("/clawcore/tenant-acme/")
+    resource.path.startsWith("/chimera/tenant-acme/")
 };
 
 // Agent cannot read platform secrets
@@ -799,7 +799,7 @@ forbid(
     action == Action::"read_secret",
     resource
 ) when {
-    resource.path.startsWith("/clawcore/platform/")
+    resource.path.startsWith("/chimera/platform/")
 };
 
 // Marketplace skills cannot access secrets directly
@@ -825,7 +825,7 @@ forbid(
 
 ```json
 {
-  "Name": "ClawCoreWAFRules",
+  "Name": "ChimeraWAFRules",
   "Rules": [
     {
       "Name": "RateLimitPerTenant",
@@ -919,7 +919,7 @@ forbid(
 
 ```json
 {
-    "name": "clawcore-agent-guardrail",
+    "name": "chimera-agent-guardrail",
     "contentPolicyConfig": {
         "filtersConfig": [
             {"type": "VIOLENCE", "inputStrength": "HIGH", "outputStrength": "HIGH"},
@@ -1069,7 +1069,7 @@ VPC (10.0.0.0/16)
 
 ### 10.1 SOC 2 Type II
 
-| SOC 2 Criteria | ClawCore Control | Evidence |
+| SOC 2 Criteria | Chimera Control | Evidence |
 |----------------|-----------------|----------|
 | CC6.1: Logical access | Cognito JWT + Cedar + IAM | CloudTrail, Cedar policy store |
 | CC6.2: Access removal | Session termination, Cognito disable | Automated deprovisioning |
@@ -1128,7 +1128,7 @@ VPC (10.0.0.0/16)
 
 **Overall Security Posture: CONDITIONAL APPROVAL**
 
-The ClawCore architecture makes fundamentally sound choices:
+The Chimera architecture makes fundamentally sound choices:
 - MicroVM isolation is the strongest available execution boundary
 - Cedar provides expressive, formally verifiable policy enforcement
 - Hybrid silo/pool model enables right-sizing isolation per tenant tier
@@ -1138,11 +1138,11 @@ The ClawCore architecture makes fundamentally sound choices:
 
 1. **Self-modifying IaC** is unprecedented risk. An agent modifying its own infrastructure is a novel threat with no industry precedent for safe operation. The 4-layer guardrail approach (Section 4) is necessary but must be proven through adversarial red-teaming.
 
-2. **Skill marketplace supply chain** directly inherits ClawHavoc risks. The 4-tier trust model with automated scanning is essential, not optional. Without it, ClawCore will face the same attacks that compromised 12% of ClawHub.
+2. **Skill marketplace supply chain** directly inherits ClawHavoc risks. The 4-tier trust model with automated scanning is essential, not optional. Without it, Chimera will face the same attacks that compromised 12% of ClawHub.
 
 3. **Prompt injection remains unsolved** at the LLM layer. Defense-in-depth (Guardrails + Cedar + sandboxing) limits blast radius but cannot prevent initial injection. The architecture correctly assumes compromise and contains it.
 
-**Bottom line:** ClawCore's security architecture is well-designed for a platform of this complexity. The MicroVM + Cedar + Guardrails stack is stronger than any open-source alternative (OpenClaw, NemoClaw, OpenFang). The critical findings are addressable without architectural changes -- they require implementation discipline, not redesign.
+**Bottom line:** Chimera's security architecture is well-designed for a platform of this complexity. The MicroVM + Cedar + Guardrails stack is stronger than any open-source alternative (OpenClaw, NemoClaw, OpenFang). The critical findings are addressable without architectural changes -- they require implementation discipline, not redesign.
 
 ---
 
@@ -1181,5 +1181,5 @@ The ClawCore architecture makes fundamentally sound choices:
 
 ---
 
-*Security architecture review conducted 2026-03-19 by Security Architect agent on team clawcore-architecture.*
+*Security architecture review conducted 2026-03-19 by Security Architect agent on team chimera-architecture.*
 *Reviewed against: AWS Well-Architected Security Pillar, OWASP LLM Top 10, STRIDE, NIST SP 800-53r5.*

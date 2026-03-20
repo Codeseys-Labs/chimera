@@ -1,28 +1,28 @@
 ---
 tags:
-  - clawcore
+  - chimera
   - efs
   - storage
   - aws
   - agent-workspace
 date: 2026-03-19
-topic: EFS & Agent Workspace Storage for ClawCore
+topic: EFS & Agent Workspace Storage for Chimera
 status: complete
 related:
-  - "[[ClawCore-AWS-Component-Blueprint]]"
-  - "[[ClawCore-Final-Architecture-Plan]]"
+  - "[[Chimera-AWS-Component-Blueprint]]"
+  - "[[Chimera-Final-Architecture-Plan]]"
   - "[[AWS Bedrock AgentCore and Strands Agents/06-AWS-Services-Agent-Infrastructure]]"
-  - "[[ClawCore-Definitive-Architecture]]"
+  - "[[Chimera-Definitive-Architecture]]"
 ---
 
-# EFS & Agent Workspace Storage for ClawCore
+# EFS & Agent Workspace Storage for Chimera
 
 > A deep dive into Amazon Elastic File System (EFS) patterns for multi-tenant AI agent
 > workspaces. Covers storage architecture decisions, EFS Access Points for tenant isolation,
 > integration patterns with Fargate/Lambda/AgentCore, cost modeling at scale, and CDK
 > implementation code.
 
-The existing ClawCore architecture (see [[ClawCore-AWS-Component-Blueprint]]) uses S3 + DynamoDB
+The existing Chimera architecture (see [[Chimera-AWS-Component-Blueprint]]) uses S3 + DynamoDB
 as primary storage. This document explores **EFS as a complementary storage layer** for use
 cases where agents need POSIX filesystem semantics: persistent working directories, shared
 skill libraries, code repositories, and real-time file collaboration between agent components.
@@ -104,9 +104,9 @@ flowchart TD
     style MOUNTPOINT fill:#e76f51,color:#fff
 ```
 
-### 2.3 When to Use Which: ClawCore Mapping
+### 2.3 When to Use Which: Chimera Mapping
 
-| ClawCore Component | Recommended Storage | Rationale |
+| Chimera Component | Recommended Storage | Rationale |
 |-------------------|-------------------|-----------|
 | **Agent session memory** | DynamoDB + S3 snapshots | Structured data, need for queries and TTL |
 | **Code interpreter sandbox** | Ephemeral (MicroVM) | Isolated per execution, destroyed after |
@@ -132,7 +132,7 @@ flowchart TD
 
 ### 3.1 Core Design: One File System, Many Access Points
 
-The recommended pattern for ClawCore is a **single Regional EFS file system** with
+The recommended pattern for Chimera is a **single Regional EFS file system** with
 **one Access Point per tenant**. This provides:
 
 - **Cost efficiency**: One file system, no per-tenant infrastructure overhead
@@ -141,7 +141,7 @@ The recommended pattern for ClawCore is a **single Regional EFS file system** wi
 - **IAM integration**: Policies can restrict which principals use which Access Points
 
 ```
-EFS File System: clawcore-workspaces
+EFS File System: chimera-workspaces
 |
 |-- /tenants/
 |   |-- /acme/                    <-- Access Point: fsap-acme (uid: 10001)
@@ -224,7 +224,7 @@ Combine Access Points with IAM to ensure each tenant's compute resources can onl
 ```
 
 > [!warning] Access Point Limits
-> EFS supports up to **1,000 Access Points per file system**. For ClawCore at
+> EFS supports up to **1,000 Access Points per file system**. For Chimera at
 > 1,000+ tenants, you would need multiple EFS file systems with a routing layer.
 > At 100 tenants (Phase 1 target), this is not a concern.
 
@@ -246,7 +246,7 @@ Combine Access Points with IAM to ensure each tenant's compute resources can onl
 ### 4.1 EFS + Fargate (Chat Service, Tool Executors)
 
 Fargate natively supports EFS volumes in task definitions. This is the primary
-integration point for ClawCore's chat service and tool executor containers.
+integration point for Chimera's chat service and tool executor containers.
 
 ```typescript
 // CDK: Fargate task with EFS volume mount
@@ -423,7 +423,7 @@ sequenceDiagram
     AC->>S3: Read results via SDK
 ```
 
-> [!tip] Recommendation for ClawCore
+> [!tip] Recommendation for Chimera
 > Use **Pattern A (Sidecar Proxy)** for Phase 0-1. It's simpler, has fewer moving
 > parts, and leverages AgentCore Gateway's existing MCP tool routing. Pattern B
 > is better for Phase 2+ when you have high-throughput batch operations that
@@ -443,7 +443,7 @@ EFS offers three throughput modes. The choice significantly impacts both perform
 | **Provisioned** | You specify throughput (1-3072 MiB/s). Pay whether used or not. | Steady, predictable high-throughput needs. | $6.00/MiB/s/month provisioned |
 | **Bursting** (legacy) | Throughput scales with storage size. Burst credits for peaks. | Large datasets with occasional bursts. Not recommended for new deployments. | Included in storage price (baseline: 50 KiB/s per GiB stored) |
 
-#### Throughput Mode Decision for ClawCore
+#### Throughput Mode Decision for Chimera
 
 ```mermaid
 flowchart LR
@@ -457,7 +457,7 @@ flowchart LR
 ```
 
 > [!tip] Start with Elastic
-> For ClawCore, **Elastic throughput** is the right choice for Phase 0-2. Agent
+> For Chimera, **Elastic throughput** is the right choice for Phase 0-2. Agent
 > workloads are inherently bursty -- agents are idle most of the time, then burst
 > during active sessions with heavy file I/O. Elastic mode means you pay nothing
 > during idle periods. Switch to Provisioned only if CloudWatch monitoring shows
@@ -510,7 +510,7 @@ const agentWorkspace = new efs.FileSystem(this, 'AgentWorkspace', {
 | **General Purpose** (recommended) | Up to 55,000 read, 25,000 write | Sub-millisecond | Most workloads. Agent workspaces, skill libraries. |
 | **Max I/O** (legacy) | 500,000+ | Higher (ms) | Highly parallelized big data. Not needed for agents. |
 
-> Always use **General Purpose** for ClawCore. Agent workloads are latency-sensitive
+> Always use **General Purpose** for Chimera. Agent workloads are latency-sensitive
 > (tool calls need fast file reads) and do not require the extreme parallelism of Max I/O.
 
 ---
@@ -519,7 +519,7 @@ const agentWorkspace = new efs.FileSystem(this, 'AgentWorkspace', {
 
 ### 6.1 The Skill Library Problem
 
-ClawCore skills (see [[ClawCore-AWS-Component-Blueprint#1.3 AgentCore Gateway]]) are
+Chimera skills (see [[Chimera-AWS-Component-Blueprint#1.3 AgentCore Gateway]]) are
 stored in S3 as the source of truth. But agents and tool executors need to _run_ skill
 code, which requires a filesystem with installed dependencies.
 
@@ -666,7 +666,7 @@ interface to S3 data without the cost of EFS.
 | **git operations** | Does not work (requires random writes, rename) | Works fully |
 | **pip/npm install** | Partially works (some operations fail) | Works fully |
 
-### 8.3 Verdict for ClawCore
+### 8.3 Verdict for Chimera
 
 > [!warning] Mountpoint for S3 is NOT suitable for agent workspaces
 > Agent workspaces require full POSIX semantics: git clone, pip install, file
@@ -785,7 +785,7 @@ export class AgentWorkspace extends Construct {
 
     // Regional EFS file system with Intelligent-Tiering
     this.fileSystem = new efs.FileSystem(this, 'FileSystem', {
-      fileSystemName: 'clawcore-agent-workspaces',
+      fileSystemName: 'chimera-agent-workspaces',
       vpc: props.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroup: this.fileSystemSecurityGroup,
@@ -928,7 +928,7 @@ props.agentWorkspace.grantMount(tenantRole, props.sharedSkillsAP, true);
 // Export Access Point ID for Fargate task definitions
 new cdk.CfnOutput(this, 'TenantAccessPointId', {
   value: tenantAP.accessPointId,
-  exportName: `ClawCore-${envName}-Tenant-${tc.tenantId}-EfsApId`,
+  exportName: `Chimera-${envName}-Tenant-${tc.tenantId}-EfsApId`,
 });
 ```
 
@@ -973,7 +973,7 @@ Key CloudWatch metrics for EFS agent workspaces:
 import * as backup from 'aws-cdk-lib/aws-backup';
 
 const plan = new backup.BackupPlan(this, 'EfsBackupPlan', {
-  backupPlanName: 'clawcore-efs-enterprise',
+  backupPlanName: 'chimera-efs-enterprise',
   backupPlanRules: [
     new backup.BackupPlanRule({
       ruleName: 'daily',
