@@ -267,38 +267,41 @@ def handler(event, context):
       cause: 'Skill failed security scanning pipeline',
     });
 
+    // Create failure chain once to avoid reusing state
+    const failureChain = scanFailureTask.next(scanRejected);
+
     // Define choices for each stage
     const checkStaticResult = new stepfunctions.Choice(this, 'CheckStaticResult')
       .when(
         stepfunctions.Condition.stringEquals('$.static_result', 'FAIL'),
-        scanFailureTask.next(scanRejected)
+        failureChain
       )
       .otherwise(dependencyAuditTask);
 
     const checkDependencyResult = new stepfunctions.Choice(this, 'CheckDependencyResult')
       .when(
         stepfunctions.Condition.stringEquals('$.dependency_result', 'FAIL'),
-        scanFailureTask.next(scanRejected)
+        failureChain
       )
       .otherwise(sandboxRunTask);
 
     const checkSandboxResult = new stepfunctions.Choice(this, 'CheckSandboxResult')
       .when(
         stepfunctions.Condition.stringEquals('$.sandbox_result', 'FAIL'),
-        scanFailureTask.next(scanRejected)
+        failureChain
       )
       .otherwise(permissionValidationTask);
 
     const checkPermissionResult = new stepfunctions.Choice(this, 'CheckPermissionResult')
       .when(
         stepfunctions.Condition.stringEquals('$.permission_result', 'FAIL'),
-        scanFailureTask.next(scanRejected)
+        failureChain
       )
       .otherwise(signingTask);
 
     // Chain the pipeline
     const definition = staticAnalysisTask
-      .addCatch(scanFailureTask.next(scanRejected), {
+      .addCatch(failureChain, {
         errors: ['States.ALL'],
         resultPath: '$.error',
       })
