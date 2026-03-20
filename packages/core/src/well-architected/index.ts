@@ -1,17 +1,41 @@
-/**
- * AWS Well-Architected Framework integration for Chimera agents
+ /**
+ * Well-Architected Framework Integration
  *
- * This module provides agent decision-making capabilities using the
- * AWS Well-Architected Framework's six pillars:
+ * Provides AWS Well-Architected Tool API integration for automated
+ * workload reviews, pillar evaluation, and infrastructure trade-off analysis.
  *
- * 1. Operational Excellence — Run and monitor systems effectively
- * 2. Security — Protect data, systems, and assets
- * 3. Reliability — Recover from failures, meet demand
- * 4. Performance Efficiency — Use resources efficiently
- * 5. Cost Optimization — Achieve outcomes at lowest price
- * 6. Sustainability — Minimize environmental impact
+ * ## Features
+ * - **AWS Well-Architected Tool API** - Create workloads, answer questions, track improvements
+ * - **Automated Review Generation** - Introspect infrastructure and generate Well-Architected reviews
+ * - **Pillar Evaluation** - Score infrastructure changes against six pillars
+ * - **Trade-off Presentation** - Present decisions in Well-Architected terms
  *
- * @example
+ * ## Usage
+ *
+ * ### Create and Review a Workload
+ * ```typescript
+ * import { createWellArchitectedToolAPI, createReviewGenerator } from '@chimera/core';
+ *
+ * const api = createWellArchitectedToolAPI({ region: 'us-west-2' });
+ *
+ * // Create workload
+ * const { workloadId } = await api.createWorkload({
+ *   workloadName: 'Chimera Platform',
+ *   description: 'Multi-tenant agent platform',
+ *   environment: 'PRODUCTION',
+ *   accountIds: ['123456789012'],
+ *   awsRegions: ['us-west-2'],
+ * });
+ *
+ * // Generate automated review
+ * const generator = createReviewGenerator({ api });
+ * const result = await generator.generateReview(workloadId);
+ *
+ * console.log(`Answered ${result.answeredQuestions} questions`);
+ * console.log(`High risk issues: ${result.summary.riskCounts.HIGH}`);
+ * ```
+ *
+ * ### Evaluate Infrastructure Changes
  * ```typescript
  * import { evaluateChange, presentTradeoffs } from '@chimera/core/well-architected';
  *
@@ -26,6 +50,7 @@
  * console.log(presentation.presentation); // Formatted markdown
  * ```
  *
+ * @module well-architected
  * @see docs/research/aws-account-agent/01-well-architected-framework.md
  */
 
@@ -68,3 +93,29 @@ export {
   formatForEmail,
   formatForAPI,
 } from './tradeoff-presenter.js';
+
+// API client
+export {
+  WellArchitectedToolAPI,
+  createWellArchitectedToolAPI,
+  type WellArchitectedToolConfig,
+  type CreateWorkloadParams,
+  type UpdateAnswerParams,
+  type CreateMilestoneParams,
+  type RiskLevel,
+  type PillarSummary,
+  type ReviewSummary,
+} from './wa-tool-api';
+
+// Review generator
+export {
+  ReviewGenerator,
+  createReviewGenerator,
+  type PillarId,
+  type PillarScore as ReviewPillarScore,
+  type PillarEvaluation as ReviewPillarEvaluation,
+  type InfrastructureEvaluation,
+  type GeneratedAnswer,
+  type ReviewGenerationResult,
+  type ReviewGeneratorConfig,
+} from './review-generator';

@@ -157,3 +157,6 @@ export * from './activity';
 
 // Infrastructure Builder module (agent-driven IaC workspace and deployment)
 export * from './infra-builder';
+
+// Well-Architected module (framework integration and automated reviews)
+export * from './well-architected';
