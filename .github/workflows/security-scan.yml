@@ -1,0 +1,359 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run nightly security scans at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  BUN_VERSION: "1.0.0"
+  NODE_VERSION: "20"
+
+jobs:
+  # Job 1: Dependency vulnerability scanning
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Bun audit (npm registry vulnerabilities)
+        run: bun audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: OSVC Database scan (Open Source Vulnerability Database)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Snyk dependency scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+  # Job 2: Static Application Security Testing (SAST)
+  sast-scan:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript,typescript
+          queries: security-extended
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install and build
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: Semgrep SAST scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/typescript
+            p/nodejs
+            p/owasp-top-ten
+            p/jwt
+          generateSarif: true
+
+      - name: Upload Semgrep results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+
+  # Job 3: Secret scanning
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 4: Container image scanning
+  container-scan:
+    name: Container Image Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image for scanning
+        run: |
+          docker build -t chimera-agent-runtime:scan ./packages/core
+
+      - name: Trivy container image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'chimera-agent-runtime:scan'
+          format: 'sarif'
+          output: 'trivy-container-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          vuln-type: 'os,library'
+
+      - name: Upload Trivy container results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-container-results.sarif'
+
+      - name: Snyk container scan
+        uses: snyk/actions/docker@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: chimera-agent-runtime:scan
+          args: --severity-threshold=high
+
+  # Job 5: Infrastructure security (CDK-nag)
+  infra-security:
+    name: Infrastructure Security Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build shared packages
+        run: |
+          cd packages/shared && bun run build
+          cd ../core && bun run build
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: bun install --frozen-lockfile
+
+      - name: Install cdk-nag
+        working-directory: infra
+        run: bun add -D cdk-nag
+
+      - name: Run cdk-nag security checks
+        working-directory: infra
+        run: |
+          # cdk-nag runs during synthesis if configured
+          npx cdk synth --all --quiet
+        env:
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+          CDK_DEFAULT_REGION: us-west-2
+
+      - name: Checkov IaC security scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infra/
+          framework: cloudformation
+          soft_fail: false
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # Job 6: OWASP LLM Top 10 security tests
+  llm-security-tests:
+    name: OWASP LLM Top 10 Security Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-asyncio boto3 botocore
+
+      - name: Run prompt injection tests
+        run: |
+          if [ -d "tests/security" ]; then
+            pytest tests/security/test_prompt_injection.py \
+              -m security \
+              --timeout=180 \
+              -v
+          fi
+        env:
+          TEST_MODE: security
+          SECURITY_TEST_BUDGET_USD: "2.00"
+
+      - name: Run tenant isolation tests
+        run: |
+          if [ -d "tests/security" ]; then
+            pytest tests/security/test_cross_tenant_attacks.py \
+              -m security \
+              --timeout=180 \
+              -v
+          fi
+
+      - name: Run skill security tests
+        run: |
+          if [ -d "tests/security" ]; then
+            pytest tests/security/ \
+              -m security \
+              -k "skill or plugin" \
+              --timeout=180 \
+              -v
+          fi
+
+  # Job 7: License compliance check
+  license-check:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: License finder
+        uses: pivotal/LicenseFinder@v7.0.1
+        with:
+          decisions_file: .license_finder.yml
+
+      - name: Check for copyleft licenses
+        run: |
+          # Fail if GPL, AGPL, or other copyleft licenses are found
+          bun run license-checker --production \
+            --exclude "MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC" \
+            --failOn "GPL;AGPL;LGPL"
+
+  # Summary job - generate security report
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs:
+      - dependency-scan
+      - sast-scan
+      - secret-scan
+      - container-scan
+      - infra-security
+      - license-check
+    if: always()
+    steps:
+      - name: Generate security summary
+        run: |
+          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Scan | ${{ needs.dependency-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST Scan | ${{ needs.sast-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret Scan | ${{ needs.secret-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Scan | ${{ needs.container-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure Security | ${{ needs.infra-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| License Check | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for failures
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" == "true" ]; then
+            echo "❌ One or more security scans failed"
+            exit 1
+          fi
+          echo "✓ All security scans passed"
