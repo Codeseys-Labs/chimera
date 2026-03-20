@@ -153,3 +153,6 @@ export * from './aws-tools';
 
 // Discovery module (AWS account-wide resource discovery)
 export * from './discovery';
+
+// Infrastructure Builder module (agent-driven IaC workspace and deployment)
+export * from './infra-builder';
