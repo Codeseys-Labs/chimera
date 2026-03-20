@@ -153,3 +153,6 @@ export * from './aws-tools';
 
 // Discovery module (AWS account-wide resource discovery)
 export * from './discovery';
+
+// Swarm module (autonomous problem-solving)
+export * from './swarm';
