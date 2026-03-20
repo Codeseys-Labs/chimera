@@ -1,5 +1,3 @@
-
-
 version: '1'
 domains:
   - architecture
@@ -14,6 +12,7 @@ domains:
   - documentation
   - self-evolution
   - evolution
+  - testing
 governance:
   max_entries: 100
   warn_entries: 150
