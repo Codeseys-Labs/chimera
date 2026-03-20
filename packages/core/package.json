@@ -26,7 +26,14 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@chimera/shared": "workspace:*",
-    "@aws-sdk/client-eventbridge": "^3.0.0"
+    "@aws-sdk/client-eventbridge": "^3.0.0",
+    "@aws-sdk/client-lambda": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-ec2": "^3.0.0",
+    "@aws-sdk/client-cloudwatch": "^3.0.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.0.0",
+    "@aws-sdk/client-sts": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
