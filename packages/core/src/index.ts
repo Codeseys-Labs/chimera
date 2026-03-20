@@ -42,5 +42,35 @@ export {
 // Memory module
 export * from './memory';
 
-// Tools module
+// Tools module (in-memory prototypes with adapter patterns)
 export * from './tools';
+
+// Skills module (production-ready ecosystem services)
+// Export with distinct names to avoid collision with tools module
+export {
+  SkillRegistry as SkillRegistryService,
+  SkillInstaller,
+  SkillDiscovery,
+  SkillValidator,
+  MCPGatewayClient,
+  SkillTrustEngine,
+  type RegistryConfig,
+  type DynamoDBClient,
+  type InstallerConfig,
+  type S3Client,
+  type DiscoveryConfig,
+  type DiscoveryFilters,
+  type SearchResult,
+  type BedrockKBClient,
+  type OpenSearchClient,
+  type ValidatorConfig,
+  type MCPGatewayConfig,
+  type MCPTool,
+  type MCPRegistrationResponse,
+  type HttpClient,
+  type TrustEngineConfig,
+  type ActionType,
+  type ResourceContext,
+  type PrincipalContext,
+  type AuthorizationResult,
+} from './skills';
