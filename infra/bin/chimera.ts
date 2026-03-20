@@ -4,6 +4,7 @@ import { NetworkStack } from '../lib/network-stack';
 import { DataStack } from '../lib/data-stack';
 import { SecurityStack } from '../lib/security-stack';
 import { ObservabilityStack } from '../lib/observability-stack';
+import { ApiStack } from '../lib/api-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -68,8 +69,20 @@ const observabilityStack = new ObservabilityStack(app, `${prefix}-Observability`
 observabilityStack.addDependency(dataStack);
 observabilityStack.addDependency(securityStack);
 
+// --- Stack 5: API Gateway ---
+// REST API v1 with JWT authorizer, WebSocket API, webhook routes, OpenAI-compatible endpoint.
+// Depends on SecurityStack for Cognito user pool and WAF WebACL.
+const apiStack = new ApiStack(app, `${prefix}-Api`, {
+  env: envConfig,
+  description: 'Chimera API Gateway: REST API, WebSocket, webhooks, OpenAI-compatible endpoint',
+  envName,
+  userPool: securityStack.userPool,
+  webAcl: securityStack.webAcl,
+});
+apiStack.addDependency(securityStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -80,5 +93,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack]
 // DataStack exports table ARNs/names, bucket ARNs/names
 // SecurityStack exports user pool ID/ARN, WebACL ARN, KMS key ARN
 // ObservabilityStack exports alarm topic ARN, dashboard URL/name
+// ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
 
 app.synth();
