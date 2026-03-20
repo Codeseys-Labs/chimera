@@ -74,3 +74,29 @@ export {
   type PrincipalContext,
   type AuthorizationResult,
 } from './skills';
+
+// Tenant module (multi-tenant configuration and resource management)
+export {
+  TenantService,
+  QuotaManager,
+  RateLimiter,
+  type TenantServiceConfig,
+  type CreateTenantParams,
+  type QuotaManagerConfig,
+  type QuotaCheckResult,
+  type ConsumeQuotaParams,
+  type CreateQuotaParams,
+  type RateLimiterConfig,
+  type CheckRateLimitParams,
+} from './tenant';
+
+// Billing module (cost tracking and budget management)
+export {
+  CostTracker,
+  BudgetMonitor,
+  type CostTrackerConfig,
+  type RecordCostParams,
+  type BudgetMonitorConfig,
+  type BudgetCheckResult,
+  type BudgetAction,
+} from './billing';
