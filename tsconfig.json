@@ -17,6 +17,7 @@
     { "path": "./packages/shared" },
     { "path": "./packages/core" },
     { "path": "./packages/sse-bridge" },
+    { "path": "./packages/chat-gateway" },
     { "path": "./infra" }
   ]
 }
