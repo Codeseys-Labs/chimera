@@ -8,10 +8,9 @@ import { createAgent, createDefaultSystemPrompt, StreamEvent } from '@chimera/co
 import { streamStrandsToDSP } from '@chimera/sse-bridge';
 import { StrandsStreamEvent } from '@chimera/sse-bridge';
 import { ChatRequest, ChatResponse, ErrorResponse } from '../types';
-import { WebPlatformAdapter } from '../adapters/web';
+import { getAdapter } from '../adapters';
 
 const router: ExpressRouter = Router();
-const webAdapter = new WebPlatformAdapter();
 
 /**
  * Map ChimeraAgent StreamEvent to StrandsStreamEvent
@@ -112,10 +111,29 @@ router.post('/stream', async (req: Request, res: Response) => {
       return;
     }
 
+    // Determine platform from request (default to 'web')
+    const platform = (req.body as { platform?: string }).platform || 'web';
+
+    // Get platform-specific adapter
+    let adapter;
+    try {
+      adapter = getAdapter(platform);
+    } catch (adapterError) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'UNSUPPORTED_PLATFORM',
+          message: adapterError instanceof Error ? adapterError.message : 'Unsupported platform',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      res.status(400).json(error);
+      return;
+    }
+
     // Parse request body
     let messages;
     try {
-      messages = webAdapter.parseIncoming(req.body);
+      messages = adapter.parseIncoming(req.body);
     } catch (parseError) {
       const error: ErrorResponse = {
         error: {
@@ -207,10 +225,29 @@ router.post('/message', async (req: Request, res: Response) => {
       return;
     }
 
+    // Determine platform from request (default to 'web')
+    const platform = (req.body as { platform?: string }).platform || 'web';
+
+    // Get platform-specific adapter
+    let adapter;
+    try {
+      adapter = getAdapter(platform);
+    } catch (adapterError) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'UNSUPPORTED_PLATFORM',
+          message: adapterError instanceof Error ? adapterError.message : 'Unsupported platform',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      res.status(400).json(error);
+      return;
+    }
+
     // Parse request body
     let messages;
     try {
-      messages = webAdapter.parseIncoming(req.body);
+      messages = adapter.parseIncoming(req.body);
     } catch (parseError) {
       const error: ErrorResponse = {
         error: {
