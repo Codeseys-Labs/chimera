@@ -10,7 +10,14 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@chimera/shared": ["./packages/shared/src"],
+      "@chimera/core": ["./packages/core/src"],
+      "@chimera/sse-bridge": ["./packages/sse-bridge/src"],
+      "@chimera/chat-gateway": ["./packages/chat-gateway/src"]
+    }
   },
   "files": [],
   "references": [
