@@ -5,9 +5,9 @@
  * - Strands agent wrapper with multi-tenant session management
  * - AgentCore Runtime integration (serverless MicroVM execution)
  * - AgentCore Memory integration (STM + LTM with tenant-scoped namespaces)
+ * - Universal skill loading (OpenClaw, MCP, Strands, Claude Code)
  * - System prompt templating
- * - Base tool implementations (to be added)
- * - Skill loading system (to be added)
+ * - Tool registry and execution
  *
  * @packageDocumentation
  */
@@ -38,3 +38,9 @@ export {
   type MemoryOperation,
   type MemoryResult
 } from './runtime';
+
+// Memory module
+export * from './memory';
+
+// Tools module
+export * from './tools';
