@@ -99,5 +99,19 @@
 		"status": "active",
 		"createdAt": "2026-03-20T18:27:29.334Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-79cb18e4",
+		"name": "final-capabilities-batch",
+		"memberIssueIds": [
+			"chimera-8e41",
+			"chimera-c872",
+			"chimera-9058",
+			"chimera-be5a",
+			"chimera-b98b"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T18:55:52.771Z",
+		"completedAt": null
 	}
 ]
