@@ -23,5 +23,8 @@ export { default as healthRouter } from './routes/health';
 // Adapters
 export * from './adapters/types';
 export { WebPlatformAdapter } from './adapters/web';
+export { SlackPlatformAdapter } from './adapters/slack';
+export { DiscordPlatformAdapter } from './adapters/discord';
 export { TelegramPlatformAdapter } from './adapters/telegram';
 export { TeamsPlatformAdapter } from './adapters/teams';
+export { getAdapter, registerAdapter, isSupported, getSupportedPlatforms } from './adapters';
