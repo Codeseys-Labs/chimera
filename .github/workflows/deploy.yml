@@ -1,0 +1,359 @@
+name: Deploy - Canary & Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      skip_canary:
+        description: 'Skip canary deployment (emergency)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  BUN_VERSION: "1.0.0"
+  NODE_VERSION: "20"
+  AWS_REGION: us-west-2
+
+jobs:
+  # Job 1: Build Docker images for agent runtime
+  build-images:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      git-sha: ${{ steps.vars.outputs.sha }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set output variables
+        id: vars
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/chimera-agent-runtime
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest-${{ github.ref_name }}
+            type=raw,value=${{ steps.vars.outputs.timestamp }}
+
+      - name: Build and push agent runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./packages/core
+          file: ./packages/core/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            GIT_SHA=${{ steps.vars.outputs.sha }}
+            BUILD_DATE=${{ steps.vars.outputs.timestamp }}
+
+  # Job 2: Deploy CDK infrastructure stacks (blue-green)
+  deploy-infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: build-images
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK Bootstrap (if needed)
+        working-directory: infra
+        run: npx cdk bootstrap --require-approval never
+
+      - name: CDK Deploy - Network Stack
+        working-directory: infra
+        run: npx cdk deploy ChimeraNetworkStack --require-approval never
+
+      - name: CDK Deploy - Data Stack
+        working-directory: infra
+        run: npx cdk deploy ChimeraDataStack --require-approval never
+
+      - name: CDK Deploy - Security Stack
+        working-directory: infra
+        run: npx cdk deploy ChimeraSecurityStack --require-approval never
+
+      - name: CDK Deploy - Observability Stack
+        working-directory: infra
+        run: npx cdk deploy ChimeraObservabilityStack --require-approval never
+
+      - name: CDK Deploy - Platform Runtime Stack
+        working-directory: infra
+        run: npx cdk deploy ChimeraPlatformRuntimeStack --require-approval never --context imageTag=${{ needs.build-images.outputs.git-sha }}
+
+      - name: CDK Deploy - Chat Stack
+        working-directory: infra
+        run: npx cdk deploy ChimeraChatStack --require-approval never
+
+      - name: CDK Deploy - Tenant Stack (template)
+        working-directory: infra
+        run: npx cdk deploy ChimeraTenantStack --require-approval never
+
+  # Job 3: Canary deployment - route 5% traffic to new version
+  deploy-canary:
+    name: Deploy to Canary (5% traffic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build-images, deploy-infra]
+    if: github.event.inputs.skip_canary != 'true'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update canary endpoint
+        run: |
+          # Update AgentCore canary configuration
+          # This would typically update a Lambda alias or ECS task definition
+          aws lambda update-alias \
+            --function-name chimera-agent-runtime \
+            --name canary \
+            --function-version $LATEST \
+            --routing-config AdditionalVersionWeights={"$LATEST"=0.05}
+
+      - name: Wait for canary deployment
+        run: sleep 30
+
+  # Job 4: Canary validation - monitor for 30 minutes
+  validate-canary:
+    name: Validate Canary (30min bake)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: deploy-canary
+    if: github.event.inputs.skip_canary != 'true'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install monitoring tools
+        run: pip install boto3 requests
+
+      - name: Monitor canary metrics
+        run: |
+          python scripts/monitor-canary.py \
+            --duration 1800 \
+            --check-interval 60 \
+            --error-rate-threshold 0.05 \
+            --latency-p99-multiplier 2.0 \
+            --guardrail-trigger-threshold 0.10
+        env:
+          CANARY_ENDPOINT: chimera-canary
+          BASELINE_ENDPOINT: chimera-production
+
+      - name: Run evaluation suite against canary
+        run: |
+          python scripts/run-evaluations.py \
+            --endpoint canary \
+            --min-score 80 \
+            --suite production-validation
+
+  # Job 5: Progressive rollout - 25% -> 50% -> 100%
+  rollout-production:
+    name: Progressive Rollout
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: validate-canary
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Rollout 25% traffic
+        run: |
+          aws lambda update-alias \
+            --function-name chimera-agent-runtime \
+            --name production \
+            --routing-config AdditionalVersionWeights={"$LATEST"=0.25}
+          echo "Deployed to 25%, monitoring for 15 minutes..."
+          sleep 900
+
+      - name: Check 25% health
+        run: |
+          # Check CloudWatch alarms
+          ALARM_STATE=$(aws cloudwatch describe-alarms \
+            --alarm-names chimera-agent-error-rate chimera-agent-latency \
+            --query 'MetricAlarms[?StateValue==`ALARM`].AlarmName' \
+            --output text)
+          
+          if [ -n "$ALARM_STATE" ]; then
+            echo "ALARM triggered: $ALARM_STATE - Rolling back"
+            exit 1
+          fi
+
+      - name: Rollout 50% traffic
+        run: |
+          aws lambda update-alias \
+            --function-name chimera-agent-runtime \
+            --name production \
+            --routing-config AdditionalVersionWeights={"$LATEST"=0.50}
+          echo "Deployed to 50%, monitoring for 15 minutes..."
+          sleep 900
+
+      - name: Check 50% health
+        run: |
+          ALARM_STATE=$(aws cloudwatch describe-alarms \
+            --alarm-names chimera-agent-error-rate chimera-agent-latency \
+            --query 'MetricAlarms[?StateValue==`ALARM`].AlarmName' \
+            --output text)
+          
+          if [ -n "$ALARM_STATE" ]; then
+            echo "ALARM triggered: $ALARM_STATE - Rolling back"
+            exit 1
+          fi
+
+      - name: Rollout 100% traffic
+        run: |
+          aws lambda update-alias \
+            --function-name chimera-agent-runtime \
+            --name production \
+            --function-version $LATEST
+          echo "Fully deployed to production"
+
+  # Job 6: Post-deployment validation
+  post-deploy-validation:
+    name: Post-Deploy Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: rollout-production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        run: pip install boto3 requests pytest pytest-asyncio
+
+      - name: Run synthetic canary checks
+        run: |
+          pytest tests/e2e/smoke/ \
+            --endpoint production \
+            --timeout 300 \
+            --retries 3
+
+      - name: Monitor cost anomalies
+        run: |
+          python scripts/check-cost-anomalies.py \
+            --window-hours 2 \
+            --threshold-multiplier 3.0
+
+      - name: Tag successful deployment
+        run: |
+          IMAGE_URI="${{ needs.build-images.outputs.image-tag }}"
+          aws ecr put-image-tag \
+            --repository-name chimera-agent-runtime \
+            --image-tag "${{ needs.build-images.outputs.git-sha }}" \
+            --image-tag latest-stable
+
+  # Job 7: Notify deployment status
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [post-deploy-validation]
+    if: always()
+    steps:
+      - name: Send deployment notification
+        run: |
+          # Send notification to Slack/SNS/etc
+          STATUS="${{ needs.post-deploy-validation.result }}"
+          if [ "$STATUS" == "success" ]; then
+            echo "Deployment succeeded"
+            # aws sns publish --topic-arn ${{ secrets.SNS_DEPLOY_TOPIC }} ...
+          else
+            echo "Deployment failed"
+            # Send alert
+          fi
