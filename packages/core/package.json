@@ -25,7 +25,8 @@
   "author": "Chimera Platform",
   "license": "Apache-2.0",
   "dependencies": {
-    "@chimera/shared": "workspace:*"
+    "@chimera/shared": "workspace:*",
+    "@aws-sdk/client-eventbridge": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
