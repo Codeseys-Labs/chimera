@@ -208,7 +208,7 @@ Amazon Verified Permissions (Cedar) acts as the gatekeeper for all infrastructur
 // Permit low-cost cron job changes
 permit(
   principal,
-  action == ClawCore::Action::"propose_infra_change",
+  action == Chimera::Action::"propose_infra_change",
   resource
 )
 when {
@@ -230,7 +230,7 @@ when {
 // Require human approval for expensive changes
 permit(
   principal,
-  action == ClawCore::Action::"propose_infra_change",
+  action == Chimera::Action::"propose_infra_change",
   resource
 )
 when {
@@ -1054,7 +1054,7 @@ export class TenantInfrastructureConstruct extends cdk.Construct {
       "Type": "Task",
       "Resource": "arn:aws:states:::aws-sdk:verifiedpermissions:isAuthorized",
       "Parameters": {
-        "PolicyStoreId": "clawcore-policies",
+        "PolicyStoreId": "chimera-policies",
         "Principal.$": "$.principal",
         "Action.$": "$.action",
         "Resource.$": "$.resource",
@@ -1295,4 +1295,4 @@ new events.Rule(this, 'QueueDepthRule', {
 **Related Documents:**
 - [[04-Self-Modifying-IaC-Patterns]] (enhancement series) — foundational IaC patterns
 - [[06-ML-Experiments-Auto-Evolution]] — ML-driven continuous improvement
-- [[ClawCore-Self-Evolution-Engine]] (architecture reviews) — full evolution engine
+- [[Chimera-Self-Evolution-Engine]] (architecture reviews) — full evolution engine

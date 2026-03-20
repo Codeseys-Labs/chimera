@@ -1,14 +1,14 @@
 ---
 title: "Cross-Platform Identity & Chat Routing"
-series: ClawCore Enhancement
+series: Chimera Enhancement
 part: 3
-tags: [clawcore, identity, chat, cross-platform, vercel-chat-sdk]
+tags: [chimera, identity, chat, cross-platform, vercel-chat-sdk]
 created: 2026-03-19
 status: complete
 related:
   - "[[07-Vercel-AI-SDK-Chat-Layer]]"
   - "[[07-Chat-Interface-Multi-Platform]]"
-  - "[[ClawCore-Architecture-Review-Integration]]"
+  - "[[Chimera-Architecture-Review-Integration]]"
   - "[[01-Agent-Runtime-Architecture]]"
   - "[[02-Tool-Permission-Governance]]"
 ---
@@ -16,7 +16,7 @@ related:
 # Cross-Platform Identity & Chat Routing
 
 > Architecture for unified identity management, conversation continuity, and chat
-> routing across Slack, Discord, Microsoft Teams, and web interfaces in ClawCore.
+> routing across Slack, Discord, Microsoft Teams, and web interfaces in Chimera.
 
 ## Table of Contents
 
@@ -37,7 +37,7 @@ related:
 
 ## 1. Overview
 
-ClawCore agents must be reachable from multiple chat platforms while maintaining a
+Chimera agents must be reachable from multiple chat platforms while maintaining a
 single coherent identity for each human user. This document defines:
 
 1. **Identity linking** -- how platform-specific user IDs map to a unified tenant identity
@@ -78,7 +78,7 @@ CLI ─────┘  └─────────────┘  └──
 
 ## 2. Identity Linking Model
 
-The identity system resolves platform-specific user IDs to a unified ClawCore identity
+The identity system resolves platform-specific user IDs to a unified Chimera identity
 within a tenant. This is the foundation for cross-platform continuity, personalization,
 and access control.
 
@@ -88,16 +88,16 @@ Three DynamoDB tables support the identity system:
 
 | Table | Purpose | Access Pattern |
 |-------|---------|---------------|
-| `clawcore-identities` | Unified user profiles + platform links | By tenant+user, by platform ID |
-| `clawcore-conversations` | Conversation state, cross-platform threads | By session, by user |
-| `clawcore-preferences` | Per-user notification and platform preferences | By tenant+user |
+| `chimera-identities` | Unified user profiles + platform links | By tenant+user, by platform ID |
+| `chimera-conversations` | Conversation state, cross-platform threads | By session, by user |
+| `chimera-preferences` | Per-user notification and platform preferences | By tenant+user |
 
-### 2.2 DynamoDB Schema: clawcore-identities
+### 2.2 DynamoDB Schema: chimera-identities
 
 **Primary table design** -- single-table with composite keys:
 
 ```
-Table: clawcore-identities
+Table: chimera-identities
   Partition Key (PK): String
   Sort Key (SK): String
   GSI-1: PlatformIndex (GSI1PK, GSI1SK) -- reverse lookup by platform ID
@@ -196,7 +196,7 @@ async function resolveIdentity(
 ): Promise<ResolvedIdentity> {
   // Step 1: Direct lookup via GSI (fast path, ~5ms)
   const link = await dynamodb.query({
-    TableName: 'clawcore-identities',
+    TableName: 'chimera-identities',
     IndexName: 'PlatformIndex',
     KeyConditionExpression: 'GSI1PK = :pk',
     ExpressionAttributeValues: {
@@ -222,7 +222,7 @@ async function resolveIdentity(
   const platformProfile = await fetchPlatformProfile(platform, platformUserId);
   if (platformProfile?.email) {
     const emailMatch = await dynamodb.query({
-      TableName: 'clawcore-identities',
+      TableName: 'chimera-identities',
       IndexName: 'EmailIndex',
       KeyConditionExpression: 'email = :email',
       ExpressionAttributeValues: { ':email': platformProfile.email },
@@ -308,7 +308,7 @@ async function requestLink(tenantId: string, identityId: string, body: {
 }): Promise<{ verificationCode: string; expiresIn: number }> {
   const code = generateSecureCode(6); // "847291"
   await dynamodb.put({
-    TableName: 'clawcore-identities',
+    TableName: 'chimera-identities',
     Item: {
       PK: `TENANT#${tenantId}`,
       SK: `LINK_REQUEST#${ulid()}`,
@@ -334,7 +334,7 @@ async function verifyLink(
 ): Promise<boolean> {
   // Find pending request for this platform user
   const requests = await dynamodb.query({
-    TableName: 'clawcore-identities',
+    TableName: 'chimera-identities',
     IndexName: 'PlatformIndex',
     KeyConditionExpression: 'GSI1PK = :pk AND begins_with(GSI1SK, :prefix)',
     ExpressionAttributeValues: {
@@ -360,7 +360,7 @@ async function verifyLink(
 
   // Mark request as verified
   await dynamodb.update({
-    TableName: 'clawcore-identities',
+    TableName: 'chimera-identities',
     Key: { PK: match.PK, SK: match.SK },
     UpdateExpression: 'SET #s = :v',
     ExpressionAttributeNames: { '#s': 'status' },
@@ -396,7 +396,7 @@ Conversations are decoupled from platforms. A conversation belongs to an **ident
 and a **context** (topic, thread, or explicit session), not to a channel.
 
 ```typescript
-// DynamoDB: clawcore-conversations
+// DynamoDB: chimera-conversations
 interface Conversation {
   PK: `TENANT#${tenantId}#IDENTITY#${identityId}`;
   SK: `CONV#${conversationId}`;
@@ -563,14 +563,14 @@ await thread.post(contextMessage);
 ## 4. Vercel Chat SDK Adapter Architecture
 
 The Chat SDK (`chat` package v4.x) provides the multi-platform delivery layer.
-ClawCore extends it with tenant-aware routing, identity resolution, and
+Chimera extends it with tenant-aware routing, identity resolution, and
 AgentCore integration.
 
 ### 4.1 Adapter Stack Architecture
 
 ```
                         ┌──────────────────────────────┐
-                        │        ClawCore Chat Service  │
+                        │        Chimera Chat Service  │
                         │        (ECS Fargate)          │
                         │                               │
 ┌──────────┐            │  ┌────────────────────────┐   │
@@ -595,7 +595,7 @@ AgentCore integration.
 └──────────┘            │  └────────────────────────┘   │
                         │                               │
                         │  ┌────────────────────────┐   │
-                        │  │  ClawCore Extensions   │   │
+                        │  │  Chimera Extensions   │   │
                         │  │  - IdentityResolver    │   │
                         │  │  - TenantRouter        │   │
                         │  │  - ConversationManager │   │
@@ -634,7 +634,7 @@ const tenantRouter = new TenantRouter(dynamoClient);
 const transport = new AgentCoreTransport(agentCoreClient);
 
 const bot = new Chat({
-  userName: 'clawcore-agent',
+  userName: 'chimera-agent',
   adapters: {
     slack: createSlackAdapter({
       botToken: process.env.SLACK_BOT_TOKEN!,
@@ -654,7 +654,7 @@ const bot = new Chat({
     }),
   },
   state: createDynamoDBState({
-    tableName: 'clawcore-chat-state',
+    tableName: 'chimera-chat-state',
     region: process.env.AWS_REGION!,
   }),
 });
@@ -735,12 +735,12 @@ bot.onSubscribedMessage(async (thread, message) => {
 // ============================================================
 // Handler: Slash commands
 // ============================================================
-bot.onSlashCommand('/clawcore', async (thread, command) => {
+bot.onSlashCommand('/chimera', async (thread, command) => {
   const [subcommand, ...args] = command.text.split(' ');
 
   switch (subcommand) {
     case 'link': {
-      // Identity linking: "/clawcore link 847291"
+      // Identity linking: "/chimera link 847291"
       const code = args[0];
       const identity = await identityResolver.resolve(
         thread.adapter.name, thread.sender.id,
@@ -759,7 +759,7 @@ bot.onSlashCommand('/clawcore', async (thread, command) => {
       break;
     }
     case 'continue': {
-      // Continue conversation: "/clawcore continue <topic>"
+      // Continue conversation: "/chimera continue <topic>"
       const topic = args.join(' ');
       const identity = await identityResolver.resolve(
         thread.adapter.name, thread.sender.id,
@@ -805,7 +805,7 @@ bot.onAction('deny_tool', async (thread, action) => {
 ### 4.4 DynamoDB State Adapter
 
 The Chat SDK requires a `StateAdapter` for thread subscriptions and distributed
-locking. ClawCore replaces the default Redis adapter with DynamoDB:
+locking. Chimera replaces the default Redis adapter with DynamoDB:
 
 ```typescript
 import { StateAdapter } from 'chat';
@@ -977,9 +977,9 @@ the identity resolver or agent runtime.
 
 ```typescript
 /**
- * The platform-agnostic message format used internally by ClawCore.
+ * The platform-agnostic message format used internally by Chimera.
  * Inspired by OpenClaw's normalized envelope and extended for
- * ClawCore's multi-tenant identity model.
+ * Chimera's multi-tenant identity model.
  */
 interface NormalizedMessage {
   // Identity (resolved after normalization)
@@ -1010,7 +1010,7 @@ interface NormalizedMessage {
 
   // Timestamps
   timestamp: string;            // ISO 8601
-  receivedAt: string;           // when ClawCore received it
+  receivedAt: string;           // when Chimera received it
 }
 
 type PlatformType = 'slack' | 'discord' | 'teams' | 'telegram' | 'web' | 'github';
@@ -1353,7 +1353,7 @@ function buildDiscordEmbed(response: AgentResponse): DiscordEmbed {
       inline: true,
     })) ?? [],
     footer: {
-      text: `ClawCore | ${response.model}`,
+      text: `Chimera | ${response.model}`,
     },
     timestamp: new Date().toISOString(),
   };
@@ -1614,7 +1614,7 @@ determines which platform(s) to deliver to based on user preferences and availab
 ### 8.1 Notification Preference Model
 
 ```typescript
-// DynamoDB: clawcore-preferences
+// DynamoDB: chimera-preferences
 interface NotificationPreferences {
   PK: `TENANT#${tenantId}#IDENTITY#${identityId}`;
   SK: 'NOTIFICATION_PREFS';
@@ -1779,7 +1779,7 @@ interface DeferredNotification {
 ## 9. Bot Registration and OAuth Flows
 
 Each chat platform requires a distinct bot registration and authentication flow.
-ClawCore manages credentials per tenant in AWS Secrets Manager.
+Chimera manages credentials per tenant in AWS Secrets Manager.
 
 ### 9.1 Platform Registration Summary
 
@@ -1800,7 +1800,7 @@ Slack uses OAuth 2.0 for multi-workspace installation. When a tenant admin click
 ```mermaid
 sequenceDiagram
     participant A as Tenant Admin
-    participant C as ClawCore Platform API
+    participant C as Chimera Platform API
     participant S as Slack OAuth
     participant SM as Secrets Manager
     participant DB as DynamoDB
@@ -1814,7 +1814,7 @@ sequenceDiagram
     C->>S: POST oauth.v2.access (code)
     S-->>C: { access_token, team: { id, name }, bot_user_id }
     C->>SM: Store credentials
-    Note over SM: SecretId: clawcore/{tenantId}/slack/{teamId}
+    Note over SM: SecretId: chimera/{tenantId}/slack/{teamId}
     C->>DB: Create platform registration
     Note over DB: PK=TENANT#acme SK=REGISTRATION#slack#T456
     C-->>A: Installation complete
@@ -1826,11 +1826,11 @@ sequenceDiagram
 // All platform credentials stored in Secrets Manager
 // with tenant-scoped secret names
 const SECRET_PATTERNS = {
-  slack: 'clawcore/{tenantId}/slack/{teamId}',
-  discord: 'clawcore/{tenantId}/discord/{guildId}',
-  teams: 'clawcore/{tenantId}/teams/{azureTenantId}',
-  telegram: 'clawcore/{tenantId}/telegram/{botId}',
-  github: 'clawcore/{tenantId}/github/{installationId}',
+  slack: 'chimera/{tenantId}/slack/{teamId}',
+  discord: 'chimera/{tenantId}/discord/{guildId}',
+  teams: 'chimera/{tenantId}/teams/{azureTenantId}',
+  telegram: 'chimera/{tenantId}/telegram/{botId}',
+  github: 'chimera/{tenantId}/github/{installationId}',
 };
 
 interface PlatformCredential {
@@ -1931,7 +1931,7 @@ sequenceDiagram
     participant AC as AgentCore Runtime
     participant LLM as Bedrock LLM
 
-    U->>S: "@clawcore-agent help me with Q4 analysis"
+    U->>S: "@chimera-agent help me with Q4 analysis"
     S->>WH: POST /webhooks/slack/events
     WH->>WH: Verify Slack signing secret
     WH->>IR: resolveIdentity("acme", "slack", "U04ABCDEF")
@@ -2070,7 +2070,7 @@ sequenceDiagram
 sequenceDiagram
     participant U as User
     participant W as Web Dashboard
-    participant API as ClawCore API
+    participant API as Chimera API
     participant DB as DynamoDB
     participant D as Discord
     participant Bot as Chat SDK
@@ -2086,9 +2086,9 @@ sequenceDiagram
     Note over API: { platform: "discord" }
     API->>DB: Create LinkingRequest (code: 847291, expires: 1 hour)
     API-->>W: { verificationCode: "847291", expiresIn: 3600 }
-    W-->>U: "Send this message on Discord: /clawcore link 847291"
+    W-->>U: "Send this message on Discord: /chimera link 847291"
 
-    U->>D: "/clawcore link 847291"
+    U->>D: "/chimera link 847291"
     D->>Bot: slash command
     Bot->>API: POST /api/v1/identities/verify-link
     Note over API: { platform: "discord", platformUserId: "789012345", code: "847291" }
@@ -2239,7 +2239,7 @@ Each phase is independently deployable:
 - [[04-CDK-Scaffold]] -- Infrastructure as code for the platform
 - [[07-Vercel-AI-SDK-Chat-Layer]] -- Deep dive on AI SDK and Chat SDK
 - [[07-Chat-Interface-Multi-Platform]] -- OpenClaw/OpenFang multi-platform analysis
-- [[ClawCore-Architecture-Review-Integration]] -- Integration review with data flow diagrams
+- [[Chimera-Architecture-Review-Integration]] -- Integration review with data flow diagrams
 
 ---
 

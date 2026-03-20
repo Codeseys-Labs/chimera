@@ -8,7 +8,7 @@ export interface NetworkStackProps extends cdk.StackProps {
 }
 
 /**
- * Network foundation for ClawCore.
+ * Network foundation for Chimera.
  *
  * Creates a VPC with 3 subnet tiers across 3 AZs, NAT gateways (1 for dev, 2 for prod),
  * VPC endpoints for AWS services, and security groups for the ALB, ECS, agents, and endpoints.
@@ -54,7 +54,7 @@ export class NetworkStack extends cdk.Stack {
     this.vpc.addFlowLog('FlowLog', {
       destination: ec2.FlowLogDestination.toCloudWatchLogs(
         new logs.LogGroup(this, 'FlowLogGroup', {
-          logGroupName: `/clawcore/${props.envName}/vpc-flow-logs`,
+          logGroupName: `/chimera/${props.envName}/vpc-flow-logs`,
           retention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
           removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
         }),
@@ -73,7 +73,7 @@ export class NetworkStack extends cdk.Stack {
     // --- Security group for interface VPC endpoints ---
     this.endpointSecurityGroup = new ec2.SecurityGroup(this, 'EndpointSG', {
       vpc: this.vpc,
-      securityGroupName: 'clawcore-vpc-endpoint-sg',
+      securityGroupName: 'chimera-vpc-endpoint-sg',
       description: 'Allows HTTPS from ECS and Agent security groups to VPC endpoints',
       allowAllOutbound: false,
     });
@@ -102,7 +102,7 @@ export class NetworkStack extends cdk.Stack {
     // --- ALB security group ---
     this.albSecurityGroup = new ec2.SecurityGroup(this, 'AlbSG', {
       vpc: this.vpc,
-      securityGroupName: 'clawcore-alb-sg',
+      securityGroupName: 'chimera-alb-sg',
       description: 'ALB: accepts HTTPS from internet, sends to ECS on 8080',
       allowAllOutbound: false,
     });
@@ -115,7 +115,7 @@ export class NetworkStack extends cdk.Stack {
     // --- ECS security group ---
     this.ecsSecurityGroup = new ec2.SecurityGroup(this, 'EcsSG', {
       vpc: this.vpc,
-      securityGroupName: 'clawcore-ecs-sg',
+      securityGroupName: 'chimera-ecs-sg',
       description: 'ECS Fargate tasks: accepts 8080 from ALB, outbound to NAT/endpoints',
       allowAllOutbound: true,
     });
@@ -128,7 +128,7 @@ export class NetworkStack extends cdk.Stack {
     // --- Agent security group ---
     this.agentSecurityGroup = new ec2.SecurityGroup(this, 'AgentSG', {
       vpc: this.vpc,
-      securityGroupName: 'clawcore-agent-sg',
+      securityGroupName: 'chimera-agent-sg',
       description: 'AgentCore MicroVMs: outbound only to NAT/endpoints',
       allowAllOutbound: true,
     });

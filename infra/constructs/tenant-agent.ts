@@ -85,12 +85,12 @@ export class TenantAgent extends Construct {
     // S3: read/write on tenants/{tenantId}/*, read on skills/global/*
     //   and skills/tenant/{tenantId}/*.
     // Bedrock: model access based on tier.
-    // Secrets Manager: only clawcore/{tenantId}/*.
+    // Secrets Manager: only chimera/{tenantId}/*.
     // ======================================================================
     this.tenantRole = new iam.Role(this, 'TenantRole', {
-      roleName: `clawcore-tenant-${tenantId}-${envName}`,
+      roleName: `chimera-tenant-${tenantId}-${envName}`,
       assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
-      description: `ClawCore tenant role for ${tenantId} (${tier})`,
+      description: `Chimera tenant role for ${tenantId} (${tier})`,
     });
 
     // Grant DynamoDB read/write on all 6 tables
@@ -142,7 +142,7 @@ export class TenantAgent extends Construct {
     this.tenantRole.addToPolicy(new iam.PolicyStatement({
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
-        `arn:aws:secretsmanager:${stack.region}:${stack.account}:secret:clawcore/${tenantId}/*`,
+        `arn:aws:secretsmanager:${stack.region}:${stack.account}:secret:chimera/${tenantId}/*`,
       ],
     }));
 
@@ -172,7 +172,7 @@ export class TenantAgent extends Construct {
     // scoped to this tenant via the TenantId dimension.
     // ======================================================================
     this.dashboard = new cloudwatch.Dashboard(this, 'Dashboard', {
-      dashboardName: `ClawCore-Tenant-${tenantId}-${envName}`,
+      dashboardName: `Chimera-Tenant-${tenantId}-${envName}`,
     });
 
     const tenantDims = { TenantId: tenantId };
@@ -302,14 +302,14 @@ export class TenantAgent extends Construct {
     });
 
     const stateMachine = new sfn.StateMachine(this, `${job.name}-SM`, {
-      stateMachineName: `clawcore-${tenantId}-${job.name}-${envName}`,
+      stateMachineName: `chimera-${tenantId}-${job.name}-${envName}`,
       definitionBody: sfn.DefinitionBody.fromChainable(startState),
       timeout: cdk.Duration.minutes(30),
     });
 
     // EventBridge rule on the custom event bus
     new events.Rule(this, `${job.name}-Schedule`, {
-      ruleName: `clawcore-${tenantId}-${job.name}-${envName}`,
+      ruleName: `chimera-${tenantId}-${job.name}-${envName}`,
       schedule: events.Schedule.expression(job.schedule),
       targets: [new targets.SfnStateMachine(stateMachine)],
     });

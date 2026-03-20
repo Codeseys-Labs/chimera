@@ -15,7 +15,7 @@ status: complete
 > How Chimera agents automatically identify repetitive patterns in their work, detect capability
 > gaps, and generate new reusable skills without human intervention.
 
-**Related:** [[ClawCore-Self-Evolution-Engine]] | [[README]]
+**Related:** [[Chimera-Self-Evolution-Engine]] | [[README]]
 
 ---
 
@@ -1145,11 +1145,11 @@ States:
 
 ## Related Documents
 
-- [[ClawCore-Self-Evolution-Engine]] — Overall self-evolution architecture
+- [[Chimera-Self-Evolution-Engine]] — Overall self-evolution architecture
 - [[02-ML-Autoresearch-Karpathy-Pattern]] — Self-improving through experiments
 - [[03-Code-Sandbox-Interpreter]] — Isolated execution environment
 
 ---
 
 *Auto-skill generation research completed 2026-03-19. Builds on patterns from OpenClaw skill
-system, ClawCore evolution engine, and AWS AgentCore Code Interpreter capabilities.*
+system, Chimera evolution engine, and AWS AgentCore Code Interpreter capabilities.*

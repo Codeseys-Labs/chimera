@@ -11,7 +11,7 @@ export interface DataStackProps extends cdk.StackProps {
 }
 
 /**
- * Data layer for ClawCore.
+ * Data layer for Chimera.
  *
  * Creates 6 DynamoDB tables (tenants, sessions, skills, rate-limits, cost-tracking, audit)
  * and 3 S3 buckets (tenant-data, skills, artifacts). Table schemas and GSIs match the
@@ -35,20 +35,20 @@ export class DataStack extends cdk.Stack {
 
     // CMK for audit table -- audit logs require customer-managed encryption
     const auditKey = new kms.Key(this, 'AuditKey', {
-      alias: `clawcore-audit-${props.envName}`,
+      alias: `chimera-audit-${props.envName}`,
       enableKeyRotation: true,
-      description: 'CMK for ClawCore audit log encryption',
+      description: 'CMK for Chimera audit log encryption',
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
     // ======================================================================
-    // Table 1: clawcore-tenants
+    // Table 1: chimera-tenants
     // PK: TENANT#{id}, SK: META
     // GSI1: tier -> tenantId (query tenants by tier)
     // Streams: NEW_AND_OLD_IMAGES for config change events
     // ======================================================================
     this.tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
-      tableName: `clawcore-tenants-${props.envName}`,
+      tableName: `chimera-tenants-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -64,13 +64,13 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // Table 2: clawcore-sessions
+    // Table 2: chimera-sessions
     // PK: TENANT#{id}, SK: SESSION#{id}
     // GSI1: agentId -> lastActivity (find active agents)
     // TTL: 24 hours after last activity
     // ======================================================================
     this.sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
-      tableName: `clawcore-sessions-${props.envName}`,
+      tableName: `chimera-sessions-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -87,13 +87,13 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // Table 3: clawcore-skills
+    // Table 3: chimera-skills
     // PK: TENANT#{id}, SK: SKILL#{name}
     // GSI1: skillName -> tenantId (find skill usage across tenants)
     // Streams: triggers Gateway MCP target sync
     // ======================================================================
     this.skillsTable = new dynamodb.Table(this, 'SkillsTable', {
-      tableName: `clawcore-skills-${props.envName}`,
+      tableName: `chimera-skills-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -109,14 +109,14 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // Table 4: clawcore-rate-limits
+    // Table 4: chimera-rate-limits
     // PK: TENANT#{id}, SK: WINDOW#{timestamp}
     // No GSI. TTL: 5 minutes after window end.
     // PITR disabled -- ephemeral data, not worth the cost.
     // DESTROY removal -- can be recreated from scratch.
     // ======================================================================
     this.rateLimitsTable = new dynamodb.Table(this, 'RateLimitsTable', {
-      tableName: `clawcore-rate-limits-${props.envName}`,
+      tableName: `chimera-rate-limits-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -125,13 +125,13 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // Table 5: clawcore-cost-tracking
+    // Table 5: chimera-cost-tracking
     // PK: TENANT#{id}, SK: PERIOD#{yyyy-mm}
     // Streams: triggers budget threshold alarms via EventBridge
     // No TTL -- retained 2 years for billing reconciliation.
     // ======================================================================
     this.costTrackingTable = new dynamodb.Table(this, 'CostTrackingTable', {
-      tableName: `clawcore-cost-tracking-${props.envName}`,
+      tableName: `chimera-cost-tracking-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -141,14 +141,14 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // Table 6: clawcore-audit
+    // Table 6: chimera-audit
     // PK: TENANT#{id}, SK: EVENT#{timestamp}#{uuid}
     // GSI1: eventType -> timestamp (query all events of a type)
     // TTL varies by tier: 90d (basic), 1yr (pro), 7yr (enterprise) -- set at write time.
     // Encrypted with CMK (compliance requirement).
     // ======================================================================
     this.auditTable = new dynamodb.Table(this, 'AuditTable', {
-      tableName: `clawcore-audit-${props.envName}`,
+      tableName: `chimera-audit-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -171,7 +171,7 @@ export class DataStack extends cdk.Stack {
     // Prefix: tenants/{tenantId}/...
     // ======================================================================
     this.tenantBucket = new s3.Bucket(this, 'TenantBucket', {
-      bucketName: `clawcore-tenants-${this.account}-${this.region}-${props.envName}`,
+      bucketName: `chimera-tenants-${this.account}-${this.region}-${props.envName}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -207,7 +207,7 @@ export class DataStack extends cdk.Stack {
     // Prefix: skills/global/{name}/, skills/marketplace/{name}/, skills/tenant/{id}/{name}/
     // ======================================================================
     this.skillsBucket = new s3.Bucket(this, 'SkillsBucket', {
-      bucketName: `clawcore-skills-${this.account}-${this.region}-${props.envName}`,
+      bucketName: `chimera-skills-${this.account}-${this.region}-${props.envName}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -226,7 +226,7 @@ export class DataStack extends cdk.Stack {
     // Reproducible from Git -- DESTROY is safe.
     // ======================================================================
     this.artifactsBucket = new s3.Bucket(this, 'ArtifactsBucket', {
-      bucketName: `clawcore-artifacts-${this.account}-${this.region}-${props.envName}`,
+      bucketName: `chimera-artifacts-${this.account}-${this.region}-${props.envName}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,

@@ -10,9 +10,9 @@ tags:
 status: complete
 related:
   - "[[00-Gap-Analysis-Report]]"
-  - "[[ClawCore-Final-Architecture-Plan]]"
+  - "[[Chimera-Final-Architecture-Plan]]"
   - "[[01-EFS-Agent-Workspace-Storage]]"
-  - "[[ClawCore-Architecture-Review-Multi-Tenant]]"
+  - "[[Chimera-Architecture-Review-Multi-Tenant]]"
 ---
 
 # Infrastructure, Workspace Storage, and Deployment Model Validation
@@ -306,7 +306,7 @@ flowchart TD
 **Validated architecture:**
 
 ```
-EFS File System: clawcore-workspaces
+EFS File System: chimera-workspaces
 ├── /tenants/acme/          (Access Point: fsap-acme, UID: 10001)
 ├── /tenants/globex/        (Access Point: fsap-globex, UID: 10002)
 ├── /tenants/initech/       (Access Point: fsap-initech, UID: 10003)
@@ -454,9 +454,9 @@ BUT: Each tenant gets isolated resources within a shared platform account, enabl
 ```
 Platform Account (Root)
 ├── Tenant A Account (AWS Organizations)
-│   └── Full ClawCore deployment
+│   └── Full Chimera deployment
 ├── Tenant B Account
-│   └── Full ClawCore deployment
+│   └── Full Chimera deployment
 └── Shared Services Account
     ├── Skill marketplace
     └── Cross-tenant A2A gateway
@@ -479,7 +479,7 @@ Platform Account (Root)
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│           ClawCore Platform (Single Account)         │
+│           Chimera Platform (Single Account)         │
 ├─────────────────────────────────────────────────────┤
 │                                                      │
 │  Foundation (Shared)                                 │

@@ -12,11 +12,11 @@ const envConfig: cdk.Environment = {
   region: app.node.tryGetContext('region') ?? 'us-west-2',
 };
 
-const prefix = `ClawCore-${envName}`;
+const prefix = `Chimera-${envName}`;
 
 // Shared tags applied to every resource in every stack
 const projectTags: Record<string, string> = {
-  Project: 'ClawCore',
+  Project: 'Chimera',
   Environment: envName,
   ManagedBy: 'CDK',
 };
@@ -26,7 +26,7 @@ const projectTags: Record<string, string> = {
 // Everything else depends on this stack.
 const networkStack = new NetworkStack(app, `${prefix}-Network`, {
   env: envConfig,
-  description: 'ClawCore network layer: VPC, subnets, NAT gateways, VPC endpoints, security groups',
+  description: 'Chimera network layer: VPC, subnets, NAT gateways, VPC endpoints, security groups',
   envName,
 });
 
@@ -34,7 +34,7 @@ const networkStack = new NetworkStack(app, `${prefix}-Network`, {
 // 6 DynamoDB tables, 3 S3 buckets. Depends on NetworkStack for VPC (future ElastiCache).
 const dataStack = new DataStack(app, `${prefix}-Data`, {
   env: envConfig,
-  description: 'ClawCore data layer: 6 DynamoDB tables, 3 S3 buckets',
+  description: 'Chimera data layer: 6 DynamoDB tables, 3 S3 buckets',
   envName,
   vpc: networkStack.vpc,
 });
@@ -44,7 +44,7 @@ dataStack.addDependency(networkStack);
 // Cognito user pool, WAF WebACL, KMS keys. Depends on NetworkStack (WAF for regional resources).
 const securityStack = new SecurityStack(app, `${prefix}-Security`, {
   env: envConfig,
-  description: 'ClawCore security layer: Cognito user pool, WAF WebACL, KMS key',
+  description: 'Chimera security layer: Cognito user pool, WAF WebACL, KMS key',
   envName,
 });
 securityStack.addDependency(networkStack);

@@ -9,7 +9,7 @@ export interface SecurityStackProps extends cdk.StackProps {
 }
 
 /**
- * Security layer for ClawCore.
+ * Security layer for Chimera.
  *
  * Creates a Cognito user pool with tenant-scoped custom attributes,
  * three user pool groups (admin, tenant-admin, user), a WAF WebACL
@@ -33,9 +33,9 @@ export class SecurityStack extends cdk.Stack {
     // Separate from the audit key in DataStack (different access policies).
     // ======================================================================
     this.platformKey = new kms.Key(this, 'PlatformKey', {
-      alias: `clawcore-platform-${props.envName}`,
+      alias: `chimera-platform-${props.envName}`,
       enableKeyRotation: true,
-      description: 'ClawCore platform encryption key for secrets and SNS',
+      description: 'Chimera platform encryption key for secrets and SNS',
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -47,7 +47,7 @@ export class SecurityStack extends cdk.Stack {
     // via the tenant_id claim in API Gateway authorizers and Cedar policies.
     // ======================================================================
     this.userPool = new cognito.UserPool(this, 'UserPool', {
-      userPoolName: `clawcore-users-${props.envName}`,
+      userPoolName: `chimera-users-${props.envName}`,
       selfSignUpEnabled: false, // Platform admin creates users
       signInAliases: { email: true },
       autoVerify: { email: true },
@@ -94,7 +94,7 @@ export class SecurityStack extends cdk.Stack {
     // --- App clients ---
     // Web client: authorization code grant for browser-based apps
     this.userPoolClient = this.userPool.addClient('WebClient', {
-      userPoolClientName: 'clawcore-web',
+      userPoolClientName: 'chimera-web',
       authFlows: { userSrp: true },
       oAuth: {
         flows: { authorizationCodeGrant: true },
@@ -109,9 +109,9 @@ export class SecurityStack extends cdk.Stack {
       refreshTokenValidity: cdk.Duration.days(30),
     });
 
-    // CLI client: SRP auth for the `clawcore` CLI tool
+    // CLI client: SRP auth for the `chimera` CLI tool
     this.userPool.addClient('CliClient', {
-      userPoolClientName: 'clawcore-cli',
+      userPoolClientName: 'chimera-cli',
       authFlows: { userSrp: true },
       accessTokenValidity: cdk.Duration.hours(8),
       refreshTokenValidity: cdk.Duration.days(30),
@@ -125,12 +125,12 @@ export class SecurityStack extends cdk.Stack {
     // 3. AWS Managed Known Bad Inputs -- blocks known malicious payloads
     // ======================================================================
     this.webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
-      name: `clawcore-api-waf-${props.envName}`,
+      name: `chimera-api-waf-${props.envName}`,
       scope: 'REGIONAL',
       defaultAction: { allow: {} },
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
-        metricName: `clawcore-waf-${props.envName}`,
+        metricName: `chimera-waf-${props.envName}`,
         sampledRequestsEnabled: true,
       },
       rules: [

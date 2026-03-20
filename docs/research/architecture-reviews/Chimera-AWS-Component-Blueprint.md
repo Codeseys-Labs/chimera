@@ -1,11 +1,11 @@
-# ClawCore — AWS Component Blueprint
+# Chimera — AWS Component Blueprint
 
-> The definitive AWS service mapping for ClawCore. Every resource, every configuration,
+> The definitive AWS service mapping for Chimera. Every resource, every configuration,
 > every field specified. No hand-waving.
 
 **Source documents:**
-- [[ClawCore-Final-Architecture-Plan]] — Technology decisions, DynamoDB schema, phases
-- [[ClawCore-Architecture-Review-Platform-IaC]] — 8-stack CDK, pipeline, GitOps, DR
+- [[Chimera-Final-Architecture-Plan]] — Technology decisions, DynamoDB schema, phases
+- [[Chimera-Architecture-Review-Platform-IaC]] — 8-stack CDK, pipeline, GitOps, DR
 - [[AWS Bedrock AgentCore and Strands Agents/06-AWS-Services-Agent-Infrastructure]] — AWS service patterns, cost models
 
 ---
@@ -17,12 +17,12 @@
 | Field | Value |
 |-------|-------|
 | Deployment type | Managed MicroVM (Firecracker) — pool model for basic/pro, dedicated per enterprise tenant |
-| Runtime name (pool) | `clawcore-pool` |
-| Runtime name (dedicated) | `clawcore-{tenantId}` |
+| Runtime name (pool) | `chimera-pool` |
+| Runtime name (dedicated) | `chimera-{tenantId}` |
 | Entrypoint | `main.py` (Strands Agent, Python 3.12) |
-| Agent artifact | Docker image pushed to ECR `clawcore-agent-runtime:{version}` |
+| Agent artifact | Docker image pushed to ECR `chimera-agent-runtime:{version}` |
 | Endpoints per runtime | 2: `production` (stable, pinned version), `canary` (5% traffic, latest version) |
-| Env vars | `CLAWCORE_ENV` (dev/staging/prod), `CLAWCORE_TABLE` (DynamoDB table name), `CLAWCORE_BUCKET` (tenant S3 bucket), `CLAWCORE_SKILLS_BUCKET` (skills S3 bucket), `CLAWCORE_EVENT_BUS` (EventBridge bus name), `CLAWCORE_REGION` (us-west-2), `CLAWCORE_LOG_LEVEL` (INFO), `OTEL_EXPORTER_OTLP_ENDPOINT` (CloudWatch OTel endpoint) |
+| Env vars | `CHIMERA_ENV` (dev/staging/prod), `CHIMERA_TABLE` (DynamoDB table name), `CHIMERA_BUCKET` (tenant S3 bucket), `CHIMERA_SKILLS_BUCKET` (skills S3 bucket), `CHIMERA_EVENT_BUS` (EventBridge bus name), `CHIMERA_REGION` (us-west-2), `CHIMERA_LOG_LEVEL` (INFO), `OTEL_EXPORTER_OTLP_ENDPOINT` (CloudWatch OTel endpoint) |
 | Scaling | AgentCore-managed autoscaling — min 1 MicroVM (pool), max 100 concurrent sessions (pool), max 10 per dedicated runtime |
 | Session timeout | 30 minutes idle, 2 hours absolute max |
 | Cold start target | < 2 seconds |
@@ -32,7 +32,7 @@
 
 | Field | Value |
 |-------|-------|
-| Namespace strategy | One namespace per tenant: `clawcore/{tenantId}` |
+| Namespace strategy | One namespace per tenant: `chimera/{tenantId}` |
 | Strategies | `SUMMARY` (default for all tiers), `SEMANTIC_MEMORY` (pro+), `USER_PREFERENCE` (pro+) |
 | Short-term memory (STM) | In-session message buffer — 50 messages max, sliding window |
 | Long-term memory (LTM) | Cross-session persistence — vector-indexed semantic search |
@@ -46,7 +46,7 @@
 |-------|-------|
 | Target types | `MCP_SERVER` (primary), `LAMBDA_FUNCTION`, `HTTP_ENDPOINT` |
 | MCP server registrations | Platform skills registered as MCP targets: `code-review`, `web-search`, `email-reader`, `summarizer`, `file-manager`, `data-analyst`, `calendar`, `slack-bot`, `ticket-manager`, `doc-generator` |
-| Tenant skill targets | Per-tenant MCP servers registered dynamically from `clawcore-skills` DynamoDB table |
+| Tenant skill targets | Per-tenant MCP servers registered dynamically from `chimera-skills` DynamoDB table |
 | Sync config | Pull-based: Gateway polls DynamoDB skill registry every 60 seconds for changes. EventBridge trigger for immediate propagation on skill install/uninstall |
 | Authentication | Gateway inherits tenant IAM role — tools scoped to tenant's S3 prefix and DynamoDB partition |
 | Tool timeout | 30 seconds default, 300 seconds for long-running tools (code interpreter, web search) |
@@ -59,7 +59,7 @@
 | Inbound auth (user -> agent) | Cognito JWT with `custom:tenant_id` claim. API Gateway Cognito authorizer validates on every request |
 | Inbound flow | Client -> Cognito -> JWT -> API Gateway authorizer -> tenant router -> AgentCore |
 | Outbound auth (agent -> external) | OAuth 2.0 (Slack, Jira, GitHub), API key (OpenAI, Anthropic, custom), IAM SigV4 (AWS services) |
-| Token storage | Secrets Manager: `clawcore/{tenantId}/{service}` (e.g., `clawcore/acme/slack-oauth-token`) |
+| Token storage | Secrets Manager: `chimera/{tenantId}/{service}` (e.g., `chimera/acme/slack-oauth-token`) |
 | Token refresh | Automatic rotation Lambda for OAuth tokens — 7-day rotation cycle |
 | Token config | Access token TTL: 1 hour. Refresh token TTL: 30 days. Token caching via AWS SecretCache SDK |
 
@@ -100,7 +100,7 @@
 | Metric dimensions | `TenantId`, `AgentType`, `Environment`, `Endpoint` (production/canary) |
 | Custom metrics emitted | `InvocationDuration` (ms), `TokensUsed` (count), `ToolCalls` (count), `Errors` (count), `ActiveSessions` (gauge), `CostAccumulated` (USD), `MemoryOperations` (count) |
 | Log format | Structured JSON via EMF (Embedded Metric Format) |
-| Log group | `/clawcore/{env}/agent-runtime` (platform), `/clawcore/{env}/tenant/{tenantId}` (per-tenant) |
+| Log group | `/chimera/{env}/agent-runtime` (platform), `/chimera/{env}/tenant/{tenantId}` (per-tenant) |
 | Log retention | 30 days (dev), 90 days (staging), 1 year (prod) |
 | X-Ray integration | Enabled — traces span agent -> tool -> LLM call chains |
 | CloudWatch dashboards | 1 platform dashboard + 1 per tenant (auto-created by AgentObservability construct) |
@@ -133,7 +133,7 @@
 
 ## 2. DynamoDB Tables (6 Tables)
 
-### 2.1 `clawcore-tenants`
+### 2.1 `chimera-tenants`
 
 | Field | Value |
 |-------|-------|
@@ -148,7 +148,7 @@
 | Removal policy | RETAIN |
 | Attributes | `tenantId`, `tier` (basic/pro/enterprise), `modelId`, `allowedSkills` (StringSet), `budgetLimitMonthlyUsd` (Number), `featureFlags` (Map), `createdAt`, `updatedAt` |
 
-### 2.2 `clawcore-sessions`
+### 2.2 `chimera-sessions`
 
 | Field | Value |
 |-------|-------|
@@ -163,7 +163,7 @@
 | Removal policy | RETAIN |
 | Attributes | `sessionId`, `agentId`, `state` (Map: messages, tool_calls, memory), `channelType` (slack/web/discord), `channelUserId`, `createdAt`, `lastActivity`, `ttl`, `GSI1PK`, `GSI1SK` |
 
-### 2.3 `clawcore-skills`
+### 2.3 `chimera-skills`
 
 | Field | Value |
 |-------|-------|
@@ -178,7 +178,7 @@
 | Removal policy | RETAIN |
 | Attributes | `skillName`, `version` (String, semver), `s3Key` (skill package location), `mcpEndpoint` (URL if running as MCP server), `trustLevel` (verified/community/custom), `signatureEd25519`, `installedAt`, `lastUsed`, `invocationCount` (Number) |
 
-### 2.4 `clawcore-rate-limits`
+### 2.4 `chimera-rate-limits`
 
 | Field | Value |
 |-------|-------|
@@ -193,7 +193,7 @@
 | Removal policy | DESTROY (can be recreated from scratch) |
 | Attributes | `requestCount` (Number, atomic counter), `tokenCount` (Number), `budgetConsumedUsd` (Number), `ttl` |
 
-### 2.5 `clawcore-cost-tracking`
+### 2.5 `chimera-cost-tracking`
 
 | Field | Value |
 |-------|-------|
@@ -208,7 +208,7 @@
 | Removal policy | RETAIN |
 | Attributes | `totalCostUsd` (Number, atomic increment), `llmCostUsd`, `computeCostUsd`, `storageCostUsd`, `invocationCount`, `tokenCount`, `budgetLimitUsd`, `budgetAlertSent` (Boolean), `lastUpdated` |
 
-### 2.6 `clawcore-audit`
+### 2.6 `chimera-audit`
 
 | Field | Value |
 |-------|-------|
@@ -227,7 +227,7 @@
 
 ## 3. S3 Buckets (3 Buckets)
 
-### 3.1 `clawcore-tenants-{accountId}-{region}`
+### 3.1 `chimera-tenants-{accountId}-{region}`
 
 | Field | Value |
 |-------|-------|
@@ -242,7 +242,7 @@
 | Prefix structure | `tenants/{tenantId}/sessions/{sessionId}/memory.json`, `tenants/{tenantId}/outputs/{cronJobName}/{date}.md`, `tenants/{tenantId}/documents/`, `tenants/{tenantId}/evaluations/` |
 | Access | Tenant IAM role scoped to `tenants/{tenantId}/*` prefix only |
 
-### 3.2 `clawcore-skills-{accountId}-{region}`
+### 3.2 `chimera-skills-{accountId}-{region}`
 
 | Field | Value |
 |-------|-------|
@@ -257,7 +257,7 @@
 | Prefix structure | `skills/global/{skillName}/SKILL.md`, `skills/marketplace/{skillName}/`, `skills/tenant/{tenantId}/{skillName}/`, `policies/*.cedar`, `evaluations/datasets/`, `evaluations/results/{date}/` |
 | Access | Agent runtime role: read-only. Platform pipeline role: read-write |
 
-### 3.3 `clawcore-artifacts-{accountId}-{region}`
+### 3.3 `chimera-artifacts-{accountId}-{region}`
 
 | Field | Value |
 |-------|-------|
@@ -276,25 +276,25 @@
 
 ## 4. IAM Roles (7 Roles)
 
-### 4.1 `clawcore-agent-runtime-role`
+### 4.1 `chimera-agent-runtime-role`
 
 | Field | Value |
 |-------|-------|
 | Trust policy | `bedrock.amazonaws.com` |
 | Managed policies | None (least privilege via inline) |
-| Inline policies | (1) DynamoDB: `GetItem`, `PutItem`, `Query`, `UpdateItem`, `DeleteItem` on all 6 tables. (2) S3: `GetObject`, `PutObject` on tenant bucket, `GetObject` on skills bucket. (3) Bedrock: `InvokeModel`, `InvokeModelWithResponseStream` on allowed model ARNs. (4) Secrets Manager: `GetSecretValue` on `clawcore/*` prefix. (5) CloudWatch: `PutMetricData`, `PutLogEvents`. (6) EventBridge: `PutEvents` on `clawcore-events` bus |
+| Inline policies | (1) DynamoDB: `GetItem`, `PutItem`, `Query`, `UpdateItem`, `DeleteItem` on all 6 tables. (2) S3: `GetObject`, `PutObject` on tenant bucket, `GetObject` on skills bucket. (3) Bedrock: `InvokeModel`, `InvokeModelWithResponseStream` on allowed model ARNs. (4) Secrets Manager: `GetSecretValue` on `chimera/*` prefix. (5) CloudWatch: `PutMetricData`, `PutLogEvents`. (6) EventBridge: `PutEvents` on `chimera-events` bus |
 | Condition keys | DynamoDB `LeadingKeys` condition scoped per tenant at runtime (Cedar evaluates before DynamoDB call) |
 
-### 4.2 `clawcore-tenant-{tenantId}-role`
+### 4.2 `chimera-tenant-{tenantId}-role`
 
 | Field | Value |
 |-------|-------|
 | Trust policy | `bedrock.amazonaws.com` (assumed by AgentCore Runtime on behalf of tenant) |
 | Managed policies | None |
-| Inline policies | (1) DynamoDB: all CRUD on 6 tables, **condition**: `dynamodb:LeadingKeys` must match `TENANT#{tenantId}*`. (2) S3: `GetObject`, `PutObject` scoped to `tenants/{tenantId}/*` on tenant bucket. (3) S3: `GetObject` on `skills/global/*` and `skills/tenant/{tenantId}/*` on skills bucket. (4) Bedrock: `InvokeModel` on model ARNs allowed for tenant's tier. (5) Secrets Manager: `GetSecretValue` on `clawcore/{tenantId}/*` only |
+| Inline policies | (1) DynamoDB: all CRUD on 6 tables, **condition**: `dynamodb:LeadingKeys` must match `TENANT#{tenantId}*`. (2) S3: `GetObject`, `PutObject` scoped to `tenants/{tenantId}/*` on tenant bucket. (3) S3: `GetObject` on `skills/global/*` and `skills/tenant/{tenantId}/*` on skills bucket. (4) Bedrock: `InvokeModel` on model ARNs allowed for tenant's tier. (5) Secrets Manager: `GetSecretValue` on `chimera/{tenantId}/*` only |
 | Notes | Created dynamically by TenantAgent construct. Enterprise tenants get additional policy for dedicated runtime |
 
-### 4.3 `clawcore-chat-service-role`
+### 4.3 `chimera-chat-service-role`
 
 | Field | Value |
 |-------|-------|
@@ -302,31 +302,31 @@
 | Managed policies | `AmazonECSTaskExecutionRolePolicy` |
 | Inline policies | (1) API Gateway: `execute-api:ManageConnections` on WebSocket API. (2) DynamoDB: `GetItem`, `PutItem`, `DeleteItem` on sessions table (connection tracking). (3) Cognito: `cognito-idp:GetUser` (validate JWT). (4) ECR: `GetAuthorizationToken`, `BatchGetImage` on chat SDK repo |
 
-### 4.4 `clawcore-pipeline-role`
+### 4.4 `chimera-pipeline-role`
 
 | Field | Value |
 |-------|-------|
 | Trust policy | `codepipeline.amazonaws.com`, `codebuild.amazonaws.com` |
-| Managed policies | `AWSCodePipelineFullAccess` (scoped to `clawcore-*` pipelines) |
-| Inline policies | (1) CloudFormation: `*` on stacks prefixed `ClawCore-*`. (2) S3: `*` on artifacts bucket. (3) ECR: `*` on `clawcore-*` repos. (4) IAM: `PassRole` on all `clawcore-*` roles. (5) SNS: `Publish` on approval topics |
+| Managed policies | `AWSCodePipelineFullAccess` (scoped to `chimera-*` pipelines) |
+| Inline policies | (1) CloudFormation: `*` on stacks prefixed `Chimera-*`. (2) S3: `*` on artifacts bucket. (3) ECR: `*` on `chimera-*` repos. (4) IAM: `PassRole` on all `chimera-*` roles. (5) SNS: `Publish` on approval topics |
 
-### 4.5 `clawcore-eventbridge-scheduler-role`
+### 4.5 `chimera-eventbridge-scheduler-role`
 
 | Field | Value |
 |-------|-------|
 | Trust policy | `scheduler.amazonaws.com` |
 | Managed policies | None |
-| Inline policies | (1) Step Functions: `StartExecution` on `clawcore-*` state machines. (2) Lambda: `InvokeFunction` on `clawcore-*` functions |
+| Inline policies | (1) Step Functions: `StartExecution` on `chimera-*` state machines. (2) Lambda: `InvokeFunction` on `chimera-*` functions |
 
-### 4.6 `clawcore-observability-role`
+### 4.6 `chimera-observability-role`
 
 | Field | Value |
 |-------|-------|
 | Trust policy | `monitoring.amazonaws.com`, `xray.amazonaws.com` |
 | Managed policies | `CloudWatchReadOnlyAccess`, `AWSXRayReadOnlyAccess` |
-| Inline policies | (1) SNS: `Publish` on alarm notification topics. (2) Lambda: `InvokeFunction` on `clawcore-budget-enforcer` (disables cron on budget breach) |
+| Inline policies | (1) SNS: `Publish` on alarm notification topics. (2) Lambda: `InvokeFunction` on `chimera-budget-enforcer` (disables cron on budget breach) |
 
-### 4.7 `clawcore-drift-detection-role`
+### 4.7 `chimera-drift-detection-role`
 
 | Field | Value |
 |-------|-------|
@@ -372,17 +372,17 @@
 
 | SG Name | Inbound | Outbound | Attached to |
 |---------|---------|----------|-------------|
-| `clawcore-alb-sg` | 443 from 0.0.0.0/0 | 8080 to `clawcore-ecs-sg` | ALB |
-| `clawcore-ecs-sg` | 8080 from `clawcore-alb-sg` | 443 to 0.0.0.0/0 (NAT/endpoints) | ECS Fargate tasks |
-| `clawcore-agent-sg` | None (initiated outbound only) | 443 to 0.0.0.0/0 (NAT/endpoints) | AgentCore MicroVMs |
-| `clawcore-vpc-endpoint-sg` | 443 from `clawcore-ecs-sg`, `clawcore-agent-sg` | None | All interface VPC endpoints |
+| `chimera-alb-sg` | 443 from 0.0.0.0/0 | 8080 to `chimera-ecs-sg` | ALB |
+| `chimera-ecs-sg` | 8080 from `chimera-alb-sg` | 443 to 0.0.0.0/0 (NAT/endpoints) | ECS Fargate tasks |
+| `chimera-agent-sg` | None (initiated outbound only) | 443 to 0.0.0.0/0 (NAT/endpoints) | AgentCore MicroVMs |
+| `chimera-vpc-endpoint-sg` | 443 from `chimera-ecs-sg`, `chimera-agent-sg` | None | All interface VPC endpoints |
 
 ---
 
 ## 6. CDK Code — Complete Platform Stack
 
 ```typescript
-// bin/clawcore.ts — CDK App Entry Point
+// bin/chimera.ts — CDK App Entry Point
 import * as cdk from 'aws-cdk-lib';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -404,7 +404,7 @@ const envConfig: cdk.Environment = {
   region: app.node.tryGetContext('region') ?? 'us-west-2',
 };
 
-const prefix = `ClawCore-${envName}`;
+const prefix = `Chimera-${envName}`;
 
 // --- Stack 1: Network ---
 const networkStack = new NetworkStack(app, `${prefix}-Network`, {
@@ -623,14 +623,14 @@ export class DataStack extends cdk.Stack {
     super(scope, id, props);
 
     const auditKey = new kms.Key(this, 'AuditKey', {
-      alias: 'clawcore-audit',
+      alias: 'chimera-audit',
       enableKeyRotation: true,
-      description: 'CMK for ClawCore audit log encryption',
+      description: 'CMK for Chimera audit log encryption',
     });
 
     // --- Table 1: Tenants ---
     this.tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
-      tableName: 'clawcore-tenants',
+      tableName: 'chimera-tenants',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -647,7 +647,7 @@ export class DataStack extends cdk.Stack {
 
     // --- Table 2: Sessions ---
     this.sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
-      tableName: 'clawcore-sessions',
+      tableName: 'chimera-sessions',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -665,7 +665,7 @@ export class DataStack extends cdk.Stack {
 
     // --- Table 3: Skills ---
     this.skillsTable = new dynamodb.Table(this, 'SkillsTable', {
-      tableName: 'clawcore-skills',
+      tableName: 'chimera-skills',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -682,7 +682,7 @@ export class DataStack extends cdk.Stack {
 
     // --- Table 4: Rate Limits ---
     this.rateLimitsTable = new dynamodb.Table(this, 'RateLimitsTable', {
-      tableName: 'clawcore-rate-limits',
+      tableName: 'chimera-rate-limits',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -692,7 +692,7 @@ export class DataStack extends cdk.Stack {
 
     // --- Table 5: Cost Tracking ---
     this.costTrackingTable = new dynamodb.Table(this, 'CostTrackingTable', {
-      tableName: 'clawcore-cost-tracking',
+      tableName: 'chimera-cost-tracking',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -703,7 +703,7 @@ export class DataStack extends cdk.Stack {
 
     // --- Table 6: Audit ---
     this.auditTable = new dynamodb.Table(this, 'AuditTable', {
-      tableName: 'clawcore-audit',
+      tableName: 'chimera-audit',
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -722,7 +722,7 @@ export class DataStack extends cdk.Stack {
 
     // --- S3 Bucket 1: Tenant Data ---
     this.tenantBucket = new s3.Bucket(this, 'TenantBucket', {
-      bucketName: `clawcore-tenants-${this.account}-${this.region}`,
+      bucketName: `chimera-tenants-${this.account}-${this.region}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -752,7 +752,7 @@ export class DataStack extends cdk.Stack {
 
     // --- S3 Bucket 2: Skills ---
     this.skillsBucket = new s3.Bucket(this, 'SkillsBucket', {
-      bucketName: `clawcore-skills-${this.account}-${this.region}`,
+      bucketName: `chimera-skills-${this.account}-${this.region}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -765,7 +765,7 @@ export class DataStack extends cdk.Stack {
 
     // --- S3 Bucket 3: Artifacts ---
     this.artifactsBucket = new s3.Bucket(this, 'ArtifactsBucket', {
-      bucketName: `clawcore-artifacts-${this.account}-${this.region}`,
+      bucketName: `chimera-artifacts-${this.account}-${this.region}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -815,14 +815,14 @@ export class SecurityStack extends cdk.Stack {
 
     // KMS key for platform-level encryption
     this.platformKey = new kms.Key(this, 'PlatformKey', {
-      alias: 'clawcore-platform',
+      alias: 'chimera-platform',
       enableKeyRotation: true,
-      description: 'ClawCore platform encryption key',
+      description: 'Chimera platform encryption key',
     });
 
     // Cognito User Pool (one per environment, tenants distinguished by custom claim)
     const userPool = new cognito.UserPool(this, 'UserPool', {
-      userPoolName: 'clawcore-users',
+      userPoolName: 'chimera-users',
       selfSignUpEnabled: false,
       signInAliases: { email: true },
       autoVerify: { email: true },
@@ -862,12 +862,12 @@ export class SecurityStack extends cdk.Stack {
 
     // WAF Web ACL for API Gateway
     this.webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
-      name: 'clawcore-api-waf',
+      name: 'chimera-api-waf',
       scope: 'REGIONAL',
       defaultAction: { allow: {} },
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
-        metricName: 'clawcore-waf',
+        metricName: 'chimera-waf',
         sampledRequestsEnabled: true,
       },
       rules: [
@@ -943,18 +943,18 @@ export class ObservabilityStack extends cdk.Stack {
     super(scope, id, props);
 
     this.alarmTopic = new sns.Topic(this, 'AlarmTopic', {
-      topicName: 'clawcore-alarms',
-      displayName: 'ClawCore Platform Alarms',
+      topicName: 'chimera-alarms',
+      displayName: 'Chimera Platform Alarms',
     });
 
     new logs.LogGroup(this, 'AgentRuntimeLogGroup', {
-      logGroupName: `/clawcore/${cdk.Stack.of(this).stackName}/agent-runtime`,
+      logGroupName: `/chimera/${cdk.Stack.of(this).stackName}/agent-runtime`,
       retention: logs.RetentionDays.ONE_YEAR,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     this.platformDashboard = new cloudwatch.Dashboard(this, 'PlatformDashboard', {
-      dashboardName: 'ClawCore-Platform',
+      dashboardName: 'Chimera-Platform',
     });
 
     const invocationDuration = new cloudwatch.Metric({
@@ -1070,7 +1070,7 @@ export class PlatformRuntimeStack extends cdk.Stack {
 
     // IAM Role for agent runtime
     this.agentRuntimeRole = new iam.Role(this, 'AgentRuntimeRole', {
-      roleName: 'clawcore-agent-runtime-role',
+      roleName: 'chimera-agent-runtime-role',
       assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
     });
 
@@ -1101,7 +1101,7 @@ export class PlatformRuntimeStack extends cdk.Stack {
     // Secrets Manager access
     (this.agentRuntimeRole as iam.Role).addToPolicy(new iam.PolicyStatement({
       actions: ['secretsmanager:GetSecretValue'],
-      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:clawcore/*`],
+      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:chimera/*`],
     }));
 
     // CloudWatch metrics and logs
@@ -1112,12 +1112,12 @@ export class PlatformRuntimeStack extends cdk.Stack {
     }));
     (this.agentRuntimeRole as iam.Role).addToPolicy(new iam.PolicyStatement({
       actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
-      resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/clawcore/*`],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/chimera/*`],
     }));
 
     // AgentCore Runtime (pool)
     this.agentRuntime = new agentcore.Runtime(this, 'PoolRuntime', {
-      runtimeName: 'clawcore-pool',
+      runtimeName: 'chimera-pool',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset('./agent-code'),
     });
 
@@ -1130,7 +1130,7 @@ export class PlatformRuntimeStack extends cdk.Stack {
 
     // EventBridge custom bus
     this.eventBus = new events.EventBus(this, 'EventBus', {
-      eventBusName: 'clawcore-events',
+      eventBusName: 'chimera-events',
     });
 
     // Grant runtime to put events
@@ -1141,7 +1141,7 @@ export class PlatformRuntimeStack extends cdk.Stack {
 
     // WebSocket API for real-time streaming
     this.webSocketApi = new apigatewayv2.CfnApi(this, 'WebSocketApi', {
-      name: 'clawcore-websocket',
+      name: 'chimera-websocket',
       protocolType: 'WEBSOCKET',
       routeSelectionExpression: '$request.body.action',
     });
@@ -1175,7 +1175,7 @@ export class ChatStack extends cdk.Stack {
 
     const cluster = new ecs.Cluster(this, 'ChatCluster', {
       vpc: props.vpc,
-      clusterName: 'clawcore-chat',
+      clusterName: 'chimera-chat',
       containerInsights: true,
     });
 
@@ -1191,7 +1191,7 @@ export class ChatStack extends cdk.Stack {
         environment: {
           WEBSOCKET_API_ID: props.webSocketApi.ref,
           COGNITO_USER_POOL_ID: props.cognitoUserPool.userPoolId,
-          SESSIONS_TABLE: 'clawcore-sessions',
+          SESSIONS_TABLE: 'chimera-sessions',
           NODE_ENV: 'production',
         },
       },
@@ -1278,7 +1278,7 @@ export class TenantStack extends cdk.Stack {
 
     // --- Scoped IAM Role ---
     const tenantRole = new iam.Role(this, 'TenantRole', {
-      roleName: `clawcore-tenant-${tc.tenantId}-role`,
+      roleName: `chimera-tenant-${tc.tenantId}-role`,
       assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
     });
 
@@ -1322,13 +1322,13 @@ export class TenantStack extends cdk.Stack {
     // Secrets Manager: tenant prefix only
     tenantRole.addToPolicy(new iam.PolicyStatement({
       actions: ['secretsmanager:GetSecretValue'],
-      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:clawcore/${tc.tenantId}/*`],
+      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:chimera/${tc.tenantId}/*`],
     }));
 
     // --- Enterprise: Dedicated Runtime ---
     if (tc.tier === 'enterprise') {
       const dedicatedRuntime = new agentcore.Runtime(this, 'DedicatedRuntime', {
-        runtimeName: `clawcore-${tc.tenantId}`,
+        runtimeName: `chimera-${tc.tenantId}`,
         agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset('./agent-code'),
       });
       dedicatedRuntime.addEndpoint('production', {
@@ -1351,13 +1351,13 @@ export class TenantStack extends cdk.Stack {
       // In production: chain LoadPrompt -> InvokeAgent -> WriteOutput -> Notify
 
       const stateMachine = new sfn.StateMachine(this, `${job.name}-SM`, {
-        stateMachineName: `clawcore-${tc.tenantId}-${job.name}`,
+        stateMachineName: `chimera-${tc.tenantId}-${job.name}`,
         definitionBody: sfn.DefinitionBody.fromChainable(definition),
         timeout: cdk.Duration.minutes(30),
       });
 
       new events.Rule(this, `${job.name}-Schedule`, {
-        ruleName: `clawcore-${tc.tenantId}-${job.name}`,
+        ruleName: `chimera-${tc.tenantId}-${job.name}`,
         schedule: events.Schedule.expression(job.schedule),
         targets: [new targets.SfnStateMachine(stateMachine)],
       });
@@ -1365,7 +1365,7 @@ export class TenantStack extends cdk.Stack {
 
     // --- Per-Tenant Observability ---
     const dashboard = new cloudwatch.Dashboard(this, 'TenantDashboard', {
-      dashboardName: `ClawCore-Tenant-${tc.tenantId}`,
+      dashboardName: `Chimera-Tenant-${tc.tenantId}`,
     });
 
     const tenantErrors = new cloudwatch.Metric({
@@ -1428,24 +1428,24 @@ Exported by platform stacks for tenant stacks to import:
 
 | Stack | Export Name | Value | Consumer |
 |-------|------------|-------|----------|
-| NetworkStack | `ClawCore-{env}-VpcId` | VPC ID | DataStack, ChatStack, TenantStack |
-| NetworkStack | `ClawCore-{env}-PrivateSubnetIds` | Comma-separated subnet IDs | ChatStack |
-| NetworkStack | `ClawCore-{env}-AgentSGId` | Agent security group ID | PlatformRuntimeStack |
-| DataStack | `ClawCore-{env}-TenantsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
-| DataStack | `ClawCore-{env}-SessionsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, ChatStack, TenantStack |
-| DataStack | `ClawCore-{env}-SkillsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
-| DataStack | `ClawCore-{env}-RateLimitsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
-| DataStack | `ClawCore-{env}-CostTrackingTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
-| DataStack | `ClawCore-{env}-AuditTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
-| DataStack | `ClawCore-{env}-TenantBucketArn` | S3 bucket ARN | PlatformRuntimeStack, TenantStack |
-| DataStack | `ClawCore-{env}-SkillsBucketArn` | S3 bucket ARN | PlatformRuntimeStack, TenantStack |
-| SecurityStack | `ClawCore-{env}-UserPoolId` | Cognito user pool ID | PlatformRuntimeStack, ChatStack |
-| SecurityStack | `ClawCore-{env}-UserPoolArn` | Cognito user pool ARN | PlatformRuntimeStack |
-| SecurityStack | `ClawCore-{env}-WebAclArn` | WAF Web ACL ARN | PlatformRuntimeStack (API GW association) |
-| ObservabilityStack | `ClawCore-{env}-AlarmTopicArn` | SNS topic ARN | TenantStack |
-| PlatformRuntimeStack | `ClawCore-{env}-PoolRuntimeArn` | AgentCore Runtime ARN | TenantStack |
-| PlatformRuntimeStack | `ClawCore-{env}-EventBusArn` | EventBridge bus ARN | TenantStack |
-| PlatformRuntimeStack | `ClawCore-{env}-WebSocketApiId` | API Gateway WebSocket API ID | ChatStack |
+| NetworkStack | `Chimera-{env}-VpcId` | VPC ID | DataStack, ChatStack, TenantStack |
+| NetworkStack | `Chimera-{env}-PrivateSubnetIds` | Comma-separated subnet IDs | ChatStack |
+| NetworkStack | `Chimera-{env}-AgentSGId` | Agent security group ID | PlatformRuntimeStack |
+| DataStack | `Chimera-{env}-TenantsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
+| DataStack | `Chimera-{env}-SessionsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, ChatStack, TenantStack |
+| DataStack | `Chimera-{env}-SkillsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
+| DataStack | `Chimera-{env}-RateLimitsTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
+| DataStack | `Chimera-{env}-CostTrackingTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
+| DataStack | `Chimera-{env}-AuditTableArn` | DynamoDB table ARN | PlatformRuntimeStack, TenantStack |
+| DataStack | `Chimera-{env}-TenantBucketArn` | S3 bucket ARN | PlatformRuntimeStack, TenantStack |
+| DataStack | `Chimera-{env}-SkillsBucketArn` | S3 bucket ARN | PlatformRuntimeStack, TenantStack |
+| SecurityStack | `Chimera-{env}-UserPoolId` | Cognito user pool ID | PlatformRuntimeStack, ChatStack |
+| SecurityStack | `Chimera-{env}-UserPoolArn` | Cognito user pool ARN | PlatformRuntimeStack |
+| SecurityStack | `Chimera-{env}-WebAclArn` | WAF Web ACL ARN | PlatformRuntimeStack (API GW association) |
+| ObservabilityStack | `Chimera-{env}-AlarmTopicArn` | SNS topic ARN | TenantStack |
+| PlatformRuntimeStack | `Chimera-{env}-PoolRuntimeArn` | AgentCore Runtime ARN | TenantStack |
+| PlatformRuntimeStack | `Chimera-{env}-EventBusArn` | EventBridge bus ARN | TenantStack |
+| PlatformRuntimeStack | `Chimera-{env}-WebSocketApiId` | API Gateway WebSocket API ID | ChatStack |
 
 ---
 

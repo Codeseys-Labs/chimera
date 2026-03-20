@@ -1,26 +1,26 @@
 ---
 tags:
   - architecture
-  - clawcore
+  - chimera
   - open-source
   - modules
   - dependencies
   - monorepo
 date: 2026-03-19
-topic: ClawCore Open-Source Module Architecture
+topic: Chimera Open-Source Module Architecture
 status: complete
 ---
 
-# ClawCore Open-Source Module Architecture
+# Chimera Open-Source Module Architecture
 
 > How 10+ open-source components compose into a cohesive, buildable, testable
 > platform -- with version pinning, integration layers, monorepo structure,
 > build pipelines, contribution model, and licensing.
 
 Based on:
-- [[ClawCore-Final-Architecture-Plan]] -- Technology decisions and implementation phases
+- [[Chimera-Final-Architecture-Plan]] -- Technology decisions and implementation phases
 - [[AWS Bedrock AgentCore and Strands Agents/04-Strands-Agents-Core]] -- Strands SDK internals
-- [[ClawCore-Architecture-Review-Integration]] -- Chat SDK, MCP, A2A, streaming patterns
+- [[Chimera-Architecture-Review-Integration]] -- Chat SDK, MCP, A2A, streaming patterns
 
 ---
 
@@ -28,14 +28,14 @@ Based on:
 
 ```mermaid
 graph TD
-    subgraph "ClawCore Platform"
-        CORE["clawcore/core<br/>(Agent definitions,<br/>tenant runtime)"]
-        GW["clawcore/chat-gateway<br/>(SSE bridge,<br/>webhook handlers)"]
-        CLI["clawcore/cli<br/>(clawcore CLI)"]
-        SDK_PY["clawcore/sdk-python<br/>(Skill author SDK)"]
-        SDK_TS["clawcore/sdk-typescript<br/>(Skill author SDK)"]
-        CDK["clawcore/cdk<br/>(CDK constructs)"]
-        SHARED["clawcore/shared<br/>(Types, utils, schemas)"]
+    subgraph "Chimera Platform"
+        CORE["chimera/core<br/>(Agent definitions,<br/>tenant runtime)"]
+        GW["chimera/chat-gateway<br/>(SSE bridge,<br/>webhook handlers)"]
+        CLI["chimera/cli<br/>(chimera CLI)"]
+        SDK_PY["chimera/sdk-python<br/>(Skill author SDK)"]
+        SDK_TS["chimera/sdk-typescript<br/>(Skill author SDK)"]
+        CDK["chimera/cdk<br/>(CDK constructs)"]
+        SHARED["chimera/shared<br/>(Types, utils, schemas)"]
     end
 
     subgraph "Agent Runtime Layer"
@@ -124,7 +124,7 @@ graph TD
 
 ### Dependency Summary Table
 
-| ClawCore Package | Primary OSS Dependencies | Language |
+| Chimera Package | Primary OSS Dependencies | Language |
 |------------------|--------------------------|----------|
 | `core` | Strands SDK (Py), Pydantic, Cedar, OpenTelemetry, LiteLLM (opt) | Python |
 | `chat-gateway` | Vercel AI SDK, Chat SDK, Chat Adapters, FastAPI, Uvicorn, OTel | Python + TS |
@@ -169,7 +169,7 @@ matrix:
 ### Lockfile Management
 
 ```
-clawcore/
+chimera/
   uv.lock              # Root Python lockfile (uv workspace)
   pnpm-lock.yaml       # Root TS lockfile (pnpm workspace)
   packages/
@@ -203,19 +203,19 @@ clawcore/
 
 ## 3. Strands Integration Layer
 
-ClawCore extends Strands Agents at four integration points: custom tools, custom model providers, custom session managers, and hooks/plugins.
+Chimera extends Strands Agents at four integration points: custom tools, custom model providers, custom session managers, and hooks/plugins.
 
 ### 3.1 Custom Tools
 
-ClawCore wraps Strands' `@tool` decorator with tenant-aware context injection:
+Chimera wraps Strands' `@tool` decorator with tenant-aware context injection:
 
 ```python
-# clawcore/core/tools/decorators.py
+# chimera/core/tools/decorators.py
 from strands import tool, ToolContext
-from clawcore.shared.types import TenantContext
+from chimera.shared.types import TenantContext
 
-def clawcore_tool(func=None, *, requires_permissions=None):
-    """ClawCore tool decorator -- adds tenant context and Cedar authorization."""
+def chimera_tool(func=None, *, requires_permissions=None):
+    """Chimera tool decorator -- adds tenant context and Cedar authorization."""
 
     def decorator(fn):
         @tool(context=True)
@@ -238,10 +238,10 @@ def clawcore_tool(func=None, *, requires_permissions=None):
 
 ### 3.2 Custom Model Providers
 
-ClawCore provides a tenant-aware model provider that wraps Strands providers with budget tracking and routing:
+Chimera provides a tenant-aware model provider that wraps Strands providers with budget tracking and routing:
 
 ```python
-# clawcore/core/models/tenant_model.py
+# chimera/core/models/tenant_model.py
 from strands.models.model import Model
 from strands.models.bedrock import BedrockModel
 
@@ -274,10 +274,10 @@ class TenantAwareModel(Model):
 
 ### 3.3 Custom Session Managers
 
-ClawCore implements a DynamoDB-backed session manager that integrates with AgentCore Memory:
+Chimera implements a DynamoDB-backed session manager that integrates with AgentCore Memory:
 
 ```python
-# clawcore/core/session/dynamodb_session.py
+# chimera/core/session/dynamodb_session.py
 from strands.session.session_manager import SessionManager
 
 class DynamoDBSessionManager(SessionManager):
@@ -304,10 +304,10 @@ class DynamoDBSessionManager(SessionManager):
 
 ### 3.4 Hooks and Plugins
 
-ClawCore registers platform-level hooks into the Strands event system:
+Chimera registers platform-level hooks into the Strands event system:
 
 ```python
-# clawcore/core/plugins/tenant_plugin.py
+# chimera/core/plugins/tenant_plugin.py
 from strands.plugins import plugin, hook
 from strands.hooks import (
     BeforeInvocationEvent, AfterInvocationEvent,
@@ -315,7 +315,7 @@ from strands.hooks import (
 )
 
 @plugin
-class ClawCoreTenantPlugin:
+class ChimeraTenantPlugin:
     """Platform plugin: Cedar auth, cost tracking, audit logging."""
 
     def __init__(self, tenant_id: str, cedar_engine, cost_tracker, audit_logger):
@@ -345,12 +345,12 @@ class ClawCoreTenantPlugin:
 
 ### 3.5 Extension Points Summary
 
-| Extension Point | Strands Interface | ClawCore Implementation |
+| Extension Point | Strands Interface | Chimera Implementation |
 |----------------|-------------------|------------------------|
-| Tools | `@tool` decorator, `ToolProvider` | `@clawcore_tool` with Cedar auth + tenant context |
+| Tools | `@tool` decorator, `ToolProvider` | `@chimera_tool` with Cedar auth + tenant context |
 | Model providers | `Model` ABC (`stream()`) | `TenantAwareModel` with budget tracking + fallback |
 | Session managers | `SessionManager` ABC | `DynamoDBSessionManager` with tenant isolation |
-| Hooks | `HookRegistry.on(Event)` | `ClawCoreTenantPlugin` for auth, cost, audit |
+| Hooks | `HookRegistry.on(Event)` | `ChimeraTenantPlugin` for auth, cost, audit |
 | Plugins | `@plugin` decorator | Skills, Steering, custom platform plugins |
 | Conversation mgmt | `ConversationManager` ABC | Default Strands managers (sliding window, summarizing) |
 | Tool executors | `ToolExecutor` | Default Strands executors (concurrent, sequential) |
@@ -364,7 +364,7 @@ The Chat SDK connects to the Strands backend through an adapter pattern with eve
 ### 4.1 Adapter Pattern
 
 ```
-Platform-Specific Events                   Unified ClawCore Format
+Platform-Specific Events                   Unified Chimera Format
 ========================                   ======================
 
 Slack event_callback     -->  SlackAdapter    -->  NormalizedMessage
@@ -398,7 +398,7 @@ Teams Bot Framework      -->  TeamsAdapter    -->  NormalizedMessage
 ### 4.2 Event Routing
 
 ```typescript
-// clawcore/chat-gateway/src/router.ts
+// chimera/chat-gateway/src/router.ts
 import { ChatAdapter, Thread, Message } from '@chat-sdk/core';
 
 interface NormalizedMessage {
@@ -596,7 +596,7 @@ cedar-policies/
 ### Evaluation Flow
 
 ```python
-# clawcore/core/auth/cedar_engine.py
+# chimera/core/auth/cedar_engine.py
 import cedarpy  # Python bindings for Cedar
 
 class CedarEngine:
@@ -680,7 +680,7 @@ forbid(
 ## 7. Monorepo Structure
 
 ```
-clawcore/
+chimera/
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml                  # Lint, test, build on every PR
@@ -694,7 +694,7 @@ clawcore/
 │   ├── core/                       # Python: Agent runtime, tenant management
 │   │   ├── pyproject.toml
 │   │   ├── src/
-│   │   │   └── clawcore/
+│   │   │   └── chimera/
 │   │   │       ├── __init__.py
 │   │   │       ├── agent.py        # TenantAgent factory
 │   │   │       ├── models/
@@ -730,10 +730,10 @@ clawcore/
 │   │   ├── Dockerfile
 │   │   └── tests/
 │   │
-│   ├── cli/                        # Python: clawcore CLI
+│   ├── cli/                        # Python: chimera CLI
 │   │   ├── pyproject.toml
 │   │   ├── src/
-│   │   │   └── clawcore_cli/
+│   │   │   └── chimera_cli/
 │   │   │       ├── __init__.py
 │   │   │       ├── main.py         # Click entrypoint
 │   │   │       ├── commands/
@@ -748,10 +748,10 @@ clawcore/
 │   ├── sdk-python/                 # Python: Skill author SDK
 │   │   ├── pyproject.toml
 │   │   ├── src/
-│   │   │   └── clawcore_sdk/
+│   │   │   └── chimera_sdk/
 │   │   │       ├── __init__.py
 │   │   │       ├── skill.py        # Skill definition helpers
-│   │   │       ├── tool.py         # @clawcore_tool re-export
+│   │   │       ├── tool.py         # @chimera_tool re-export
 │   │   │       ├── testing.py      # SkillTestHarness
 │   │   │       └── types.py        # Shared types
 │   │   └── tests/
@@ -784,14 +784,14 @@ clawcore/
 │   │   │       ├── tenant-agent.ts
 │   │   │       └── agent-observability.ts
 │   │   ├── bin/
-│   │   │   └── clawcore.ts
+│   │   │   └── chimera.ts
 │   │   └── test/
 │   │
 │   └── shared/                     # Shared types, utils, schemas
 │       ├── pyproject.toml          # Python shared types
 │       ├── package.json            # TS shared types
 │       ├── python/
-│       │   └── clawcore_shared/
+│       │   └── chimera_shared/
 │       │       ├── types.py        # TenantConfig, AgentConfig, etc.
 │       │       └── schemas.py      # Pydantic models for API contracts
 │       └── typescript/
@@ -837,7 +837,7 @@ clawcore/
 ```toml
 # pyproject.toml (root)
 [project]
-name = "clawcore"
+name = "chimera"
 version = "0.1.0"
 
 [tool.uv.workspace]
@@ -995,7 +995,7 @@ jobs:
      my-new-skill/
        SKILL.md          # Skill specification (follows agentskills.io spec)
        tools/
-         my_tool.py      # Tool implementations using @clawcore_tool
+         my_tool.py      # Tool implementations using @chimera_tool
        tests/
          test_my_tool.py # Tests (required)
        README.md         # Usage documentation
@@ -1037,11 +1037,11 @@ jobs:
 
 ### How External Contributors Add Model Providers
 
-Model providers are contributed upstream to Strands Agents SDK, not to ClawCore directly. ClawCore consumes them via the Strands dependency. For providers not yet in Strands:
+Model providers are contributed upstream to Strands Agents SDK, not to Chimera directly. Chimera consumes them via the Strands dependency. For providers not yet in Strands:
 
 1. Contribute to `strands-agents/sdk-python` following their contribution guide
 2. Or register the provider in LiteLLM's community providers
-3. ClawCore picks it up automatically via dependency updates
+3. Chimera picks it up automatically via dependency updates
 
 ### Contributor Roles
 
@@ -1108,11 +1108,11 @@ Contributors must sign a Contributor License Agreement (CLA) before their first 
 
 ## Related Documents
 
-- [[ClawCore-Final-Architecture-Plan]] -- Technology decisions, CDK stacks, implementation phases
-- [[ClawCore-Architecture-Review-Integration]] -- Chat SDK, MCP, A2A, streaming details
+- [[Chimera-Final-Architecture-Plan]] -- Technology decisions, CDK stacks, implementation phases
+- [[Chimera-Architecture-Review-Integration]] -- Chat SDK, MCP, A2A, streaming details
 - [[AWS Bedrock AgentCore and Strands Agents/04-Strands-Agents-Core]] -- Strands SDK architecture
-- [[ClawCore-Architecture-Review-Security]] -- STRIDE threat model, Cedar policies
-- [[ClawCore-Architecture-Review-DevEx]] -- CLI design, agent.yaml spec
+- [[Chimera-Architecture-Review-Security]] -- STRIDE threat model, Cedar policies
+- [[Chimera-Architecture-Review-DevEx]] -- CLI design, agent.yaml spec
 
 ---
 
