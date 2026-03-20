@@ -5,6 +5,7 @@ import { DataStack } from '../lib/data-stack';
 import { SecurityStack } from '../lib/security-stack';
 import { ObservabilityStack } from '../lib/observability-stack';
 import { ApiStack } from '../lib/api-stack';
+import { ChatStack } from '../lib/chat-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -81,8 +82,25 @@ const apiStack = new ApiStack(app, `${prefix}-Api`, {
 });
 apiStack.addDependency(securityStack);
 
+// --- Stack 6: Chat Gateway ---
+// Express/Fastify server on ECS Fargate with ALB, SSE bridge for Vercel AI SDK streaming.
+// Depends on NetworkStack for VPC/security groups and DataStack for DynamoDB tables.
+const chatStack = new ChatStack(app, `${prefix}-Chat`, {
+  env: envConfig,
+  description: 'Chimera chat gateway: ECS Fargate service with ALB, SSE streaming, platform adapters',
+  envName,
+  vpc: networkStack.vpc,
+  albSecurityGroup: networkStack.albSecurityGroup,
+  ecsSecurityGroup: networkStack.ecsSecurityGroup,
+  tenantsTable: dataStack.tenantsTable,
+  sessionsTable: dataStack.sessionsTable,
+  skillsTable: dataStack.skillsTable,
+});
+chatStack.addDependency(networkStack);
+chatStack.addDependency(dataStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, chatStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -94,5 +112,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // SecurityStack exports user pool ID/ARN, WebACL ARN, KMS key ARN
 // ObservabilityStack exports alarm topic ARN, dashboard URL/name
 // ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
+// ChatStack exports ALB DNS/ARN, ECS cluster/service names, task definition ARN
 
 app.synth();
