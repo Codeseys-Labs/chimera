@@ -145,3 +145,6 @@ export {
 
 // Evolution module (self-improvement engine)
 export * from './evolution';
+
+// Discovery module (AWS account-wide resource discovery)
+export * from './discovery';
