@@ -18,6 +18,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/sse-bridge" },
     { "path": "./packages/chat-gateway" },
-    { "path": "./infra" }
+    { "path": "./infra" },
+    { "path": "./tests" }
   ]
 }
