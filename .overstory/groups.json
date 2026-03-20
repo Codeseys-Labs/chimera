@@ -59,5 +59,17 @@
 		"status": "active",
 		"createdAt": "2026-03-20T07:43:40.354Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-168bb7c8",
+		"name": "integration-hardening-batch",
+		"memberIssueIds": [
+			"chimera-2610",
+			"chimera-9dc8",
+			"chimera-1fc2"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T16:19:16.772Z",
+		"completedAt": null
 	}
 ]
