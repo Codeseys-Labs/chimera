@@ -1,9 +1,10 @@
-/**
+ /**
  * Activity Logging Module
  *
  * Structured activity logging with decision capture, Well-Architected Framework alignment,
- * and audit trail generation:
+ * audit trail generation, and real-time agent activity monitoring:
  * - DecisionLogger: Capture agent decision-making with alternatives and justifications
+ * - StatusDashboard: Aggregate view of agent sessions and metrics
  * - Types: Comprehensive type definitions for activity logging
  */
 
@@ -11,8 +12,20 @@ export {
   DecisionLogger,
   type DecisionLoggerConfig,
   type LogDecisionParams,
-  type DynamoDBClient,
 } from './decision-logger';
+
+export {
+  StatusDashboard,
+  type StatusDashboardConfig,
+  type SessionMetrics,
+  type AgentActivitySummary,
+  type TenantDashboard,
+  type RecentActivityItem,
+  type QuerySessionsParams,
+  type QuerySessionsResult,
+} from './status-dashboard';
+
+export type { DynamoDBClient } from './status-dashboard';
 
 export type {
   // Activity Types
