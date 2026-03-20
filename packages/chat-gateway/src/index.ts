@@ -23,3 +23,5 @@ export { default as healthRouter } from './routes/health';
 // Adapters
 export * from './adapters/types';
 export { WebPlatformAdapter } from './adapters/web';
+export { TelegramPlatformAdapter } from './adapters/telegram';
+export { TeamsPlatformAdapter } from './adapters/teams';
