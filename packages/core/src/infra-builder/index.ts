@@ -14,6 +14,9 @@
 // Core managers
 export { CodeCommitWorkspaceManager } from './codecommit-workspace';
 export { CodePipelineDeployer } from './codepipeline-deployer';
+export { CDKGenerator, createCDKGenerator } from './cdk-generator';
+export { CedarProvisioningPolicies, createCedarProvisioningPolicies } from './cedar-provisioning';
+export { InfrastructureDriftDetector, createDriftDetector } from './drift-detector';
 
 // Type exports
 export type {
@@ -50,3 +53,26 @@ export type {
   AWSRegion,
   ISOTimestamp,
 } from './types';
+
+// CDK Generator types
+export type {
+  CDKGenerationRequest,
+  CDKGenerationResult,
+  L3ConstructRequest,
+} from './cdk-generator';
+
+// Cedar Provisioning types
+export type {
+  CedarProvisioningContext,
+  CedarProvisioningResult,
+  TenantTierConfig,
+} from './cedar-provisioning';
+
+// Drift Detector types
+export type {
+  DriftDetectionRequest,
+  DriftDetectionResult,
+  DriftedResource,
+  PropertyDifference,
+  DriftRemediationAction,
+} from './drift-detector';
