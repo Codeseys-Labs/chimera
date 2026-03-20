@@ -1,0 +1,27 @@
+[
+	{
+		"id": "group-383094cb",
+		"name": "research-validation-batch-1",
+		"memberIssueIds": [
+			"chimera-ec1a",
+			"chimera-efac",
+			"chimera-0382",
+			"chimera-efa3"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-19T22:38:42.584Z",
+		"completedAt": "2026-03-19T23:15:58.352Z"
+	},
+	{
+		"id": "group-65e03737",
+		"name": "phase0-implementation-batch",
+		"memberIssueIds": [
+			"chimera-0070",
+			"chimera-bbb5",
+			"chimera-2e8e"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T00:06:47.420Z",
+		"completedAt": null
+	}
+]
