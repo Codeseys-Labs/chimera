@@ -102,14 +102,33 @@ export interface DiscordChannelConfig {
 }
 
 /**
+ * Microsoft Teams channel configuration
+ */
+export interface TeamsChannelConfig {
+  tenantId: string; // Microsoft Entra (Azure AD) tenant ID
+  appId: string; // Bot application ID
+  appPasswordArn: string; // Secrets Manager ARN for app password
+}
+
+/**
+ * Telegram channel configuration
+ */
+export interface TelegramChannelConfig {
+  botTokenArn: string; // Secrets Manager ARN for bot token
+  webhookUrl?: string; // Optional webhook URL for bot
+}
+
+/**
  * Channel configuration (SK=CONFIG#channels)
  */
 export interface TenantChannelConfig {
   PK: string; // TENANT#{tenantId}
   SK: 'CONFIG#channels';
-  enabledChannels: string[]; // ["web", "slack", "discord"]
+  enabledChannels: string[]; // ["web", "slack", "discord", "teams", "telegram"]
   slack?: SlackChannelConfig;
   discord?: DiscordChannelConfig;
+  teams?: TeamsChannelConfig;
+  telegram?: TelegramChannelConfig;
 }
 
 /**
