@@ -1,0 +1,23 @@
+# Source files
+src/
+tsconfig.json
+jest.config.js
+
+# Tests
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+
+# Examples
+examples/
+
+# Development files
+.gitignore
+.npmignore
+
+# Coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
