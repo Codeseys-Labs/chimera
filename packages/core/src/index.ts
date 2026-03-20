@@ -1,3 +1,5 @@
+
+
 /**
  * @chimera/core - Core agent runtime for AWS Chimera platform
  *
@@ -148,3 +150,6 @@ export * from './evolution';
 
 // AWS Tools module (Tier 1 first-class AWS service integration)
 export * from './aws-tools';
+
+// Discovery module (AWS account-wide resource discovery)
+export * from './discovery';
