@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib';
 import { NetworkStack } from '../lib/network-stack';
 import { DataStack } from '../lib/data-stack';
 import { SecurityStack } from '../lib/security-stack';
+import { ObservabilityStack } from '../lib/observability-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -49,8 +50,26 @@ const securityStack = new SecurityStack(app, `${prefix}-Security`, {
 });
 securityStack.addDependency(networkStack);
 
+// --- Stack 4: Observability ---
+// CloudWatch dashboard, SNS alarm topic, X-Ray config, DDB throttle alarms.
+// Depends on DataStack for table metrics and SecurityStack for KMS encryption.
+const observabilityStack = new ObservabilityStack(app, `${prefix}-Observability`, {
+  env: envConfig,
+  description: 'Chimera observability layer: CloudWatch dashboards, SNS alarms, X-Ray config',
+  envName,
+  platformKey: securityStack.platformKey,
+  tenantsTable: dataStack.tenantsTable,
+  sessionsTable: dataStack.sessionsTable,
+  skillsTable: dataStack.skillsTable,
+  rateLimitsTable: dataStack.rateLimitsTable,
+  costTrackingTable: dataStack.costTrackingTable,
+  auditTable: dataStack.auditTable,
+});
+observabilityStack.addDependency(dataStack);
+observabilityStack.addDependency(securityStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -60,5 +79,6 @@ for (const stack of [networkStack, dataStack, securityStack]) {
 // NetworkStack exports VPC ID, subnet IDs, security group IDs
 // DataStack exports table ARNs/names, bucket ARNs/names
 // SecurityStack exports user pool ID/ARN, WebACL ARN, KMS key ARN
+// ObservabilityStack exports alarm topic ARN, dashboard URL/name
 
 app.synth();
