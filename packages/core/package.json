@@ -1,7 +1,7 @@
 {
   "name": "@chimera/core",
   "version": "0.1.0",
-  "description": "Core agent runtime for Chimera - Strands agent wrapper with AgentCore Runtime integration",
+  "description": "Core agent runtime for Chimera - Strands agent wrapper with AgentCore Runtime, Memory, and universal skill loading",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -17,6 +17,9 @@
     "agentcore",
     "runtime",
     "agent",
+    "memory",
+    "tools",
+    "skills",
     "ai"
   ],
   "author": "Chimera Platform",
@@ -33,5 +36,9 @@
     "eslint": "^8.57.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-bedrock-agent": "^3.0.0",
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.0.0"
   }
 }
