@@ -382,7 +382,14 @@ export class TenantService {
    * @returns Array of tenant profiles
    */
   async getTenantsByTier(tier: TenantTier, status?: TenantStatus): Promise<TenantProfile[]> {
-    const params: any = {
+    const params: {
+      TableName: string;
+      IndexName: string;
+      KeyConditionExpression: string;
+      ExpressionAttributeValues: Record<string, any>;
+      FilterExpression?: string;
+      ExpressionAttributeNames?: Record<string, string>;
+    } = {
       TableName: this.config.tenantsTableName,
       IndexName: 'tier-index',
       KeyConditionExpression: 'tier = :tier',
