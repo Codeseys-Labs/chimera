@@ -160,3 +160,6 @@ export * from './infra-builder';
 
 // Well-Architected module (framework integration and automated reviews)
 export * from './well-architected';
+
+// Swarm module (autonomous problem-solving)
+export * from './swarm';

@@ -5,7 +5,7 @@
  * - Task decomposition (vague → concrete subtasks)
  * - Blocker detection and resolution
  * - Role assignment (planner, researcher, builder, validator)
- * - Human-in-the-loop decision gateway
+ * - Human-in-the-loop decision gateway (when to escalate vs. proceed)
  * - Progressive refinement (POC → Staging → Production)
  *
  * Based on research:
@@ -14,6 +14,10 @@
  * - docs/research/aws-account-agent/03-Role-Assignment.md
  * - docs/research/aws-account-agent/04-HITL-Gateway.md
  * - docs/research/aws-account-agent/05-Progressive-Refinement.md
+ *
+ * Architecture:
+ * - HITLGateway: Decision policy engine for autonomous vs. human approval
+ * - ProgressiveRefiner: Iterative development with learning loops
  *
  * @packageDocumentation
  */
@@ -118,7 +122,6 @@ export {
 export {
   HITLGateway,
   createHITLGateway,
-  // Module-specific types
   type EscalationUrgency,
   type Environment,
   type TaskContext,
@@ -138,7 +141,6 @@ export {
 export {
   ProgressiveRefiner,
   createProgressiveRefiner,
-  // Module-specific types (not in types.ts)
   type StageStatus,
   type StageLearning,
   type StageTask,
