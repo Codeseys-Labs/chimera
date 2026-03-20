@@ -29,7 +29,7 @@ export interface ChatRequest {
   userId?: string;
 
   /** Platform type (default: 'web') */
-  platform?: 'web' | 'slack' | 'teams';
+  platform?: 'web' | 'slack' | 'teams' | 'telegram' | 'discord';
 }
 
 /**
