@@ -1,0 +1,117 @@
+# AWS Chimera Local Development Stack
+# Provides local AWS service mocks for development and testing
+
+version: '3.9'
+
+services:
+  # DynamoDB Local - for all 6 Chimera tables
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: chimera-dynamodb-local
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
+    ports:
+      - "8000:8000"
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    networks:
+      - chimera-local
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # LocalStack - S3, SQS, EventBridge, and other AWS services
+  localstack:
+    image: localstack/localstack:latest
+    container_name: chimera-localstack
+    ports:
+      - "4566:4566"            # LocalStack gateway
+      - "4510-4559:4510-4559"  # External services port range
+    environment:
+      # Core configuration
+      - SERVICES=s3,sqs,events,logs,iam,sts,kms,secretsmanager
+      - DEBUG=0
+      - DATA_DIR=/var/lib/localstack/data
+      - PERSISTENCE=1
+      - LAMBDA_EXECUTOR=docker
+
+      # AWS configuration
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+
+      # Edge configuration
+      - EDGE_PORT=4566
+      - HOSTNAME_EXTERNAL=localstack
+
+      # Feature flags
+      - EAGER_SERVICE_LOADING=1
+      - SKIP_INFRA_DOWNLOADS=0
+
+      # S3 configuration
+      - S3_SKIP_SIGNATURE_VALIDATION=1
+
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - chimera-local
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # DynamoDB Admin UI (optional, for browsing tables)
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: chimera-dynamodb-admin
+    ports:
+      - "8001:8001"
+    environment:
+      - DYNAMO_ENDPOINT=http://dynamodb-local:8000
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    networks:
+      - chimera-local
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+
+  # Chat Gateway (hot reload via Bun watch)
+  # Commented out by default - run manually with `bun run dev` for hot reload
+  # chat-gateway:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/chat-gateway/Dockerfile.dev
+  #   container_name: chimera-chat-gateway
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     - NODE_ENV=development
+  #     - PORT=8080
+  #     - AWS_REGION=us-east-1
+  #     - AWS_ENDPOINT=http://localstack:4566
+  #     - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+  #   volumes:
+  #     - ./packages/chat-gateway:/app/packages/chat-gateway
+  #     - ./packages/core:/app/packages/core
+  #     - ./packages/shared:/app/packages/shared
+  #     - ./packages/sse-bridge:/app/packages/sse-bridge
+  #   networks:
+  #     - chimera-local
+  #   depends_on:
+  #     - dynamodb-local
+  #     - localstack
+
+networks:
+  chimera-local:
+    driver: bridge
+
+volumes:
+  dynamodb-data:
+    driver: local
+  localstack-data:
+    driver: local

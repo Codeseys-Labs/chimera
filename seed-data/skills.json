@@ -1,0 +1,250 @@
+[
+  {
+    "skillId": "skill-code-review-001",
+    "name": "code-review",
+    "displayName": "Code Review Assistant",
+    "version": "1.2.0",
+    "category": "development",
+    "description": "Automated code review focusing on security, style, and logic quality",
+    "author": {
+      "name": "Chimera Official",
+      "email": "skills@chimera.dev",
+      "verified": true
+    },
+    "marketplace": {
+      "tier": "official",
+      "trustLevel": "high",
+      "downloads": 15420,
+      "rating": 4.8,
+      "reviewCount": 234
+    },
+    "manifest": {
+      "format": "SKILL.md",
+      "permissions": [
+        "read_file",
+        "write_file",
+        "execute_analysis"
+      ],
+      "dependencies": [],
+      "mcpServers": [],
+      "platform": "agentcore"
+    },
+    "s3Location": {
+      "bucket": "chimera-skill-packages-local",
+      "key": "official/code-review/1.2.0/skill.zip",
+      "etag": "abc123def456"
+    },
+    "metadata": {
+      "createdAt": "2026-01-10T10:00:00Z",
+      "updatedAt": "2026-03-15T14:30:00Z",
+      "tags": ["code", "review", "security", "quality"],
+      "supportUrl": "https://docs.chimera.dev/skills/code-review"
+    }
+  },
+  {
+    "skillId": "skill-ticket-manager-002",
+    "name": "ticket-manager",
+    "displayName": "Support Ticket Manager",
+    "version": "2.0.1",
+    "category": "productivity",
+    "description": "Create, update, and search support tickets with intelligent routing",
+    "author": {
+      "name": "Chimera Official",
+      "email": "skills@chimera.dev",
+      "verified": true
+    },
+    "marketplace": {
+      "tier": "official",
+      "trustLevel": "high",
+      "downloads": 8920,
+      "rating": 4.6,
+      "reviewCount": 145
+    },
+    "manifest": {
+      "format": "SKILL.md",
+      "permissions": [
+        "external_api",
+        "read_memory",
+        "write_memory"
+      ],
+      "dependencies": [],
+      "mcpServers": ["jira", "zendesk"],
+      "platform": "agentcore"
+    },
+    "s3Location": {
+      "bucket": "chimera-skill-packages-local",
+      "key": "official/ticket-manager/2.0.1/skill.zip",
+      "etag": "xyz789ghi012"
+    },
+    "metadata": {
+      "createdAt": "2025-11-20T09:00:00Z",
+      "updatedAt": "2026-03-10T11:15:00Z",
+      "tags": ["tickets", "support", "crm", "automation"],
+      "supportUrl": "https://docs.chimera.dev/skills/ticket-manager"
+    }
+  },
+  {
+    "skillId": "skill-email-digest-003",
+    "name": "email-digest",
+    "displayName": "Email Digest Generator",
+    "version": "1.5.3",
+    "category": "productivity",
+    "description": "Summarize emails and generate daily/weekly digests with key action items",
+    "author": {
+      "name": "Chimera Official",
+      "email": "skills@chimera.dev",
+      "verified": true
+    },
+    "marketplace": {
+      "tier": "official",
+      "trustLevel": "high",
+      "downloads": 12340,
+      "rating": 4.9,
+      "reviewCount": 287
+    },
+    "manifest": {
+      "format": "SKILL.md",
+      "permissions": [
+        "read_memory",
+        "external_api"
+      ],
+      "dependencies": [],
+      "mcpServers": ["outlook", "gmail"],
+      "platform": "agentcore"
+    },
+    "s3Location": {
+      "bucket": "chimera-skill-packages-local",
+      "key": "official/email-digest/1.5.3/skill.zip",
+      "etag": "email123abc"
+    },
+    "metadata": {
+      "createdAt": "2025-12-05T08:00:00Z",
+      "updatedAt": "2026-03-18T16:45:00Z",
+      "tags": ["email", "summarization", "productivity", "digest"],
+      "supportUrl": "https://docs.chimera.dev/skills/email-digest"
+    }
+  },
+  {
+    "skillId": "skill-knowledge-search-004",
+    "name": "knowledge-base-search",
+    "displayName": "Knowledge Base Search",
+    "version": "1.0.0",
+    "category": "knowledge",
+    "description": "Semantic search across internal documentation, wikis, and knowledge bases",
+    "author": {
+      "name": "Community Contributor",
+      "email": "dev@knowledgetools.dev",
+      "verified": false
+    },
+    "marketplace": {
+      "tier": "verified",
+      "trustLevel": "medium",
+      "downloads": 3420,
+      "rating": 4.3,
+      "reviewCount": 67
+    },
+    "manifest": {
+      "format": "SKILL.md",
+      "permissions": [
+        "read_memory",
+        "external_api",
+        "vector_search"
+      ],
+      "dependencies": [],
+      "mcpServers": ["confluence", "notion"],
+      "platform": "agentcore"
+    },
+    "s3Location": {
+      "bucket": "chimera-skill-packages-local",
+      "key": "community/knowledge-base-search/1.0.0/skill.zip",
+      "etag": "kb567def890"
+    },
+    "metadata": {
+      "createdAt": "2026-02-14T12:00:00Z",
+      "updatedAt": "2026-02-14T12:00:00Z",
+      "tags": ["knowledge", "search", "semantic", "documentation"],
+      "supportUrl": "https://github.com/knowledgetools/kb-search-skill"
+    }
+  },
+  {
+    "skillId": "skill-weather-005",
+    "name": "weather",
+    "displayName": "Weather Information",
+    "version": "0.9.2",
+    "category": "utility",
+    "description": "Get current weather conditions and forecasts for any location",
+    "author": {
+      "name": "Community Contributor",
+      "email": "weather@skills.dev",
+      "verified": false
+    },
+    "marketplace": {
+      "tier": "unverified",
+      "trustLevel": "low",
+      "downloads": 892,
+      "rating": 4.1,
+      "reviewCount": 23
+    },
+    "manifest": {
+      "format": "SKILL.md",
+      "permissions": [
+        "external_api"
+      ],
+      "dependencies": [],
+      "mcpServers": [],
+      "platform": "agentcore"
+    },
+    "s3Location": {
+      "bucket": "chimera-skill-packages-local",
+      "key": "community/weather/0.9.2/skill.zip",
+      "etag": "weather456xyz"
+    },
+    "metadata": {
+      "createdAt": "2026-03-01T09:30:00Z",
+      "updatedAt": "2026-03-12T10:15:00Z",
+      "tags": ["weather", "forecast", "utility", "api"],
+      "supportUrl": "https://github.com/weather-skill/weather"
+    }
+  },
+  {
+    "skillId": "skill-sql-query-006",
+    "name": "sql-query-assistant",
+    "displayName": "SQL Query Assistant",
+    "version": "1.1.0",
+    "category": "development",
+    "description": "Generate, explain, and optimize SQL queries for various database systems",
+    "author": {
+      "name": "Chimera Official",
+      "email": "skills@chimera.dev",
+      "verified": true
+    },
+    "marketplace": {
+      "tier": "official",
+      "trustLevel": "high",
+      "downloads": 6780,
+      "rating": 4.7,
+      "reviewCount": 134
+    },
+    "manifest": {
+      "format": "SKILL.md",
+      "permissions": [
+        "execute_analysis",
+        "read_file"
+      ],
+      "dependencies": [],
+      "mcpServers": [],
+      "platform": "agentcore"
+    },
+    "s3Location": {
+      "bucket": "chimera-skill-packages-local",
+      "key": "official/sql-query-assistant/1.1.0/skill.zip",
+      "etag": "sql890qwe123"
+    },
+    "metadata": {
+      "createdAt": "2026-01-22T11:00:00Z",
+      "updatedAt": "2026-03-05T13:20:00Z",
+      "tags": ["sql", "database", "query", "development"],
+      "supportUrl": "https://docs.chimera.dev/skills/sql-query-assistant"
+    }
+  }
+]
