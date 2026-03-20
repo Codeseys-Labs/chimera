@@ -97,12 +97,14 @@ export class SkillDiscovery {
    * Uses semantic search if available, otherwise falls back to keyword search
    *
    * @param query - Natural language query
+   * @param tenantId - Tenant ID for security filtering
    * @param filters - Optional filters
    * @param limit - Max results
    * @returns Ranked search results
    */
   async search(
     query: string,
+    tenantId: string,
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
@@ -112,7 +114,7 @@ export class SkillDiscovery {
     }
 
     // Fall back to keyword search
-    return this.keywordSearch(query, filters, limit);
+    return this.keywordSearch(query, tenantId, filters, limit);
   }
 
   /**
@@ -178,12 +180,14 @@ export class SkillDiscovery {
    * Keyword search using OpenSearch or DynamoDB scan
    *
    * @param query - Search query
+   * @param tenantId - Tenant ID for security filtering
    * @param filters - Optional filters
    * @param limit - Max results
    * @returns Ranked search results
    */
   async keywordSearch(
     query: string,
+    tenantId: string,
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
@@ -192,7 +196,7 @@ export class SkillDiscovery {
     }
 
     // Fall back to registry search (DynamoDB scan)
-    return this.registryKeywordSearch(query, filters, limit);
+    return this.registryKeywordSearch(query, tenantId, filters, limit);
   }
 
   /**
@@ -260,6 +264,7 @@ export class SkillDiscovery {
    */
   private async registryKeywordSearch(
     query: string,
+    tenantId: string,
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
@@ -270,9 +275,9 @@ export class SkillDiscovery {
       trust_level: filters?.trust_level,
       tags: filters?.tags,
       limit,
-    });
+    }, tenantId);
 
-    return searchResult.skills.map(skill => ({
+    return searchResult.skills.map((skill: Skill) => ({
       skill,
       score: this.calculateSimpleScore(skill, query),
       match_reason: 'Registry keyword match',
@@ -283,14 +288,16 @@ export class SkillDiscovery {
    * Browse skills by category
    *
    * @param category - Skill category
+   * @param tenantId - Tenant ID for security filtering
    * @param limit - Max results
    * @returns Skills in category, sorted by popularity
    */
   async browseByCategory(
     category: SkillCategory,
+    tenantId: string,
     limit: number = 20
   ): Promise<Skill[]> {
-    return this.config.registry.listByCategory(category, limit);
+    return this.config.registry.listByCategory(category, tenantId, limit);
   }
 
   /**
@@ -298,10 +305,11 @@ export class SkillDiscovery {
    *
    * Returns skills with high download velocity
    *
+   * @param tenantId - Tenant ID for security filtering
    * @param limit - Max results
    * @returns Trending skills
    */
-  async getTrending(limit: number = 10): Promise<Skill[]> {
+  async getTrending(tenantId: string, limit: number = 10): Promise<Skill[]> {
     // Placeholder: would query time-series data for download velocity
     // For now, return top downloaded skills
     const categories: SkillCategory[] = [
@@ -320,7 +328,7 @@ export class SkillDiscovery {
     const allSkills: Skill[] = [];
 
     for (const category of categories) {
-      const skills = await this.config.registry.listByCategory(category, 5);
+      const skills = await this.config.registry.listByCategory(category, tenantId, 5);
       allSkills.push(...skills);
     }
 
@@ -365,7 +373,7 @@ export class SkillDiscovery {
     const recommendations: SearchResult[] = [];
 
     for (const category of categories) {
-      const categorySkills = await this.config.registry.listByCategory(category, 10);
+      const categorySkills = await this.config.registry.listByCategory(category, tenantId, 10);
 
       for (const skill of categorySkills) {
         // Skip already installed

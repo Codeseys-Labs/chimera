@@ -104,15 +104,20 @@ export class SkillRegistry {
    * - Full-text search (name, description)
    *
    * @param request - Search request
+   * @param tenantId - Tenant ID for security filtering
    * @returns Search results
    */
-  async searchSkills(request: SearchSkillsRequest): Promise<SkillSearchResult> {
+  async searchSkills(request: SearchSkillsRequest, tenantId: string): Promise<SkillSearchResult> {
     const limit = request.limit || 20;
     const offset = request.offset || 0;
 
     // Build filter expression
     const filterExpressions: string[] = [];
     const expressionValues: Record<string, any> = {};
+
+    // CRITICAL: Always filter by tenantId for multi-tenant isolation
+    filterExpressions.push('tenantId = :tenantId');
+    expressionValues[':tenantId'] = tenantId;
 
     if (request.category) {
       filterExpressions.push('category = :category');
@@ -142,14 +147,16 @@ export class SkillRegistry {
       expressionValues[':query'] = queryLower;
     }
 
-    const params: any = {
+    const params: {
+      TableName: string;
+      FilterExpression: string;
+      ExpressionAttributeValues: Record<string, any>;
+      ExpressionAttributeNames?: Record<string, string>;
+      Limit: number;
+    } = {
       TableName: this.config.skillsTableName,
-      FilterExpression: filterExpressions.length > 0
-        ? filterExpressions.join(' AND ')
-        : undefined,
-      ExpressionAttributeValues: Object.keys(expressionValues).length > 0
-        ? expressionValues
-        : undefined,
+      FilterExpression: filterExpressions.join(' AND '),
+      ExpressionAttributeValues: expressionValues,
       ExpressionAttributeNames: request.query ? { '#name': 'name' } : undefined,
       Limit: limit,
     };
@@ -174,19 +181,23 @@ export class SkillRegistry {
    * Uses GSI-2 (Category Index) for efficient querying
    *
    * @param category - Skill category
+   * @param tenantId - Tenant ID for security filtering
    * @param limit - Max results
    * @returns Skills in category, sorted by popularity
    */
   async listByCategory(
     category: SkillCategory,
+    tenantId: string,
     limit: number = 20
   ): Promise<Skill[]> {
     const params = {
       TableName: this.config.skillsTableName,
       IndexName: 'GSI-2',
       KeyConditionExpression: 'PK = :pk',
+      FilterExpression: 'tenantId = :tenantId',
       ExpressionAttributeValues: {
         ':pk': `CATEGORY#${category}`,
+        ':tenantId': tenantId,
       },
       Limit: limit,
       ScanIndexForward: false, // Descending order (most downloads first)
@@ -202,19 +213,23 @@ export class SkillRegistry {
    * Uses GSI-3 (Trust Level Index) for efficient querying
    *
    * @param trustLevel - Trust level
+   * @param tenantId - Tenant ID for security filtering
    * @param limit - Max results
    * @returns Skills at trust level, sorted by recency
    */
   async listByTrustLevel(
     trustLevel: SkillTrustLevel,
+    tenantId: string,
     limit: number = 20
   ): Promise<Skill[]> {
     const params = {
       TableName: this.config.skillsTableName,
       IndexName: 'GSI-3',
       KeyConditionExpression: 'PK = :pk',
+      FilterExpression: 'tenantId = :tenantId',
       ExpressionAttributeValues: {
         ':pk': `TRUST#${trustLevel}`,
+        ':tenantId': tenantId,
       },
       Limit: limit,
       ScanIndexForward: false, // Descending order (most recent first)
