@@ -153,3 +153,6 @@ export * from './aws-tools';
 
 // Discovery module (AWS account-wide resource discovery)
 export * from './discovery';
+
+// Well-Architected module (framework integration and automated reviews)
+export * from './well-architected';
