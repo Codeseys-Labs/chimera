@@ -75,6 +75,48 @@ export {
   type AuthorizationResult,
 } from './skills';
 
+// Orchestration module (multi-agent coordination)
+export {
+  AgentOrchestrator,
+  createOrchestrator,
+  AgentSwarm,
+  createSwarm,
+  SwarmPresets,
+  WorkflowEngine,
+  createWorkflowEngine,
+  WorkflowPatterns,
+  CronScheduler,
+  createCronScheduler,
+  CronPatterns,
+  CronJobPresets,
+  type AgentStatus,
+  type AgentRole,
+  type AgentEventType,
+  type SpawnAgentConfig,
+  type AgentRuntimeMetadata,
+  type TaskDelegation,
+  type AgentEvent,
+  type OrchestratorConfig,
+  type ScalingStrategy,
+  type SwarmConfig,
+  type SwarmMetrics,
+  type SwarmState,
+  type WorkflowStepType,
+  type WorkflowStepStatus,
+  type WorkflowStep,
+  type WorkflowChoice,
+  type RetryConfig,
+  type WorkflowDefinition,
+  type WorkflowExecution,
+  type StepExecutionResult,
+  type CronExpression,
+  type CronJobStatus,
+  type CronExecutionStatus,
+  type CronJob,
+  type CronExecution,
+  type CronSchedulerConfig
+} from './orchestration';
+
 // Tenant module (multi-tenant configuration and resource management)
 export {
   TenantService,
