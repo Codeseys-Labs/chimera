@@ -1,0 +1,37 @@
+{
+  "name": "chimera-monorepo",
+  "version": "0.1.0",
+  "description": "AWS Chimera - Multi-tenant agent platform monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "infra"
+  ],
+  "scripts": {
+    "build": "bun run build:shared && bun run build:packages && bun run build:infra",
+    "build:shared": "cd packages/shared && bun run build",
+    "build:packages": "bun run build:sse-bridge",
+    "build:sse-bridge": "cd packages/sse-bridge && bun run build",
+    "build:infra": "cd infra && bun run build",
+    "test": "bun test",
+    "test:all": "bun run test:shared && bun run test:sse-bridge && bun run test:infra",
+    "test:shared": "cd packages/shared && bun test",
+    "test:sse-bridge": "cd packages/sse-bridge && bun test",
+    "test:infra": "cd infra && bun test",
+    "lint": "bun run lint:packages && bun run lint:infra",
+    "lint:packages": "cd packages/shared && bun run lint && cd ../sse-bridge && bun run lint",
+    "lint:infra": "cd infra && bun run lint",
+    "typecheck": "tsc --build",
+    "clean": "bun run clean:packages && bun run clean:infra",
+    "clean:packages": "rm -rf packages/*/dist packages/*/node_modules",
+    "clean:infra": "rm -rf infra/dist infra/cdk.out"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.0.0"
+  }
+}
