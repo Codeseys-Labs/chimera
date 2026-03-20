@@ -5,6 +5,7 @@ import { DataStack } from '../lib/data-stack';
 import { SecurityStack } from '../lib/security-stack';
 import { ObservabilityStack } from '../lib/observability-stack';
 import { ApiStack } from '../lib/api-stack';
+import { SkillPipelineStack } from '../lib/skill-pipeline-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -81,8 +82,20 @@ const apiStack = new ApiStack(app, `${prefix}-Api`, {
 });
 apiStack.addDependency(securityStack);
 
+// --- Stack 6: Skill Pipeline ---
+// 7-stage security scanning pipeline for marketplace skills using Step Functions.
+// Depends on DataStack for skills table and skills bucket.
+const skillPipelineStack = new SkillPipelineStack(app, `${prefix}-SkillPipeline`, {
+  env: envConfig,
+  description: 'Chimera skill security scanning pipeline: 7-stage Step Functions workflow',
+  envName,
+  skillsTable: dataStack.skillsTable,
+  skillsBucket: dataStack.skillsBucket,
+});
+skillPipelineStack.addDependency(dataStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -94,5 +107,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // SecurityStack exports user pool ID/ARN, WebACL ARN, KMS key ARN
 // ObservabilityStack exports alarm topic ARN, dashboard URL/name
 // ApiStack exports REST API ID/URL, authorizer ID, WebSocket API ID/URL
+// SkillPipelineStack exports state machine ARN/name
 
 app.synth();

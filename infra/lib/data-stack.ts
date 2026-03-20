@@ -101,10 +101,12 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // Table 3: chimera-skills
-    // PK: TENANT#{id}, SK: SKILL#{name}
-    // GSI1: skillName -> tenantId (find skill usage across tenants)
-    // Streams: triggers Gateway MCP target sync
+    // Table 3: chimera-skills (Marketplace Catalog)
+    // PK: SKILL#{name}, SK: VERSION#{semver} or META
+    // GSI1: author -> skillName (find skills by author)
+    // GSI2: category -> downloadCount (browse by category, sorted by popularity)
+    // GSI3: trustLevel -> updatedAt (list skills by trust tier, sorted by recency)
+    // Streams: triggers skill update notifications
     // ======================================================================
     this.skillsTable = new dynamodb.Table(this, 'SkillsTable', {
       tableName: `chimera-skills-${props.envName}`,
@@ -115,10 +117,25 @@ export class DataStack extends cdk.Stack {
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
+    // GSI1: Author Index - Query skills by author
     this.skillsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1-skill-usage',
-      partitionKey: { name: 'skillName', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      indexName: 'GSI1-author',
+      partitionKey: { name: 'author', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'skillName', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    // GSI2: Category Index - Browse by category, sorted by popularity
+    this.skillsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2-category',
+      partitionKey: { name: 'category', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'downloadCount', type: dynamodb.AttributeType.NUMBER },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    // GSI3: Trust Level Index - List skills by trust tier, sorted by recency
+    this.skillsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI3-trust',
+      partitionKey: { name: 'trustLevel', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'updatedAt', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
