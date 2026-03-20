@@ -593,17 +593,17 @@ forbid(
     // Step Functions: Onboarding Workflow
     // Orchestrates all Lambda functions with error handling and retries.
     // ======================================================================
-    const createTenantTask = new tasks.LambdaInvoke(this, 'CreateTenantRecord', {
+    const createTenantTask = new tasks.LambdaInvoke(this, 'CreateTenantRecordTask', {
       lambdaFunction: this.createTenantRecordFunction,
       resultPath: '$.createTenantResult',
     });
 
-    const createRoleTask = new tasks.LambdaInvoke(this, 'CreateIAMRole', {
+    const createRoleTask = new tasks.LambdaInvoke(this, 'CreateIAMRoleTask', {
       lambdaFunction: this.createIamRoleFunction,
       resultPath: '$.createRoleResult',
     });
 
-    const createGroupTask = new tasks.LambdaInvoke(this, 'CreateCognitoGroup', {
+    const createGroupTask = new tasks.LambdaInvoke(this, 'CreateCognitoGroupTask', {
       lambdaFunction: this.createCognitoGroupFunction,
       inputPath: '$',
       resultPath: '$.createGroupResult',
@@ -614,17 +614,17 @@ forbid(
       }),
     });
 
-    const initS3Task = new tasks.LambdaInvoke(this, 'InitializeS3Prefix', {
+    const initS3Task = new tasks.LambdaInvoke(this, 'InitializeS3PrefixTask', {
       lambdaFunction: this.initializeS3PrefixFunction,
       resultPath: '$.initS3Result',
     });
 
-    const createCedarTask = new tasks.LambdaInvoke(this, 'CreateCedarPolicies', {
+    const createCedarTask = new tasks.LambdaInvoke(this, 'CreateCedarPoliciesTask', {
       lambdaFunction: this.createCedarPoliciesFunction,
       resultPath: '$.createCedarResult',
     });
 
-    const initCostTask = new tasks.LambdaInvoke(this, 'InitializeCostTracking', {
+    const initCostTask = new tasks.LambdaInvoke(this, 'InitializeCostTrackingTask', {
       lambdaFunction: this.initializeCostTrackingFunction,
       resultPath: '$.initCostResult',
     });
@@ -669,8 +669,7 @@ forbid(
           .branch(initCostTask)
       )
       .next(updateStatusTask)
-      .next(successState)
-      .addCatch(failState, { resultPath: '$.error' });
+      .next(successState);
 
     this.onboardingStateMachine = new sfn.StateMachine(this, 'OnboardingStateMachine', {
       stateMachineName: `chimera-tenant-onboarding-${envName}`,
