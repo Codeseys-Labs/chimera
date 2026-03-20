@@ -1,0 +1,37 @@
+{
+  "name": "@chimera/core",
+  "version": "0.1.0",
+  "description": "Core agent runtime for Chimera - Strands agent wrapper with AgentCore Runtime integration",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "chimera",
+    "strands",
+    "agentcore",
+    "runtime",
+    "agent",
+    "ai"
+  ],
+  "author": "Chimera Platform",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@chimera/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.7.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "@types/jest": "^29.5.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0"
+  }
+}

@@ -15,6 +15,7 @@
   "files": [],
   "references": [
     { "path": "./packages/shared" },
+    { "path": "./packages/core" },
     { "path": "./packages/sse-bridge" },
     { "path": "./infra" }
   ]
