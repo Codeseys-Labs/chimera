@@ -126,12 +126,14 @@ export class NetworkStack extends cdk.Stack {
 
 #### DataStack
 
+> **Note**: This section was updated 2026-03-19 to use the canonical **6-table design** from the Final Architecture Plan. The original draft used a single-table design which has been superseded. See [docs/architecture/canonical-data-model.md](../../architecture/canonical-data-model.md) for the authoritative schema definition.
+
 ```typescript
 // lib/stacks/data-stack.ts
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as efs from 'aws-cdk-lib/aws-efs';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
 
@@ -140,31 +142,65 @@ interface DataStackProps extends cdk.StackProps {
 }
 
 export class DataStack extends cdk.Stack {
-  public readonly platformTable: dynamodb.ITable;
+  public readonly tenantsTable: dynamodb.ITable;
+  public readonly sessionsTable: dynamodb.ITable;
+  public readonly skillsTable: dynamodb.ITable;
+  public readonly rateLimitsTable: dynamodb.ITable;
+  public readonly costTrackingTable: dynamodb.ITable;
+  public readonly auditTable: dynamodb.ITable;
   public readonly tenantBucket: s3.IBucket;
   public readonly skillsBucket: s3.IBucket;
-  public readonly agentWorkspace: efs.IFileSystem;
+  public readonly artifactsBucket: s3.IBucket;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
-    // Single-table design: PK=TENANT#{id}, SK=SESSION#|SKILL#|CONFIG|CRON#
-    this.platformTable = new dynamodb.Table(this, 'PlatformTable', {
-      tableName: 'chimera-platform',
+    const isProd = props.envName === 'production';
+
+    // --- Table 1: Tenants ---
+    this.tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
+      tableName: `chimera-tenants-${props.envName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       pointInTimeRecovery: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      timeToLiveAttribute: 'ttl',
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+    this.tenantsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI1-tier',
+      partitionKey: { name: 'tier', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    this.tenantsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2-status',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
-    // GSI for cross-tenant queries (active sessions, skill search)
-    this.platformTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1',
-      partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
+    // --- Table 2: Sessions ---
+    this.sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
+      tableName: `chimera-sessions-${props.envName}`,
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      timeToLiveAttribute: 'ttl',
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+    this.sessionsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI1-agent-activity',
+      partitionKey: { name: 'agentId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    this.sessionsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2-user-sessions',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
 

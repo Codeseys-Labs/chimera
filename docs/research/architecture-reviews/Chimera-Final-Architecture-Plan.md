@@ -110,7 +110,9 @@ graph TD
 
 ### Global Secondary Indexes
 - `chimera-tenants` GSI1: `tier` → `tenantId` (query tenants by tier)
+- `chimera-tenants` GSI2: `status` → `tenantId` (query tenants by lifecycle status)
 - `chimera-sessions` GSI1: `agentId` → `lastActivity` (find active agents)
+- `chimera-sessions` GSI2: `userId` → `lastActivity` (find user sessions)
 - `chimera-skills` GSI1: `skillName` → `tenantId` (find skill usage across tenants)
 
 ---
