@@ -4,10 +4,14 @@ import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as xray from 'aws-cdk-lib/aws-xray';
 import { Construct } from 'constructs';
 
 export interface ObservabilityStackProps extends cdk.StackProps {
   envName: string;
+  platformKey: kms.IKey;
   tenantsTable?: dynamodb.ITable;
   sessionsTable?: dynamodb.ITable;
   skillsTable?: dynamodb.ITable;
@@ -26,6 +30,8 @@ export interface ObservabilityStackProps extends cdk.StackProps {
 export class ObservabilityStack extends cdk.Stack {
   public readonly alarmTopic: sns.Topic;
   public readonly platformDashboard: cloudwatch.Dashboard;
+  public readonly platformLogGroup: logs.LogGroup;
+  public readonly xrayGroup: xray.CfnGroup;
 
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
@@ -33,12 +39,25 @@ export class ObservabilityStack extends cdk.Stack {
     const isProd = props.envName === 'prod';
 
     // ======================================================================
+    // Centralized Log Group: Platform-wide logs
+    // All services (ECS, Lambda, API Gateway) send logs here for unified querying.
+    // ======================================================================
+    this.platformLogGroup = new logs.LogGroup(this, 'PlatformLogGroup', {
+      logGroupName: `/chimera/${props.envName}/platform`,
+      retention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      encryptionKey: props.platformKey,
+    });
+
+    // ======================================================================
     // SNS Topic: Alarm notifications
     // All CloudWatch alarms publish to this topic. Subscribers: email, PagerDuty, Slack.
+    // Encrypted with platformKey for security compliance.
     // ======================================================================
     this.alarmTopic = new sns.Topic(this, 'AlarmTopic', {
       displayName: `Chimera ${props.envName} Alarms`,
       topicName: `chimera-alarms-${props.envName}`,
+      masterKey: props.platformKey,
     });
 
     // Add email subscription for prod (typically ops team distribution list)
@@ -48,6 +67,20 @@ export class ObservabilityStack extends cdk.Stack {
         this.alarmTopic.addSubscription(new subscriptions.EmailSubscription(opsEmail));
       }
     }
+
+    // ======================================================================
+    // X-Ray Tracing Group: Distributed tracing for Chimera services
+    // Groups traces from ECS, Lambda, and API Gateway for end-to-end visibility.
+    // Filter: service(chimera-*) for all Chimera microservices.
+    // ======================================================================
+    this.xrayGroup = new xray.CfnGroup(this, 'XRayTracingGroup', {
+      groupName: `chimera-${props.envName}`,
+      filterExpression: 'service("chimera-*")',
+      insightsConfiguration: {
+        insightsEnabled: true,
+        notificationsEnabled: isProd,
+      },
+    });
 
     // ======================================================================
     // CloudWatch Dashboard: Platform-wide view
@@ -181,39 +214,161 @@ export class ObservabilityStack extends cdk.Stack {
     );
 
     // --- Latency section: ECS task latency, API Gateway p99 ---
-    // Placeholder until ChatStack and PlatformRuntimeStack are implemented.
-    // These stacks will export metrics that we import here.
+    // API Gateway latency (p99) - namespace: AWS/ApiGateway
+    const apiLatencyP99 = new cloudwatch.Metric({
+      namespace: 'AWS/ApiGateway',
+      metricName: 'Latency',
+      statistic: 'p99',
+      period: cdk.Duration.minutes(5),
+      dimensionsMap: {
+        Stage: props.envName,
+      },
+    });
+
+    // ECS task CPU/Memory utilization - namespace: AWS/ECS
+    const ecsCpuUtilization = new cloudwatch.Metric({
+      namespace: 'AWS/ECS',
+      metricName: 'CPUUtilization',
+      statistic: 'Average',
+      period: cdk.Duration.minutes(5),
+      dimensionsMap: {
+        ServiceName: `chimera-chat-${props.envName}`,
+      },
+    });
+
+    const ecsMemoryUtilization = new cloudwatch.Metric({
+      namespace: 'AWS/ECS',
+      metricName: 'MemoryUtilization',
+      statistic: 'Average',
+      period: cdk.Duration.minutes(5),
+      dimensionsMap: {
+        ServiceName: `chimera-chat-${props.envName}`,
+      },
+    });
+
     this.platformDashboard.addWidgets(
-      new cloudwatch.TextWidget({
-        markdown: `## Latency (p99)\n\nAPI Gateway and ECS Fargate latency metrics will appear here after ChatStack deployment.\n\nTarget SLA: p99 < 2s for HTTP requests.`,
-        width: 24,
-        height: 3,
+      new cloudwatch.GraphWidget({
+        title: 'API Gateway Latency (p99)',
+        left: [apiLatencyP99],
+        width: 12,
+        leftYAxis: { label: 'Milliseconds', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'ECS Task CPU/Memory',
+        left: [ecsCpuUtilization, ecsMemoryUtilization],
+        width: 12,
+        leftYAxis: { label: 'Percent', min: 0, max: 100 },
       }),
     );
 
-    // --- Errors section: ECS task failures, Lambda errors, 5xx responses ---
-    // Placeholder until runtime stacks are deployed.
+    // --- Errors section: ECS task failures, Lambda errors, 4xx/5xx responses ---
+    // API Gateway 4xx/5xx errors
+    const api4xxErrors = new cloudwatch.Metric({
+      namespace: 'AWS/ApiGateway',
+      metricName: '4XXError',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+      dimensionsMap: {
+        Stage: props.envName,
+      },
+    });
+
+    const api5xxErrors = new cloudwatch.Metric({
+      namespace: 'AWS/ApiGateway',
+      metricName: '5XXError',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+      dimensionsMap: {
+        Stage: props.envName,
+      },
+    });
+
+    // Lambda errors
+    const lambdaErrors = new cloudwatch.Metric({
+      namespace: 'AWS/Lambda',
+      metricName: 'Errors',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    const lambdaThrottles = new cloudwatch.Metric({
+      namespace: 'AWS/Lambda',
+      metricName: 'Throttles',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
     this.platformDashboard.addWidgets(
-      new cloudwatch.TextWidget({
-        markdown: `## Error Rates\n\nECS task failures, Lambda errors, and HTTP 5xx responses will appear here after runtime stacks are deployed.\n\nTarget SLA: <0.1% error rate.`,
-        width: 24,
-        height: 3,
+      new cloudwatch.GraphWidget({
+        title: 'API Gateway Errors',
+        left: [api4xxErrors, api5xxErrors],
+        width: 12,
+        leftYAxis: { label: 'Count', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Lambda Errors & Throttles',
+        left: [lambdaErrors, lambdaThrottles],
+        width: 12,
+        leftYAxis: { label: 'Count', min: 0 },
       }),
     );
 
     // ======================================================================
-    // X-Ray Tracing Configuration
-    // Enable X-Ray sampling rules for distributed tracing across services.
-    // Lambda, ECS, and API Gateway will instrument with X-Ray SDK.
+    // Key Alarms: API error rate, cost anomaly
     // ======================================================================
-    // X-Ray sampling rules are configured per-service, not via CDK constructs.
-    // This is a placeholder for documentation. Actual X-Ray enablement happens in:
-    // - ECS task definitions (ChatStack)
-    // - Lambda functions (PlatformRuntimeStack)
-    // - API Gateway stages (ChatStack)
-    //
-    // Default sampling: 5% of requests + 1 req/sec reservoir.
-    // Override for critical paths (e.g., /invoke, /chat) to 100% sampling in dev.
+
+    // API Error Rate >5% alarm
+    // Calculates error rate as (5xx / total requests) * 100
+    const apiRequestCount = new cloudwatch.Metric({
+      namespace: 'AWS/ApiGateway',
+      metricName: 'Count',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+      dimensionsMap: {
+        Stage: props.envName,
+      },
+    });
+
+    const apiErrorRate = new cloudwatch.MathExpression({
+      expression: '(m1 / m2) * 100',
+      usingMetrics: {
+        m1: api5xxErrors,
+        m2: apiRequestCount,
+      },
+      period: cdk.Duration.minutes(5),
+    });
+
+    const apiErrorRateAlarm = new cloudwatch.Alarm(this, 'ApiErrorRateAlarm', {
+      alarmName: `chimera-${props.envName}-api-error-rate`,
+      alarmDescription: 'API 5xx error rate exceeds 5% (indicates platform degradation)',
+      metric: apiErrorRate,
+      threshold: 5,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    apiErrorRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+
+    // Cost Anomaly Detection alarm
+    // Tracks monthly spend in cost-tracking table via custom metric filter
+    // Triggers when tenant exceeds tier quota by 20%
+    const costAnomalyMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Billing',
+      metricName: 'TenantCostAnomaly',
+      statistic: 'Maximum',
+      period: cdk.Duration.hours(1),
+    });
+
+    const costAnomalyAlarm = new cloudwatch.Alarm(this, 'CostAnomalyAlarm', {
+      alarmName: `chimera-${props.envName}-cost-anomaly`,
+      alarmDescription: 'Tenant cost exceeded tier quota by 20% (requires investigation)',
+      metric: costAnomalyMetric,
+      threshold: 1.2, // 120% of tier quota
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
 
     // ======================================================================
     // Stack Outputs
@@ -234,6 +389,18 @@ export class ObservabilityStack extends cdk.Stack {
       value: this.platformDashboard.dashboardName,
       exportName: `${this.stackName}-DashboardName`,
       description: 'CloudWatch dashboard name',
+    });
+
+    new cdk.CfnOutput(this, 'PlatformLogGroupName', {
+      value: this.platformLogGroup.logGroupName,
+      exportName: `${this.stackName}-PlatformLogGroupName`,
+      description: 'Centralized platform log group name',
+    });
+
+    new cdk.CfnOutput(this, 'XRayGroupName', {
+      value: this.xrayGroup.groupName!,
+      exportName: `${this.stackName}-XRayGroupName`,
+      description: 'X-Ray tracing group name',
     });
   }
 }

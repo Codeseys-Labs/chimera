@@ -52,11 +52,12 @@ securityStack.addDependency(networkStack);
 
 // --- Stack 4: Observability ---
 // CloudWatch dashboard, SNS alarm topic, X-Ray config, DDB throttle alarms.
-// Depends on DataStack for table metrics.
+// Depends on DataStack for table metrics and SecurityStack for KMS encryption.
 const observabilityStack = new ObservabilityStack(app, `${prefix}-Observability`, {
   env: envConfig,
   description: 'Chimera observability layer: CloudWatch dashboards, SNS alarms, X-Ray config',
   envName,
+  platformKey: securityStack.platformKey,
   tenantsTable: dataStack.tenantsTable,
   sessionsTable: dataStack.sessionsTable,
   skillsTable: dataStack.skillsTable,
@@ -65,6 +66,7 @@ const observabilityStack = new ObservabilityStack(app, `${prefix}-Observability`
   auditTable: dataStack.auditTable,
 });
 observabilityStack.addDependency(dataStack);
+observabilityStack.addDependency(securityStack);
 
 // Apply tags to all stacks
 for (const stack of [networkStack, dataStack, securityStack, observabilityStack]) {
