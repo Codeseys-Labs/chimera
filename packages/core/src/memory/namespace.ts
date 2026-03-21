@@ -115,3 +115,134 @@ export function extractSessionId(sessionNamespace: string): string | null {
   const match = sessionNamespace.match(pattern);
   return match ? match[1] : null;
 }
+
+/**
+ * Generate namespace for SWARM scope (shared across agents on same task)
+ *
+ * @param tenantId - Tenant identifier
+ * @param swarmId - Swarm/task identifier (e.g., 'chimera-39d5', 'build-pipeline-123')
+ * @returns Swarm-scoped namespace
+ *
+ * @example
+ * ```ts
+ * const namespace = generateSwarmNamespace('acme-corp', 'chimera-39d5');
+ * // Returns: 'tenant-acme-corp-swarm-chimera-39d5'
+ * ```
+ */
+export function generateSwarmNamespace(
+  tenantId: string,
+  swarmId: string
+): string {
+  if (!tenantId || !swarmId) {
+    throw new Error('Both tenantId and swarmId are required for swarm namespace generation');
+  }
+
+  const validIdPattern = /^[a-zA-Z0-9_-]+$/;
+  if (!validIdPattern.test(tenantId)) {
+    throw new Error(`Invalid tenantId format: ${tenantId}`);
+  }
+  if (!validIdPattern.test(swarmId)) {
+    throw new Error(`Invalid swarmId format: ${swarmId}`);
+  }
+
+  return `tenant-${tenantId}-swarm-${swarmId}`;
+}
+
+/**
+ * Generate namespace for AGENT scope (persistent cross-session agent knowledge)
+ *
+ * @param tenantId - Tenant identifier
+ * @param agentId - Agent identifier (e.g., 'builder-memory-tiers', 'lead-docs')
+ * @returns Agent-scoped namespace
+ *
+ * @example
+ * ```ts
+ * const namespace = generateAgentNamespace('acme-corp', 'builder-memory-tiers');
+ * // Returns: 'tenant-acme-corp-agent-builder-memory-tiers'
+ * ```
+ */
+export function generateAgentNamespace(
+  tenantId: string,
+  agentId: string
+): string {
+  if (!tenantId || !agentId) {
+    throw new Error('Both tenantId and agentId are required for agent namespace generation');
+  }
+
+  const validIdPattern = /^[a-zA-Z0-9_-]+$/;
+  if (!validIdPattern.test(tenantId)) {
+    throw new Error(`Invalid tenantId format: ${tenantId}`);
+  }
+  if (!validIdPattern.test(agentId)) {
+    throw new Error(`Invalid agentId format: ${agentId}`);
+  }
+
+  return `tenant-${tenantId}-agent-${agentId}`;
+}
+
+/**
+ * Parse scoped namespace to extract components and determine scope
+ *
+ * @param namespace - Scoped namespace string
+ * @returns Parsed components with scope type or null if invalid
+ *
+ * @example
+ * ```ts
+ * parseScopedNamespace('tenant-acme-corp-swarm-chimera-39d5');
+ * // Returns: { tenantId: 'acme-corp', scope: 'SWARM', scopeId: 'chimera-39d5' }
+ * ```
+ */
+export function parseScopedNamespace(namespace: string): {
+  tenantId: string;
+  scope: 'SESSION' | 'SWARM' | 'AGENT';
+  scopeId: string;
+  userId?: string; // Only for SESSION scope
+} | null {
+  // Try SWARM pattern: tenant-{tenantId}-swarm-{swarmId}
+  const swarmPattern = /^tenant-(.+?)-swarm-(.+)$/;
+  const swarmMatch = namespace.match(swarmPattern);
+  if (swarmMatch) {
+    return {
+      tenantId: swarmMatch[1],
+      scope: 'SWARM',
+      scopeId: swarmMatch[2],
+    };
+  }
+
+  // Try AGENT pattern: tenant-{tenantId}-agent-{agentId}
+  const agentPattern = /^tenant-(.+?)-agent-(.+)$/;
+  const agentMatch = namespace.match(agentPattern);
+  if (agentMatch) {
+    return {
+      tenantId: agentMatch[1],
+      scope: 'AGENT',
+      scopeId: agentMatch[2],
+    };
+  }
+
+  // Try SESSION pattern: tenant-{tenantId}-user-{userId}-session-{sessionId}
+  const sessionPattern = /^tenant-(.+?)-user-(.+?)-session-(.+)$/;
+  const sessionMatch = namespace.match(sessionPattern);
+  if (sessionMatch) {
+    return {
+      tenantId: sessionMatch[1],
+      scope: 'SESSION',
+      scopeId: sessionMatch[3],
+      userId: sessionMatch[2],
+    };
+  }
+
+  // Try base user pattern (legacy SESSION scope): tenant-{tenantId}-user-{userId}
+  const userPattern = /^tenant-(.+?)-user-(.+)$/;
+  const userMatch = namespace.match(userPattern);
+  if (userMatch) {
+    return {
+      tenantId: userMatch[1],
+      scope: 'SESSION',
+      scopeId: 'default', // No explicit session ID
+      userId: userMatch[2],
+    };
+  }
+
+  return null;
+}

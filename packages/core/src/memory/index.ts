@@ -16,3 +16,6 @@ export * from './in-memory-client';
 
 // Namespace utilities
 export * from './namespace';
+
+// Tiered memory client (SESSION, SWARM, AGENT scopes)
+export * from './tiered-client';
