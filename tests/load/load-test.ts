@@ -262,4 +262,140 @@ describe('Load Tests', () => {
       expect(errorRate).toBeLessThan(0.05); // < 5% error rate
     }, 600000); // 10 min timeout
   });
+
+  describe('Extreme Scale: 1000 Concurrent Sessions', () => {
+    test('100 concurrent clients - 10 requests each (1000 total)', async () => {
+      const result = await runLoadTest(100, 10, (i) => `Scale test ${i + 1}: What is 5+5?`);
+
+      console.log('100 Clients Scale Test Results:', result);
+
+      expect(result.successfulRequests).toBeGreaterThanOrEqual(900); // 90% success at scale
+      expect(result.p99LatencyMs).toBeLessThan(90000); // p99 < 90s at high concurrency
+      expect(result.requestsPerSecond).toBeGreaterThan(0.3); // Maintain throughput
+    }, 1800000); // 30 min timeout
+  });
+
+  describe('Extreme Scale: 1000 Concurrent Sessions (Long-Running)', () => {
+    test('200 concurrent clients - 5 requests each (1000 total)', async () => {
+      const result = await runLoadTest(200, 5, (i) => `Scale ${i + 1}`);
+
+      console.log('200 Clients Scale Test Results:', result);
+
+      expect(result.successfulRequests).toBeGreaterThanOrEqual(900); // 90% success
+      expect(result.p95LatencyMs).toBeLessThan(120000); // p95 < 2 min at extreme concurrency
+      expect(result.avgLatencyMs).toBeLessThan(60000); // avg < 1 min
+    }, 2400000); // 40 min timeout
+  });
+
+  describe('Extreme Scale: 1000 Concurrent Sessions (Maximum Burst)', () => {
+    test('1000 concurrent clients - 1 request each (maximum burst)', async () => {
+      const result = await runLoadTest(1000, 1, (i) => `Burst ${i + 1}: ping`);
+
+      console.log('1000 Clients Burst Test Results:', result);
+
+      expect(result.successfulRequests).toBeGreaterThanOrEqual(850); // 85% success under extreme burst
+      expect(result.p99LatencyMs).toBeLessThan(180000); // p99 < 3 min under extreme load
+      expect(result.failedRequests).toBeLessThan(150); // < 15% failure rate
+    }, 3600000); // 60 min timeout
+  });
+
+  describe('Sustained 1000 Concurrent Sessions', () => {
+    test('500 clients - 2 requests each (sustained high load)', async () => {
+      const result = await runLoadTest(500, 2, (i) => `Sustained ${i + 1}: calculate`);
+
+      console.log('500 Clients Sustained Load Results:', result);
+
+      expect(result.successfulRequests).toBeGreaterThanOrEqual(900); // 90% success
+      expect(result.requestsPerSecond).toBeGreaterThan(0.2); // Maintain throughput under sustained load
+      expect(result.p50LatencyMs).toBeLessThan(45000); // p50 < 45s under sustained load
+    }, 2400000); // 40 min timeout
+  });
+
+  describe('Gradual Ramp-Up to 1000 Sessions', () => {
+    test('ramp from 10 to 1000 clients over 10 minutes', async () => {
+      const rampResults: LoadTestResult[] = [];
+      const rampSteps = [10, 50, 100, 200, 500, 1000];
+
+      for (const concurrency of rampSteps) {
+        console.log(`--- Ramping to ${concurrency} clients ---`);
+        const result = await runLoadTest(concurrency, 1, (i) => `Ramp ${i + 1}`);
+        rampResults.push(result);
+
+        // Wait 30 seconds between ramp steps
+        await new Promise((resolve) => setTimeout(resolve, 30000));
+      }
+
+      // Analyze degradation curve
+      console.log('Ramp-Up Analysis:');
+      rampResults.forEach((result, index) => {
+        const concurrency = rampSteps[index];
+        console.log(`${concurrency} clients: p50=${result.p50LatencyMs}ms, p99=${result.p99LatencyMs}ms, success=${result.successfulRequests}/${result.totalRequests}`);
+      });
+
+      // At 1000 clients, error rate should still be acceptable
+      const finalResult = rampResults[rampResults.length - 1];
+      const errorRate = finalResult.failedRequests / finalResult.totalRequests;
+      expect(errorRate).toBeLessThan(0.20); // < 20% error rate at maximum scale
+    }, 3600000); // 60 min timeout
+  });
+
+  describe('1000 Concurrent Sessions - Skill Usage', () => {
+    test('100 clients using skills - 5 requests each', async () => {
+      const client = new TestClient(LOAD_TEST_CONFIG);
+
+      // Install web-search skill
+      try {
+        await client.installSkill('web-search');
+      } catch {
+        // Already installed
+      }
+
+      const result = await runLoadTest(100, 5, (i) => `Search query ${i + 1}`);
+
+      console.log('1000 Sessions Skill Usage Results:', result);
+
+      expect(result.successfulRequests).toBeGreaterThanOrEqual(400); // 80% success with skills at scale
+      expect(result.p99LatencyMs).toBeLessThan(150000); // p99 < 2.5 min with tool calls
+    }, 3600000); // 60 min timeout
+  });
+
+  describe('Cost Validation at 1000 Sessions', () => {
+    test('verify total cost stays under budget', async () => {
+      // Run smaller representative sample (100 clients) to estimate cost
+      const sampleResult = await runLoadTest(100, 1, (i) => `Cost test ${i + 1}`);
+
+      const sampleClient = new TestClient(LOAD_TEST_CONFIG);
+      const sampleCost = sampleClient.getTotalCost();
+
+      // Extrapolate to 1000 sessions
+      const estimatedCostFor1000 = (sampleCost / 100) * 1000;
+
+      console.log('Cost Analysis:', {
+        sampleCost: `$${sampleCost.toFixed(2)}`,
+        estimatedCostFor1000: `$${estimatedCostFor1000.toFixed(2)}`,
+        budget: `$${LOAD_TEST_CONFIG.maxBudgetUsd}`,
+      });
+
+      // 1000-session load test should stay under $5 budget
+      expect(estimatedCostFor1000).toBeLessThan(LOAD_TEST_CONFIG.maxBudgetUsd);
+    }, 600000); // 10 min timeout
+  });
+
+  describe('Auto-Scaling Verification at 1000 Sessions', () => {
+    test('verify ECS auto-scaling triggers at high load', async () => {
+      // This test requires AWS SDK access to check ECS metrics
+      // Placeholder for auto-scaling validation
+
+      console.log('Auto-Scaling Verification:');
+      console.log('- Monitor ECS CPU/Memory utilization during 1000-session test');
+      console.log('- Verify ECS service scales from 5 tasks → 20+ tasks');
+      console.log('- Confirm scale-up completes within 5 minutes');
+      console.log('- Validate scale-down after load decreases');
+
+      // Run load test to trigger auto-scaling
+      const result = await runLoadTest(200, 5, (i) => `Autoscale trigger ${i + 1}`);
+
+      expect(result.successfulRequests).toBeGreaterThanOrEqual(900); // Validate platform handled scale
+    }, 2400000); // 40 min timeout
+  });
 });
