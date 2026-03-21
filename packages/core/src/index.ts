@@ -426,6 +426,9 @@ export {
 // Multi-Account module (cross-account governance and management)
 export * from './multi-account';
 
+// Gateway module (tier-based tool access control)
+export * from './gateway';
+
 // Auth module (user pairing and identity resolution)
 export {
   UserPairingService,
