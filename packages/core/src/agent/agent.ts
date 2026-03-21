@@ -39,6 +39,9 @@ export interface AgentConfig {
   /** Skills to load (skill names from tenant's installed skills) */
   skills?: string[];
 
+  /** Skill registry (optional, for dynamic skill loading) */
+  skillRegistry?: any; // SkillRegistry type from skills module
+
   /** Agent name/identifier */
   name?: string;
 
@@ -141,6 +144,46 @@ export class ChimeraAgent {
 
     // Initialize memory with tier-based configuration (async, will complete before first use)
     this.initializeMemory(config.tier || 'basic');
+
+    // Load skills if specified and registry provided
+    if (config.skills && config.skills.length > 0 && config.skillRegistry) {
+      this.loadSkillsAsync(config.skills, config.skillRegistry);
+    }
+  }
+
+  /**
+   * Load skills asynchronously and inject into agent
+   * Private helper called during initialization
+   */
+  private async loadSkillsAsync(skillNames: string[], registry: any): Promise<void> {
+    try {
+      // Dynamically import skill bridge to avoid circular dependency
+      const { loadSkillsForAgent } = await import('../skills/skill-bridge');
+
+      // Load skills
+      const { config: enhancedConfig, result } = await loadSkillsForAgent(
+        this.context.tenantId,
+        skillNames,
+        registry,
+        this.config
+      );
+
+      // Update config with loaded skills
+      this.config = enhancedConfig;
+      this.context.config = enhancedConfig;
+
+      // Log warnings if any
+      if (result.warnings.length > 0) {
+        console.warn(`[ChimeraAgent] Skill loading warnings:`, result.warnings);
+      }
+
+      // Log failed skills
+      if (result.failed.length > 0) {
+        console.error(`[ChimeraAgent] Failed to load skills:`, result.failed);
+      }
+    } catch (error) {
+      console.error('[ChimeraAgent] Failed to load skills:', error);
+    }
   }
 
   /**
