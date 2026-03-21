@@ -5,6 +5,10 @@ import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import * as scheduler from 'aws-cdk-lib/aws-scheduler';
+import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
+import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 
 export interface OrchestrationStackProps extends cdk.StackProps {
@@ -33,6 +37,9 @@ export class OrchestrationStack extends cdk.Stack {
   public readonly eventBus: events.EventBus;
   public readonly agentTaskQueue: sqs.Queue;
   public readonly agentMessageQueue: sqs.Queue;
+  public readonly schedulerGroup: scheduler.CfnScheduleGroup;
+  public readonly pipelineBuildStateMachine: stepfunctions.StateMachine;
+  public readonly dataAnalysisStateMachine: stepfunctions.StateMachine;
 
   constructor(scope: Construct, id: string, props: OrchestrationStackProps) {
     super(scope, id, props);
@@ -49,7 +56,7 @@ export class OrchestrationStack extends cdk.Stack {
     });
 
     // Event archive for replay capability (retain 7 days in dev, 30 days in prod)
-    const eventArchive = new events.Archive(this, 'EventArchive', {
+    new events.Archive(this, 'EventArchive', {
       sourceEventBus: this.eventBus,
       archiveName: `chimera-agents-archive-${props.envName}`,
       description: 'Archive of all agent lifecycle events for replay and debugging',
@@ -232,6 +239,265 @@ export class OrchestrationStack extends cdk.Stack {
     );
 
     // ======================================================================
+    // EventBridge Scheduler: Cron-based Agent Tasks
+    // Enables scheduled agent execution (daily reports, weekly audits, etc.)
+    // ======================================================================
+
+    this.schedulerGroup = new scheduler.CfnScheduleGroup(this, 'AgentSchedulerGroup', {
+      name: `chimera-agent-schedules-${props.envName}`,
+    });
+
+    // IAM role for EventBridge Scheduler to publish to EventBridge
+    const schedulerRole = new iam.Role(this, 'SchedulerRole', {
+      roleName: `chimera-scheduler-${props.envName}`,
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+      description: 'Allows EventBridge Scheduler to publish agent task events',
+    });
+
+    schedulerRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['events:PutEvents'],
+      resources: [this.eventBus.eventBusArn],
+    }));
+
+    // ======================================================================
+    // Per-Tenant FIFO Queues (Dynamic Creation Pattern)
+    // Tenants can have dedicated FIFO queues for strict ordering guarantees.
+    // This is created on-demand via API/Lambda, not at stack deploy time.
+    // Pattern: chimera-tenant-{tenantId}-tasks-{env}.fifo
+    // ======================================================================
+
+    // IAM role for Lambda to create per-tenant queues dynamically
+    const queueProvisionerRole = new iam.Role(this, 'QueueProvisionerRole', {
+      roleName: `chimera-queue-provisioner-${props.envName}`,
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description: 'Allows Lambda to create per-tenant SQS FIFO queues on demand',
+    });
+
+    queueProvisionerRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'sqs:CreateQueue',
+        'sqs:SetQueueAttributes',
+        'sqs:TagQueue',
+        'sqs:GetQueueAttributes',
+        'sqs:GetQueueUrl',
+      ],
+      resources: [`arn:aws:sqs:${this.region}:${this.account}:chimera-tenant-*-tasks-${props.envName}.fifo`],
+    }));
+
+    queueProvisionerRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['kms:Decrypt', 'kms:GenerateDataKey'],
+      resources: [props.platformKey.keyArn],
+    }));
+
+    queueProvisionerRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+    );
+
+    // ======================================================================
+    // Lambda Functions for Workflow Steps
+    // ======================================================================
+
+    // Pipeline Build: Start build job
+    const startBuildFunction = new lambda.Function(this, 'StartBuildFunction', {
+      functionName: `chimera-workflow-start-build-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+def handler(event, context):
+    """
+    Start a CodeBuild/CodePipeline build job.
+
+    Input: { tenant_id, repository, branch, build_spec }
+    Output: { build_id, status, started_at }
+    """
+    # TODO: Implement actual CodeBuild integration
+    return {
+        'build_id': 'build-12345',
+        'status': 'IN_PROGRESS',
+        'started_at': '2026-03-21T00:00:00Z'
+    }
+`),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+    });
+
+    // Pipeline Build: Check build status
+    const checkBuildStatusFunction = new lambda.Function(this, 'CheckBuildStatusFunction', {
+      functionName: `chimera-workflow-check-build-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+def handler(event, context):
+    """
+    Check status of a running build job.
+
+    Input: { build_id }
+    Output: { build_id, status, progress, logs_url }
+    """
+    # TODO: Implement actual build status check
+    return {
+        'build_id': event['build_id'],
+        'status': 'SUCCEEDED',
+        'progress': 100,
+        'logs_url': 'https://console.aws.amazon.com/codebuild/...'
+    }
+`),
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    // Data Analysis: Run query
+    const runDataQueryFunction = new lambda.Function(this, 'RunDataQueryFunction', {
+      functionName: `chimera-workflow-run-query-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+def handler(event, context):
+    """
+    Execute a data analysis query (Athena, Redshift, etc.).
+
+    Input: { tenant_id, query, data_source }
+    Output: { query_id, status, row_count }
+    """
+    # TODO: Implement actual query execution
+    return {
+        'query_id': 'query-67890',
+        'status': 'RUNNING',
+        'row_count': 0
+    }
+`),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 512,
+    });
+
+    // Data Analysis: Check query status
+    const checkQueryStatusFunction = new lambda.Function(this, 'CheckQueryStatusFunction', {
+      functionName: `chimera-workflow-check-query-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+def handler(event, context):
+    """
+    Check status of a running data query.
+
+    Input: { query_id }
+    Output: { query_id, status, row_count, result_location }
+    """
+    # TODO: Implement actual query status check
+    return {
+        'query_id': event['query_id'],
+        'status': 'COMPLETED',
+        'row_count': 1523,
+        'result_location': 's3://results/query-67890.csv'
+    }
+`),
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
+    // ======================================================================
+    // Step Functions: Pipeline Build Workflow
+    // Orchestrates multi-stage build process with status checks and retries.
+    // ======================================================================
+
+    const startBuildTask = new tasks.LambdaInvoke(this, 'StartBuildTask', {
+      lambdaFunction: startBuildFunction,
+      outputPath: '$.Payload',
+    });
+
+    const checkBuildTask = new tasks.LambdaInvoke(this, 'CheckBuildTask', {
+      lambdaFunction: checkBuildStatusFunction,
+      outputPath: '$.Payload',
+    });
+
+    const buildWait = new stepfunctions.Wait(this, 'BuildWait', {
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(30)),
+    });
+
+    const buildSucceeded = new stepfunctions.Succeed(this, 'BuildSucceeded');
+    const buildFailed = new stepfunctions.Fail(this, 'BuildFailed', {
+      cause: 'Build job failed',
+      error: 'BuildError',
+    });
+
+    const checkBuildChoice = new stepfunctions.Choice(this, 'BuildComplete?')
+      .when(stepfunctions.Condition.stringEquals('$.status', 'SUCCEEDED'), buildSucceeded)
+      .when(stepfunctions.Condition.stringEquals('$.status', 'FAILED'), buildFailed)
+      .otherwise(buildWait);
+
+    buildWait.next(checkBuildTask);
+    checkBuildTask.next(checkBuildChoice);
+
+    const pipelineBuildDefinition = startBuildTask.next(buildWait);
+
+    this.pipelineBuildStateMachine = new stepfunctions.StateMachine(this, 'PipelineBuildStateMachine', {
+      stateMachineName: `chimera-pipeline-build-${props.envName}`,
+      definitionBody: stepfunctions.DefinitionBody.fromChainable(pipelineBuildDefinition),
+      timeout: cdk.Duration.minutes(30),
+      logs: {
+        destination: new logs.LogGroup(this, 'PipelineBuildLogGroup', {
+          logGroupName: `/aws/vendedlogs/states/chimera-pipeline-build-${props.envName}`,
+          retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+          removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+        }),
+        level: stepfunctions.LogLevel.ALL,
+      },
+    });
+
+    // ======================================================================
+    // Step Functions: Data Analysis Workflow
+    // Orchestrates query execution with polling and result validation.
+    // ======================================================================
+
+    const runQueryTask = new tasks.LambdaInvoke(this, 'RunQueryTask', {
+      lambdaFunction: runDataQueryFunction,
+      outputPath: '$.Payload',
+    });
+
+    const checkQueryTask = new tasks.LambdaInvoke(this, 'CheckQueryTask', {
+      lambdaFunction: checkQueryStatusFunction,
+      outputPath: '$.Payload',
+    });
+
+    const queryWait = new stepfunctions.Wait(this, 'QueryWait', {
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(30)),
+    });
+
+    const querySucceeded = new stepfunctions.Succeed(this, 'QuerySucceeded');
+    const queryFailed = new stepfunctions.Fail(this, 'QueryFailed', {
+      cause: 'Query execution failed',
+      error: 'QueryError',
+    });
+
+    const checkQueryChoice = new stepfunctions.Choice(this, 'QueryComplete?')
+      .when(stepfunctions.Condition.stringEquals('$.status', 'COMPLETED'), querySucceeded)
+      .when(stepfunctions.Condition.stringEquals('$.status', 'FAILED'), queryFailed)
+      .otherwise(queryWait);
+
+    queryWait.next(checkQueryTask);
+    checkQueryTask.next(checkQueryChoice);
+
+    const dataAnalysisDefinition = runQueryTask.next(queryWait);
+
+    this.dataAnalysisStateMachine = new stepfunctions.StateMachine(this, 'DataAnalysisStateMachine', {
+      stateMachineName: `chimera-data-analysis-${props.envName}`,
+      definitionBody: stepfunctions.DefinitionBody.fromChainable(dataAnalysisDefinition),
+      timeout: cdk.Duration.minutes(15),
+      logs: {
+        destination: new logs.LogGroup(this, 'DataAnalysisLogGroup', {
+          logGroupName: `/aws/vendedlogs/states/chimera-data-analysis-${props.envName}`,
+          retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+          removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+        }),
+        level: stepfunctions.LogLevel.ALL,
+      },
+    });
+
+    // Grant Lambda functions access to invoke Step Functions
+    this.pipelineBuildStateMachine.grantStartExecution(eventPublisherRole);
+    this.dataAnalysisStateMachine.grantStartExecution(eventPublisherRole);
+
+    // ======================================================================
     // Stack Outputs
     // ======================================================================
 
@@ -275,6 +541,30 @@ export class OrchestrationStack extends cdk.Stack {
       value: eventPublisherRole.roleArn,
       exportName: `${this.stackName}-EventPublisherRoleArn`,
       description: 'IAM role ARN for publishing events to the agent event bus',
+    });
+
+    new cdk.CfnOutput(this, 'SchedulerGroupName', {
+      value: this.schedulerGroup.name || `chimera-agent-schedules-${props.envName}`,
+      exportName: `${this.stackName}-SchedulerGroupName`,
+      description: 'EventBridge Scheduler group name for agent cron tasks',
+    });
+
+    new cdk.CfnOutput(this, 'PipelineBuildStateMachineArn', {
+      value: this.pipelineBuildStateMachine.stateMachineArn,
+      exportName: `${this.stackName}-PipelineBuildStateMachineArn`,
+      description: 'Step Functions state machine ARN for pipeline build workflow',
+    });
+
+    new cdk.CfnOutput(this, 'DataAnalysisStateMachineArn', {
+      value: this.dataAnalysisStateMachine.stateMachineArn,
+      exportName: `${this.stackName}-DataAnalysisStateMachineArn`,
+      description: 'Step Functions state machine ARN for data analysis workflow',
+    });
+
+    new cdk.CfnOutput(this, 'QueueProvisionerRoleArn', {
+      value: queueProvisionerRole.roleArn,
+      exportName: `${this.stackName}-QueueProvisionerRoleArn`,
+      description: 'IAM role ARN for provisioning per-tenant FIFO queues',
     });
   }
 }
