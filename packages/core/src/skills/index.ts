@@ -62,3 +62,23 @@ export {
   type PrincipalContext,
   type AuthorizationResult,
 } from './trust-engine';
+
+// Parser (SKILL.md v2)
+export {
+  parseSkillMd,
+  validateSkill,
+  type SkillMdFrontmatter,
+  type ParseResult,
+} from './parser';
+
+// Skill Bridge (Agent integration)
+export {
+  loadSkills,
+  skillsToAgentTools,
+  injectSkillsIntoAgent,
+  loadSkillsForAgent,
+  buildSkillCatalog,
+  type SkillLoadOptions,
+  type SkillLoadResult,
+  type LoadedTool,
+} from './skill-bridge';
