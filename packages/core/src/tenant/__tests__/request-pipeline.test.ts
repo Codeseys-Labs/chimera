@@ -481,7 +481,7 @@ describe('RequestPipeline', () => {
   });
 
   describe('error handling', () => {
-    it('should fail open on rate limiter errors', async () => {
+    it('should fail closed on rate limiter errors', async () => {
       tenantService.getTenantConfig = async (tenantId: string) => {
         if (tenantId === 'acme-corp') {
           return createMockTenantConfig('acme-corp');
@@ -515,8 +515,8 @@ describe('RequestPipeline', () => {
 
       const result = await pipeline.process(metadata);
 
-      // Should allow request despite rate limiter error
-      expect(result.allowed).toBe(true);
+      // Should deny request on rate limiter error
+      expect(result.allowed).toBe(false);
       expect(result.stages[2].error?.code).toBe('RATE_LIMITER_ERROR');
     });
 
