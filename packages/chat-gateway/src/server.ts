@@ -10,9 +10,11 @@ import type { Express } from 'express';
 import cors from 'cors';
 import path from 'path';
 import { extractTenantContext } from './middleware/tenant';
+import { rateLimitMiddleware, recordMetricsMiddleware } from './middleware/rate-limit';
 import chatRouter from './routes/chat';
 import healthRouter from './routes/health';
 import slackRouter from './routes/slack';
+import tenantRouter from './routes/tenant';
 import { ErrorResponse } from './types';
 
 // Create Express app
@@ -28,15 +30,24 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // Health check route (no auth required)
 app.use('/', healthRouter);
 
-// Apply tenant middleware to all /chat/* and /slack/* routes
+// Tenant provisioning API (administrative, no tenant context required)
+app.use('/tenants', tenantRouter);
+
+// Apply tenant middleware and rate limiting to all /chat/* and /slack/* routes
 app.use('/chat', extractTenantContext);
+app.use('/chat', rateLimitMiddleware('api-requests', 1));
 app.use('/slack', extractTenantContext);
+app.use('/slack', rateLimitMiddleware('slack-requests', 1));
 
 // Chat routes
 app.use('/chat', chatRouter);
 
 // Slack routes
 app.use('/slack', slackRouter);
+
+// Record metrics after response (async, non-blocking)
+app.use('/chat', recordMetricsMiddleware(1));
+app.use('/slack', recordMetricsMiddleware(1));
 
 // Global error handler
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
