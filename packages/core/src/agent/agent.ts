@@ -463,6 +463,9 @@ export class ChimeraAgent {
       timestamp: new Date().toISOString(),
     });
 
+    // Self-reflection hook: Analyze interaction and update evolution metrics
+    await this.performSelfReflection(message, result);
+
     return result;
   }
 
@@ -493,6 +496,55 @@ export class ChimeraAgent {
     }
     // Fallback: assume it's a valid schema
     return zodSchema;
+  }
+
+  /**
+   * Perform self-reflection after each interaction
+   *
+   * Analyzes the interaction quality and updates evolution metrics.
+   * This creates a feedback loop where the agent monitors its own
+   * performance and can recommend evolution actions.
+   */
+  private async performSelfReflection(userMessage: string, result: AgentResult): Promise<void> {
+    try {
+      // Extract interaction metadata
+      const hadToolCalls = result.toolCalls && result.toolCalls.length > 0;
+      const toolErrors = result.toolCalls?.filter(tc => tc.error).length || 0;
+      const toolSuccesses = result.toolCalls?.filter(tc => !tc.error).length || 0;
+
+      // Calculate basic quality signals
+      const interactionQuality = {
+        completed: result.stopReason === 'end_turn',
+        toolSuccessRate: hadToolCalls ? toolSuccesses / (toolSuccesses + toolErrors) : 1.0,
+        responseLength: result.output.length,
+        sessionId: result.sessionId,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Store reflection metadata in memory for evolution analysis
+      // This will be aggregated by evolution subsystems to calculate health scores
+      await this.memoryClient.storeMessage({
+        role: 'system',
+        content: JSON.stringify({
+          type: 'self_reflection',
+          tenantId: this.context.tenantId,
+          quality: interactionQuality,
+        }),
+        timestamp: new Date().toISOString(),
+      });
+
+      // Log reflection data (in production, this would go to CloudWatch/DynamoDB)
+      if (process.env.DEBUG === 'true') {
+        console.log('[Self-Reflection]', {
+          tenantId: this.context.tenantId,
+          sessionId: result.sessionId,
+          quality: interactionQuality,
+        });
+      }
+    } catch (error) {
+      // Self-reflection errors should not break the agent
+      console.warn('[ChimeraAgent] Self-reflection failed:', error);
+    }
   }
 
   /**
