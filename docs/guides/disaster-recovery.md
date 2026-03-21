@@ -1,5 +1,7 @@
 # Chimera Disaster Recovery Guide
 
+> **Status: DRAFT** — This guide describes planned DR procedures. Referenced scripts (scripts/dr/*.sh) and DR stacks have not yet been created.
+
 > Comprehensive disaster recovery procedures, RTO/RPO targets, and data protection strategies
 
 **Last Updated:** 2026-03-21
