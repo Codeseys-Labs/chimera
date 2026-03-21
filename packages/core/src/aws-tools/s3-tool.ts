@@ -1,17 +1,19 @@
 /**
- * AWS S3 Tool - Object storage management for agents
+ * AWS S3 Tool - Object storage management for agents (Strands format)
  *
  * Operations:
- * - put_object: Upload objects with encryption and metadata
- * - get_object: Download objects
- * - list_objects: Paginated object listing
- * - delete_object: Remove objects
- * - get_presigned_url: Generate time-limited URLs
- * - copy_object: Copy between buckets/keys
+ * - s3_put_object: Upload objects with encryption and metadata
+ * - s3_get_object: Download objects
+ * - s3_list_objects: Paginated object listing
+ * - s3_delete_object: Remove objects
+ * - s3_get_presigned_url: Generate time-limited URLs
+ * - s3_copy_object: Copy between buckets/keys
  *
  * Reference: docs/research/aws-account-agent/01-AWS-API-First-Class-Tools.md
  */
 
+import { tool } from './strands-agents';
+import { z } from 'zod';
 import {
   S3Client,
   PutObjectCommand,
@@ -24,473 +26,356 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { AWSClientFactory } from './client-factory';
-import type { AWSToolContext, AWSToolResult } from './types';
-import { createResourceTags } from './client-factory';
+import { retryWithBackoff, formatToolError, S3_RETRYABLE_ERRORS } from './tool-utils';
 
 /**
- * Configuration for uploading an object
+ * Convert readable stream to buffer
  */
-export interface PutObjectConfig {
-  bucket: string;
-  key: string;
-  body: Buffer | string;
-  contentType?: string;
-  metadata?: Record<string, string>;
-  serverSideEncryption?: ServerSideEncryption; // AES256 | aws:kms
-  storageClass?: StorageClass; // STANDARD | GLACIER | INTELLIGENT_TIERING
-  tagging?: Record<string, string>;
+async function streamToBuffer(stream: any): Promise<Buffer> {
+  if (stream.transformToByteArray) {
+    // AWS SDK v3 stream
+    const bytes = await stream.transformToByteArray();
+    return Buffer.from(bytes);
+  }
+
+  // Node.js readable stream fallback
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 /**
- * Configuration for downloading an object
+ * Create S3 Strands tools
+ *
+ * @param clientFactory - AWS client factory for credential management
+ * @returns Array of S3 tools for Strands Agent
  */
-export interface GetObjectConfig {
-  bucket: string;
-  key: string;
-  versionId?: string;
-}
-
-/**
- * Configuration for listing objects
- */
-export interface ListObjectsConfig {
-  bucket: string;
-  prefix?: string;
-  maxKeys?: number;
-  continuationToken?: string;
-  delimiter?: string;
-}
-
-/**
- * Configuration for deleting an object
- */
-export interface DeleteObjectConfig {
-  bucket: string;
-  key: string;
-  versionId?: string;
-}
-
-/**
- * Configuration for generating presigned URL
- */
-export interface GetPresignedUrlConfig {
-  bucket: string;
-  key: string;
-  expiresIn: number; // Seconds
-  operation: 'getObject' | 'putObject';
-}
-
-/**
- * Configuration for copying an object
- */
-export interface CopyObjectConfig {
-  sourceBucket: string;
-  sourceKey: string;
-  destinationBucket: string;
-  destinationKey: string;
-  sourceVersionId?: string;
-}
-
-/**
- * AWS S3 Tool
- */
-export class S3Tool {
-  constructor(private clientFactory: AWSClientFactory) {}
-
-  /**
-   * Upload an object to S3
-   */
-  async putObject(
-    context: AWSToolContext,
-    config: PutObjectConfig
-  ): Promise<
-    AWSToolResult<{
-      etag: string;
-      versionId?: string;
-      serverSideEncryption?: string;
-    }>
-  > {
-    const startTime = Date.now();
-
-    try {
-      const s3 = await this.clientFactory.getS3Client(context);
-
-      // Build tagging string
-      let tagging: string | undefined;
-      if (config.tagging) {
-        const tags = Object.entries(config.tagging)
-          .map(([k, v]) => `${k}=${v}`)
-          .join('&');
-        tagging = tags;
-      }
-
-      const command = new PutObjectCommand({
-        Bucket: config.bucket,
-        Key: config.key,
-        Body: config.body,
-        ContentType: config.contentType,
-        Metadata: config.metadata,
-        ServerSideEncryption: config.serverSideEncryption,
-        StorageClass: config.storageClass,
-        Tagging: tagging,
-      });
-
-      const response = await this.retryWithBackoff(() => s3.send(command));
-
-      return {
-        success: true,
-        data: {
-          etag: response.ETag!,
-          versionId: response.VersionId,
-          serverSideEncryption: response.ServerSideEncryption,
-        },
-        metadata: {
-          requestId: response.$metadata.requestId,
-          region: context.region ?? 'us-east-1',
-          durationMs: Date.now() - startTime,
-        },
-      };
-    } catch (error: any) {
-      return this.handleError(error, context, startTime);
-    }
-  }
-
-  /**
-   * Download an object from S3
-   */
-  async getObject(
-    context: AWSToolContext,
-    config: GetObjectConfig
-  ): Promise<
-    AWSToolResult<{
-      body: Buffer;
-      contentType: string;
-      metadata: Record<string, string>;
-      lastModified: Date;
-      contentLength: number;
-    }>
-  > {
-    const startTime = Date.now();
-
-    try {
-      const s3 = await this.clientFactory.getS3Client(context);
-
-      const command = new GetObjectCommand({
-        Bucket: config.bucket,
-        Key: config.key,
-        VersionId: config.versionId,
-      });
-
-      const response = await this.retryWithBackoff(() => s3.send(command));
-
-      // Convert stream to buffer
-      const body = await this.streamToBuffer(response.Body as any);
-
-      return {
-        success: true,
-        data: {
-          body,
-          contentType: response.ContentType ?? 'application/octet-stream',
-          metadata: response.Metadata ?? {},
-          lastModified: response.LastModified!,
-          contentLength: response.ContentLength!,
-        },
-        metadata: {
-          requestId: response.$metadata.requestId,
-          region: context.region ?? 'us-east-1',
-          durationMs: Date.now() - startTime,
-        },
-      };
-    } catch (error: any) {
-      return this.handleError(error, context, startTime);
-    }
-  }
-
-  /**
-   * List objects in a bucket
-   */
-  async listObjects(
-    context: AWSToolContext,
-    config: ListObjectsConfig
-  ): Promise<
-    AWSToolResult<{
-      contents: Array<{
-        key: string;
-        size: number;
-        lastModified: Date;
-        storageClass: string;
-      }>;
-      nextContinuationToken?: string;
-      isTruncated: boolean;
-    }>
-  > {
-    const startTime = Date.now();
-
-    try {
-      const s3 = await this.clientFactory.getS3Client(context);
-
-      const command = new ListObjectsV2Command({
-        Bucket: config.bucket,
-        Prefix: config.prefix,
-        MaxKeys: config.maxKeys,
-        ContinuationToken: config.continuationToken,
-        Delimiter: config.delimiter,
-      });
-
-      const response = await this.retryWithBackoff(() => s3.send(command));
-
-      const contents = (response.Contents ?? []).map((obj) => ({
-        key: obj.Key!,
-        size: obj.Size!,
-        lastModified: obj.LastModified!,
-        storageClass: obj.StorageClass!,
-      }));
-
-      return {
-        success: true,
-        data: {
-          contents,
-          nextContinuationToken: response.NextContinuationToken,
-          isTruncated: response.IsTruncated ?? false,
-        },
-        metadata: {
-          requestId: response.$metadata.requestId,
-          region: context.region ?? 'us-east-1',
-          durationMs: Date.now() - startTime,
-        },
-      };
-    } catch (error: any) {
-      return this.handleError(error, context, startTime);
-    }
-  }
-
-  /**
-   * Delete an object from S3
-   */
-  async deleteObject(
-    context: AWSToolContext,
-    config: DeleteObjectConfig
-  ): Promise<
-    AWSToolResult<{
-      deleteMarker?: boolean;
-      versionId?: string;
-    }>
-  > {
-    const startTime = Date.now();
-
-    try {
-      const s3 = await this.clientFactory.getS3Client(context);
-
-      const command = new DeleteObjectCommand({
-        Bucket: config.bucket,
-        Key: config.key,
-        VersionId: config.versionId,
-      });
-
-      const response = await this.retryWithBackoff(() => s3.send(command));
-
-      return {
-        success: true,
-        data: {
-          deleteMarker: response.DeleteMarker,
-          versionId: response.VersionId,
-        },
-        metadata: {
-          requestId: response.$metadata.requestId,
-          region: context.region ?? 'us-east-1',
-          durationMs: Date.now() - startTime,
-        },
-      };
-    } catch (error: any) {
-      return this.handleError(error, context, startTime);
-    }
-  }
-
-  /**
-   * Generate a presigned URL for an object
-   */
-  async getPresignedUrl(
-    context: AWSToolContext,
-    config: GetPresignedUrlConfig
-  ): Promise<
-    AWSToolResult<{
-      url: string;
-      expiresAt: Date;
-    }>
-  > {
-    const startTime = Date.now();
-
-    try {
-      const s3 = await this.clientFactory.getS3Client(context);
-
-      const command =
-        config.operation === 'getObject'
-          ? new GetObjectCommand({
-              Bucket: config.bucket,
-              Key: config.key,
-            })
-          : new PutObjectCommand({
-              Bucket: config.bucket,
-              Key: config.key,
-            });
-
-      const url = await getSignedUrl(s3, command, {
-        expiresIn: config.expiresIn,
-      });
-
-      const expiresAt = new Date(Date.now() + config.expiresIn * 1000);
-
-      return {
-        success: true,
-        data: {
-          url,
-          expiresAt,
-        },
-        metadata: {
-          region: context.region ?? 'us-east-1',
-          durationMs: Date.now() - startTime,
-        },
-      };
-    } catch (error: any) {
-      return this.handleError(error, context, startTime);
-    }
-  }
-
-  /**
-   * Copy an object within S3
-   */
-  async copyObject(
-    context: AWSToolContext,
-    config: CopyObjectConfig
-  ): Promise<
-    AWSToolResult<{
-      etag: string;
-      lastModified: Date;
-      versionId?: string;
-    }>
-  > {
-    const startTime = Date.now();
-
-    try {
-      const s3 = await this.clientFactory.getS3Client(context);
-
-      // Build copy source string
-      let copySource = `${config.sourceBucket}/${config.sourceKey}`;
-      if (config.sourceVersionId) {
-        copySource += `?versionId=${config.sourceVersionId}`;
-      }
-
-      const command = new CopyObjectCommand({
-        CopySource: copySource,
-        Bucket: config.destinationBucket,
-        Key: config.destinationKey,
-      });
-
-      const response = await this.retryWithBackoff(() => s3.send(command));
-
-      return {
-        success: true,
-        data: {
-          etag: response.CopyObjectResult?.ETag ?? '',
-          lastModified: response.CopyObjectResult?.LastModified ?? new Date(),
-          versionId: response.VersionId,
-        },
-        metadata: {
-          requestId: response.$metadata.requestId,
-          region: context.region ?? 'us-east-1',
-          durationMs: Date.now() - startTime,
-        },
-      };
-    } catch (error: any) {
-      return this.handleError(error, context, startTime);
-    }
-  }
-
-  /**
-   * Convert readable stream to buffer
-   */
-  private async streamToBuffer(stream: any): Promise<Buffer> {
-    if (stream.transformToByteArray) {
-      // AWS SDK v3 stream
-      const bytes = await stream.transformToByteArray();
-      return Buffer.from(bytes);
-    }
-
-    // Node.js readable stream fallback
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
-  }
-
-  /**
-   * Retry with exponential backoff and jitter
-   */
-  private async retryWithBackoff<T>(
-    operation: () => Promise<T>,
-    maxRetries: number = 3,
-    baseDelay: number = 1000
-  ): Promise<T> {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+export function createS3Tools(clientFactory: AWSClientFactory) {
+  const putObject = tool({
+    name: 's3_put_object',
+    description: 'Upload an object to S3 bucket with optional encryption, metadata, and storage class',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant ID for IAM role assumption'),
+      agentId: z.string().describe('Agent ID for audit trail'),
+      region: z.string().optional().describe('AWS region (default: us-east-1)'),
+      bucket: z.string().describe('S3 bucket name'),
+      key: z.string().describe('Object key (path within bucket)'),
+      body: z.string().describe('Object content (base64-encoded for binary data)'),
+      contentType: z.string().optional().describe('MIME type (e.g., text/plain, application/json)'),
+      metadata: z.record(z.string()).optional().describe('Custom metadata key-value pairs'),
+      serverSideEncryption: z.enum(['AES256', 'aws:kms']).optional().describe('Server-side encryption method'),
+      storageClass: z.enum(['STANDARD', 'GLACIER', 'INTELLIGENT_TIERING']).optional().describe('S3 storage class'),
+      tagging: z.record(z.string()).optional().describe('Object tags'),
+    }),
+    callback: async (input) => {
+      const startTime = Date.now();
       try {
-        return await operation();
-      } catch (error: any) {
-        const errorName = error.name;
-        const retryableErrors = [
-          'TooManyRequestsException',
-          'ServiceException',
-          'ThrottlingException',
-          'TimeoutError',
-          'RequestTimeout',
-          'SlowDown',
-        ];
+        const context = { tenantId: input.tenantId, agentId: input.agentId, region: input.region };
+        const s3 = await clientFactory.getS3Client(context);
 
-        if (retryableErrors.includes(errorName) && attempt < maxRetries) {
-          // Exponential backoff with jitter
-          const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
-          await this.sleep(delay);
-        } else {
-          throw error;
+        // Build tagging string
+        let tagging: string | undefined;
+        if (input.tagging) {
+          const tags = Object.entries(input.tagging)
+            .map(([k, v]) => `${k}=${v}`)
+            .join('&');
+          tagging = tags;
         }
+
+        const command = new PutObjectCommand({
+          Bucket: input.bucket,
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+          Metadata: input.metadata,
+          ServerSideEncryption: input.serverSideEncryption as ServerSideEncryption,
+          StorageClass: input.storageClass as StorageClass,
+          Tagging: tagging,
+        });
+
+        const response = await retryWithBackoff(() => s3.send(command), S3_RETRYABLE_ERRORS);
+
+        return JSON.stringify({
+          success: true,
+          data: {
+            etag: response.ETag,
+            versionId: response.VersionId,
+            serverSideEncryption: response.ServerSideEncryption,
+          },
+          metadata: {
+            requestId: response.$metadata.requestId,
+            region: input.region ?? 'us-east-1',
+            durationMs: Date.now() - startTime,
+          },
+        });
+      } catch (error: any) {
+        return formatToolError(error, input.region ?? 'us-east-1', startTime);
       }
-    }
+    },
+  });
 
-    throw new Error('Unexpected: all retries exhausted');
-  }
+  const getObject = tool({
+    name: 's3_get_object',
+    description: 'Download an object from S3 bucket, returns base64-encoded content',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant ID for IAM role assumption'),
+      agentId: z.string().describe('Agent ID for audit trail'),
+      region: z.string().optional().describe('AWS region (default: us-east-1)'),
+      bucket: z.string().describe('S3 bucket name'),
+      key: z.string().describe('Object key (path within bucket)'),
+      versionId: z.string().optional().describe('Specific version ID (for versioned buckets)'),
+    }),
+    callback: async (input) => {
+      const startTime = Date.now();
+      try {
+        const context = { tenantId: input.tenantId, agentId: input.agentId, region: input.region };
+        const s3 = await clientFactory.getS3Client(context);
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
+        const command = new GetObjectCommand({
+          Bucket: input.bucket,
+          Key: input.key,
+          VersionId: input.versionId,
+        });
 
-  /**
-   * Error handler with retryability detection
-   */
-  private handleError(
-    error: any,
-    context: AWSToolContext,
-    startTime: number
-  ): AWSToolResult<any> {
-    const retryableErrors = [
-      'TooManyRequestsException',
-      'ServiceException',
-      'ThrottlingException',
-      'TimeoutError',
-      'RequestTimeout',
-      'SlowDown',
-    ];
+        const response = await retryWithBackoff(() => s3.send(command), S3_RETRYABLE_ERRORS);
 
-    return {
-      success: false,
-      error: {
-        message: error.message ?? 'Unknown error',
-        code: error.name ?? 'UnknownError',
-        retryable: retryableErrors.includes(error.name),
-      },
-      metadata: {
-        region: context.region ?? 'us-east-1',
-        durationMs: Date.now() - startTime,
-      },
-    };
-  }
+        // Convert stream to buffer and base64 encode
+        const body = await streamToBuffer(response.Body as any);
+        const base64Body = body.toString('base64');
+
+        return JSON.stringify({
+          success: true,
+          data: {
+            body: base64Body,
+            contentType: response.ContentType ?? 'application/octet-stream',
+            metadata: response.Metadata ?? {},
+            lastModified: response.LastModified?.toISOString(),
+            contentLength: response.ContentLength,
+          },
+          metadata: {
+            requestId: response.$metadata.requestId,
+            region: input.region ?? 'us-east-1',
+            durationMs: Date.now() - startTime,
+          },
+        });
+      } catch (error: any) {
+        return formatToolError(error, input.region ?? 'us-east-1', startTime);
+      }
+    },
+  });
+
+  const listObjects = tool({
+    name: 's3_list_objects',
+    description: 'List objects in S3 bucket with optional prefix filter and pagination',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant ID for IAM role assumption'),
+      agentId: z.string().describe('Agent ID for audit trail'),
+      region: z.string().optional().describe('AWS region (default: us-east-1)'),
+      bucket: z.string().describe('S3 bucket name'),
+      prefix: z.string().optional().describe('Filter objects by key prefix'),
+      maxKeys: z.number().optional().describe('Maximum number of keys to return'),
+      continuationToken: z.string().optional().describe('Pagination token from previous call'),
+      delimiter: z.string().optional().describe('Delimiter for grouping keys (e.g., / for directories)'),
+    }),
+    callback: async (input) => {
+      const startTime = Date.now();
+      try {
+        const context = { tenantId: input.tenantId, agentId: input.agentId, region: input.region };
+        const s3 = await clientFactory.getS3Client(context);
+
+        const command = new ListObjectsV2Command({
+          Bucket: input.bucket,
+          Prefix: input.prefix,
+          MaxKeys: input.maxKeys,
+          ContinuationToken: input.continuationToken,
+          Delimiter: input.delimiter,
+        });
+
+        const response = await retryWithBackoff(() => s3.send(command), S3_RETRYABLE_ERRORS);
+
+        const contents = (response.Contents ?? []).map((obj) => ({
+          key: obj.Key,
+          size: obj.Size,
+          lastModified: obj.LastModified?.toISOString(),
+          storageClass: obj.StorageClass,
+        }));
+
+        return JSON.stringify({
+          success: true,
+          data: {
+            contents,
+            nextContinuationToken: response.NextContinuationToken,
+            isTruncated: response.IsTruncated ?? false,
+          },
+          metadata: {
+            requestId: response.$metadata.requestId,
+            region: input.region ?? 'us-east-1',
+            durationMs: Date.now() - startTime,
+          },
+        });
+      } catch (error: any) {
+        return formatToolError(error, input.region ?? 'us-east-1', startTime);
+      }
+    },
+  });
+
+  const deleteObject = tool({
+    name: 's3_delete_object',
+    description: 'Delete an object from S3 bucket',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant ID for IAM role assumption'),
+      agentId: z.string().describe('Agent ID for audit trail'),
+      region: z.string().optional().describe('AWS region (default: us-east-1)'),
+      bucket: z.string().describe('S3 bucket name'),
+      key: z.string().describe('Object key (path within bucket)'),
+      versionId: z.string().optional().describe('Specific version ID to delete (for versioned buckets)'),
+    }),
+    callback: async (input) => {
+      const startTime = Date.now();
+      try {
+        const context = { tenantId: input.tenantId, agentId: input.agentId, region: input.region };
+        const s3 = await clientFactory.getS3Client(context);
+
+        const command = new DeleteObjectCommand({
+          Bucket: input.bucket,
+          Key: input.key,
+          VersionId: input.versionId,
+        });
+
+        const response = await retryWithBackoff(() => s3.send(command), S3_RETRYABLE_ERRORS);
+
+        return JSON.stringify({
+          success: true,
+          data: {
+            deleteMarker: response.DeleteMarker,
+            versionId: response.VersionId,
+          },
+          metadata: {
+            requestId: response.$metadata.requestId,
+            region: input.region ?? 'us-east-1',
+            durationMs: Date.now() - startTime,
+          },
+        });
+      } catch (error: any) {
+        return formatToolError(error, input.region ?? 'us-east-1', startTime);
+      }
+    },
+  });
+
+  const getPresignedUrl = tool({
+    name: 's3_get_presigned_url',
+    description: 'Generate a time-limited presigned URL for uploading or downloading an S3 object',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant ID for IAM role assumption'),
+      agentId: z.string().describe('Agent ID for audit trail'),
+      region: z.string().optional().describe('AWS region (default: us-east-1)'),
+      bucket: z.string().describe('S3 bucket name'),
+      key: z.string().describe('Object key (path within bucket)'),
+      expiresIn: z.number().describe('URL expiration time in seconds'),
+      operation: z.enum(['getObject', 'putObject']).describe('Operation type: getObject for download, putObject for upload'),
+    }),
+    callback: async (input) => {
+      const startTime = Date.now();
+      try {
+        const context = { tenantId: input.tenantId, agentId: input.agentId, region: input.region };
+        const s3 = await clientFactory.getS3Client(context);
+
+        const command =
+          input.operation === 'getObject'
+            ? new GetObjectCommand({
+                Bucket: input.bucket,
+                Key: input.key,
+              })
+            : new PutObjectCommand({
+                Bucket: input.bucket,
+                Key: input.key,
+              });
+
+        const url = await getSignedUrl(s3, command, {
+          expiresIn: input.expiresIn,
+        });
+
+        const expiresAt = new Date(Date.now() + input.expiresIn * 1000);
+
+        return JSON.stringify({
+          success: true,
+          data: {
+            url,
+            expiresAt: expiresAt.toISOString(),
+          },
+          metadata: {
+            region: input.region ?? 'us-east-1',
+            durationMs: Date.now() - startTime,
+          },
+        });
+      } catch (error: any) {
+        return formatToolError(error, input.region ?? 'us-east-1', startTime);
+      }
+    },
+  });
+
+  const copyObject = tool({
+    name: 's3_copy_object',
+    description: 'Copy an object from one S3 location to another (within or across buckets)',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant ID for IAM role assumption'),
+      agentId: z.string().describe('Agent ID for audit trail'),
+      region: z.string().optional().describe('AWS region (default: us-east-1)'),
+      sourceBucket: z.string().describe('Source bucket name'),
+      sourceKey: z.string().describe('Source object key'),
+      destinationBucket: z.string().describe('Destination bucket name'),
+      destinationKey: z.string().describe('Destination object key'),
+      sourceVersionId: z.string().optional().describe('Source version ID (for versioned buckets)'),
+    }),
+    callback: async (input) => {
+      const startTime = Date.now();
+      try {
+        const context = { tenantId: input.tenantId, agentId: input.agentId, region: input.region };
+        const s3 = await clientFactory.getS3Client(context);
+
+        // Build copy source string
+        let copySource = `${input.sourceBucket}/${input.sourceKey}`;
+        if (input.sourceVersionId) {
+          copySource += `?versionId=${input.sourceVersionId}`;
+        }
+
+        const command = new CopyObjectCommand({
+          CopySource: copySource,
+          Bucket: input.destinationBucket,
+          Key: input.destinationKey,
+        });
+
+        const response = await retryWithBackoff(() => s3.send(command), S3_RETRYABLE_ERRORS);
+
+        return JSON.stringify({
+          success: true,
+          data: {
+            etag: response.CopyObjectResult?.ETag ?? '',
+            lastModified: response.CopyObjectResult?.LastModified?.toISOString() ?? new Date().toISOString(),
+            versionId: response.VersionId,
+          },
+          metadata: {
+            requestId: response.$metadata.requestId,
+            region: input.region ?? 'us-east-1',
+            durationMs: Date.now() - startTime,
+          },
+        });
+      } catch (error: any) {
+        return formatToolError(error, input.region ?? 'us-east-1', startTime);
+      }
+    },
+  });
+
+  return [
+    putObject,
+    getObject,
+    listObjects,
+    deleteObject,
+    getPresignedUrl,
+    copyObject,
+  ];
 }
+
+// Legacy config types removed - now defined inline with Zod schemas
