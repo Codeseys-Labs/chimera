@@ -160,17 +160,20 @@ cdk bootstrap aws://<prod-account>/us-west-2 \
 
 ### Deployment Order
 
-Chimera uses an **8-stack architecture** with explicit dependencies. Deploy in this order:
+Chimera uses an **11-stack architecture** with explicit dependencies. Deploy in this order:
 
 ```
-1. NetworkStack       (VPC, subnets, security groups, VPC endpoints)
-2. DataStack          (6 DynamoDB tables, S3 buckets, EFS)
-3. SecurityStack      (Cognito, KMS keys, Cedar policies, IAM roles)
-4. ObservabilityStack (CloudWatch dashboards, alarms, X-Ray)
-5. PlatformRuntimeStack (AgentCore Runtime, API Gateway, EventBridge)
-6. ChatStack          (ECS Fargate, ALB, Vercel AI SDK integration)
-7. PipelineStack      (CodePipeline, CodeBuild, deployment automation)
-8. TenantStack(s)     (Per-tenant infrastructure, cron jobs, skills)
+1. NetworkStack           (VPC, subnets, NAT gateways, VPC endpoints, security groups)
+2. DataStack              (6 DynamoDB tables, 3 S3 buckets)
+3. SecurityStack          (Cognito user pool, WAF WebACL, KMS keys)
+4. ObservabilityStack     (CloudWatch dashboards, SNS alarm topics, X-Ray config)
+5. ApiStack               (API Gateway REST + WebSocket, JWT authorizer, OpenAI-compatible endpoint)
+6. SkillPipelineStack     (7-stage skill security scanning pipeline with Step Functions)
+7. ChatStack              (ECS Fargate service with ALB, SSE streaming bridge)
+8. OrchestrationStack     (EventBridge event bus, SQS queues for agent communication)
+9. EvolutionStack         (Self-evolution engine: prompt A/B testing, auto-skills, model routing)
+10. TenantOnboardingStack (Tenant provisioning workflow with Cedar policies)
+11. PipelineStack         (CI/CD pipeline with canary deployment and auto-rollback)
 ```
 
 **CDK automatically resolves dependencies,** so you can deploy all at once or individually.
@@ -201,11 +204,11 @@ For targeted updates:
 # Deploy just the data layer
 cdk deploy Chimera-${ENVIRONMENT}-Data
 
-# Deploy runtime changes only
-cdk deploy Chimera-${ENVIRONMENT}-PlatformRuntime
+# Deploy API Gateway changes only
+cdk deploy Chimera-${ENVIRONMENT}-Api
 
-# Deploy a specific tenant stack
-cdk deploy Chimera-${ENVIRONMENT}-Tenant-acme
+# Deploy tenant onboarding workflow
+cdk deploy Chimera-${ENVIRONMENT}-TenantOnboarding
 ```
 
 ### Stack Outputs
@@ -215,12 +218,12 @@ After deployment, CDK outputs critical values:
 ```bash
 # View stack outputs
 aws cloudformation describe-stacks \
-  --stack-name Chimera-${ENVIRONMENT}-PlatformRuntime \
+  --stack-name Chimera-${ENVIRONMENT}-Api \
   --query 'Stacks[0].Outputs'
 
 # Common outputs:
-# - AgentRuntimeEndpoint: https://runtime.agent.example.com/
-# - WebSocketApiUrl: wss://ws.agent.example.com/
+# - RestApiUrl: https://api.execute-api.us-west-2.amazonaws.com/prod/
+# - WebSocketApiUrl: wss://ws.execute-api.us-west-2.amazonaws.com/prod/
 # - ChatApiUrl: https://chat.agent.example.com/
 # - TenantsTableName: chimera-tenants-dev
 # - SessionsTableName: chimera-sessions-dev
@@ -640,8 +643,8 @@ aws support create-case \
 - [ ] Development tools installed (mise, bun, CDK CLI, Docker)
 - [ ] Environment variables configured
 - [ ] CDK bootstrapped in target account/region
-- [ ] All 8 stacks deployed successfully
-- [ ] Health checks passed (Network, Data, Runtime, Chat)
+- [ ] All 11 stacks deployed successfully
+- [ ] Health checks passed (Network, Data, API, Chat)
 - [ ] Integration tests passed
 - [ ] Smoke test completed (create tenant, invoke agent)
 - [ ] Monitoring dashboards accessible
