@@ -12,6 +12,7 @@
  */
 
 import { SystemPromptTemplate, PromptContext } from './prompt';
+import { MemoryClient, MemoryClientFactory, generateNamespace } from '../memory';
 
 /**
  * Agent configuration options
@@ -43,6 +44,12 @@ export interface AgentConfig {
 
   /** Additional configuration */
   config?: Record<string, unknown>;
+
+  /** Memory client (optional, defaults to in-memory for testing) */
+  memoryClient?: MemoryClient;
+
+  /** Tenant tier for memory strategy selection (basic, advanced, premium) */
+  tier?: 'basic' | 'advanced' | 'premium';
 }
 
 /**
@@ -102,6 +109,7 @@ export interface ToolCall {
 export class ChimeraAgent {
   private config: AgentConfig;
   private context: AgentContext;
+  private memoryClient: MemoryClient;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -114,6 +122,13 @@ export class ChimeraAgent {
       memoryNamespace: config.memoryNamespace || this.buildMemoryNamespace(config.tenantId, config.userId),
       config
     };
+
+    // Initialize memory client (default to in-memory if not provided)
+    this.memoryClient = config.memoryClient ||
+      MemoryClientFactory.createInMemoryClient(this.context.memoryNamespace);
+
+    // Initialize memory with tier-based configuration
+    this.initializeMemory(config.tier || 'basic');
   }
 
   /**
@@ -129,9 +144,70 @@ export class ChimeraAgent {
    */
   private buildMemoryNamespace(tenantId: string, userId?: string): string {
     if (userId) {
-      return `tenant-${tenantId}-user-${userId}`;
+      return generateNamespace(tenantId, userId);
     }
     return `tenant-${tenantId}`;
+  }
+
+  /**
+   * Initialize memory with tier-based configuration
+   * Implements the tier-based strategy selection from the Python agent
+   */
+  private async initializeMemory(tier: 'basic' | 'advanced' | 'premium'): Promise<void> {
+    const memoryConfig = this.getMemoryConfigForTier(tier);
+    await this.memoryClient.initialize(memoryConfig);
+  }
+
+  /**
+   * Get memory configuration based on tenant tier
+   * Matches Python implementation in chimera_agent.py:get_memory_config_for_tier
+   */
+  private getMemoryConfigForTier(tier: 'basic' | 'advanced' | 'premium') {
+    const configs = {
+      basic: {
+        namespace: this.context.memoryNamespace,
+        strategies: {
+          summary: {
+            memoryWindow: 10,
+            summaryRatio: 0.3,
+          },
+        },
+      },
+      advanced: {
+        namespace: this.context.memoryNamespace,
+        strategies: {
+          summary: {
+            memoryWindow: 50,
+            summaryRatio: 0.3,
+          },
+          userPreference: {
+            enabled: true,
+            maxPreferences: 50,
+          },
+        },
+      },
+      premium: {
+        namespace: this.context.memoryNamespace,
+        strategies: {
+          summary: {
+            memoryWindow: 200,
+            summaryRatio: 0.3,
+          },
+          userPreference: {
+            enabled: true,
+            maxPreferences: 100,
+          },
+          semantic: {
+            embeddingModel: 'amazon.titan-embed-text-v2:0',
+            vectorDimensions: 1024,
+            similarityThreshold: 0.7,
+            maxResults: 5,
+          },
+        },
+      },
+    };
+
+    return configs[tier];
   }
 
   /**
@@ -141,6 +217,13 @@ export class ChimeraAgent {
    * @returns Agent response and execution metadata
    */
   async invoke(message: string): Promise<AgentResult> {
+    // Store user message in memory
+    await this.memoryClient.storeMessage({
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString(),
+    });
+
     // Build prompt context
     const promptContext: PromptContext = {
       tenantId: this.context.tenantId,
@@ -159,6 +242,13 @@ export class ChimeraAgent {
       stopReason: 'end_turn',
       context: this.context
     };
+
+    // Store assistant response in memory
+    await this.memoryClient.storeMessage({
+      role: 'assistant',
+      content: result.output,
+      timestamp: new Date().toISOString(),
+    });
 
     return result;
   }
@@ -208,6 +298,13 @@ export class ChimeraAgent {
     if (updates.memoryNamespace) {
       this.context.memoryNamespace = updates.memoryNamespace;
     }
+  }
+
+  /**
+   * Get memory client for direct memory operations
+   */
+  getMemoryClient(): MemoryClient {
+    return this.memoryClient;
   }
 }
 
