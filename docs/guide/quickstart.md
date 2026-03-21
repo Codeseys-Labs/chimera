@@ -283,17 +283,20 @@ export const getTimeToolDefinition: ToolDefinition = {
 
 ## Step 5: Deploy to AWS
 
-Chimera uses **AWS CDK** for infrastructure-as-code. The platform is organized into 8 stacks:
+Chimera uses **AWS CDK** for infrastructure-as-code. The platform is organized into 11 stacks:
 
 ```
-1. Network        → VPC, subnets, NAT, security groups
-2. Data           → DynamoDB (6 tables), S3, EFS
-3. Security       → Cognito, IAM, Cedar policies, KMS
-4. Observability  → CloudWatch, X-Ray, alarms
-5. Platform Runtime → AgentCore Runtime, Memory, Gateway
-6. Chat           → ECS Fargate, API Gateway, WebSocket
-7. Tenant         → Per-tenant IAM isolation
-8. Pipeline       → CI/CD, CodePipeline, CodeBuild
+1. Network            → VPC, subnets, NAT gateways, VPC endpoints, security groups
+2. Data               → DynamoDB (6 tables), 3 S3 buckets
+3. Security           → Cognito user pool, WAF WebACL, KMS keys
+4. Observability      → CloudWatch dashboards, SNS alarm topics, X-Ray config
+5. API Gateway        → REST + WebSocket APIs, JWT auth, OpenAI-compatible endpoint
+6. Skill Pipeline     → 7-stage skill security scanning pipeline
+7. Chat               → ECS Fargate service with ALB, SSE streaming bridge
+8. Orchestration      → EventBridge event bus, SQS queues for agent communication
+9. Evolution          → Self-evolution engine (A/B testing, auto-skills, model routing)
+10. Tenant Onboarding → Tenant provisioning workflow with Cedar policies
+11. Pipeline          → CI/CD pipeline with canary deployment
 ```
 
 ### 5.1 Bootstrap CDK (First Time Only)
@@ -311,14 +314,17 @@ cdk bootstrap
 cdk deploy --all --require-approval never
 
 # Or deploy incrementally:
-cdk deploy ChimeraNetworkStack
-cdk deploy ChimeraDataStack
-cdk deploy ChimeraSecurityStack
-cdk deploy ChimeraObservabilityStack
-cdk deploy ChimeraPlatformRuntimeStack
-cdk deploy ChimeraChatStack
-cdk deploy ChimeraTenantStack
-cdk deploy ChimeraPipelineStack
+cdk deploy Chimera-dev-Network
+cdk deploy Chimera-dev-Data
+cdk deploy Chimera-dev-Security
+cdk deploy Chimera-dev-Observability
+cdk deploy Chimera-dev-Api
+cdk deploy Chimera-dev-SkillPipeline
+cdk deploy Chimera-dev-Chat
+cdk deploy Chimera-dev-Orchestration
+cdk deploy Chimera-dev-Evolution
+cdk deploy Chimera-dev-TenantOnboarding
+cdk deploy Chimera-dev-Pipeline
 ```
 
 **What gets deployed?**
@@ -338,8 +344,8 @@ After deployment:
 ```bash
 # Get the API Gateway endpoint
 aws cloudformation describe-stacks \
-  --stack-name ChimeraChatStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+  --stack-name Chimera-dev-Api \
+  --query 'Stacks[0].Outputs[?OutputKey==`RestApiUrl`].OutputValue' \
   --output text
 ```
 
