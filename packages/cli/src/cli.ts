@@ -12,6 +12,8 @@ import { registerTenantCommands } from './commands/tenant';
 import { registerSessionCommands } from './commands/session';
 import { registerSkillCommands } from './commands/skill';
 import { registerDeployCommands } from './commands/deploy';
+import { registerConnectCommand } from './commands/connect';
+import { registerStatusCommand } from './commands/status';
 
 const program = new Command();
 
@@ -25,6 +27,8 @@ registerTenantCommands(program);
 registerSessionCommands(program);
 registerSkillCommands(program);
 registerDeployCommands(program);
+registerConnectCommand(program);
+registerStatusCommand(program);
 
 // Error handling
 program.exitOverride();

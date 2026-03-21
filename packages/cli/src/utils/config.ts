@@ -6,11 +6,24 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+export interface DeploymentConfig {
+  accountId: string;
+  region: string;
+  repositoryName: string;
+  apiUrl?: string;
+  webSocketUrl?: string;
+  cognitoUserPoolId?: string;
+  cognitoClientId?: string;
+  status: 'deploying' | 'deployed' | 'failed';
+  lastDeployed?: string;
+}
+
 export interface ChimeraConfig {
   currentTenant: string | null;
   tenants?: TenantConfigEntry[];
   awsRegion?: string;
   awsProfile?: string;
+  deployment?: DeploymentConfig;
 }
 
 export interface TenantConfigEntry {
@@ -36,7 +49,7 @@ export function loadConfig(): ChimeraConfig {
 
     const data = fs.readFileSync(CONFIG_FILE, 'utf8');
     return JSON.parse(data);
-  } catch (error) {
+  } catch {
     // Return default config on error
     return { currentTenant: null };
   }
@@ -53,8 +66,8 @@ export function saveConfig(config: ChimeraConfig): void {
     }
 
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
-  } catch (error) {
-    throw new Error(`Failed to save config: ${error}`);
+  } catch (err) {
+    throw new Error(`Failed to save config: ${err}`);
   }
 }
 
