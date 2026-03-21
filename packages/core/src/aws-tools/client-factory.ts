@@ -16,6 +16,9 @@ import { S3Client } from '@aws-sdk/client-s3';
 import { EC2Client } from '@aws-sdk/client-ec2';
 import { CloudWatchClient } from '@aws-sdk/client-cloudwatch';
 import { CloudWatchLogsClient } from '@aws-sdk/client-cloudwatch-logs';
+import { TranscribeClient } from '@aws-sdk/client-transcribe';
+import { RekognitionClient } from '@aws-sdk/client-rekognition';
+import { TextractClient } from '@aws-sdk/client-textract';
 import type {
   AWSClientFactoryConfig,
   AWSToolContext,
@@ -28,7 +31,10 @@ type AWSClient =
   | S3Client
   | EC2Client
   | CloudWatchClient
-  | CloudWatchLogsClient;
+  | CloudWatchLogsClient
+  | TranscribeClient
+  | RekognitionClient
+  | TextractClient;
 
 /**
  * Factory for creating and caching tenant-scoped AWS SDK clients
@@ -150,6 +156,69 @@ export class AWSClientFactory {
       context,
       (credentials, region) =>
         new CloudWatchLogsClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Transcribe client for tenant
+   */
+  async getTranscribeClient(
+    context: AWSToolContext
+  ): Promise<TranscribeClient> {
+    return this.getOrCreateClient(
+      'transcribe',
+      context,
+      (credentials, region) =>
+        new TranscribeClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Rekognition client for tenant
+   */
+  async getRekognitionClient(
+    context: AWSToolContext
+  ): Promise<RekognitionClient> {
+    return this.getOrCreateClient(
+      'rekognition',
+      context,
+      (credentials, region) =>
+        new RekognitionClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Textract client for tenant
+   */
+  async getTextractClient(
+    context: AWSToolContext
+  ): Promise<TextractClient> {
+    return this.getOrCreateClient(
+      'textract',
+      context,
+      (credentials, region) =>
+        new TextractClient({
           region,
           credentials,
           maxAttempts: this.config.retryConfig.maxAttempts,
