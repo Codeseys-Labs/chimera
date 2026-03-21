@@ -1,10 +1,12 @@
 /**
- * AWS Account Discovery Module
+ * AWS Account Discovery Module - Strands Tools
  *
- * Provides account-wide resource discovery, cost analysis, and tag governance:
- * - Cost Explorer integration for spending analysis and forecasting
- * - Tag Organization for compliance checking and resource discovery
- * - Unified Resource Index for fast queries and aggregations
+ * Provides Strands @tool decorated functions for account-wide resource discovery,
+ * cost analysis, and tag governance.
+ *
+ * Each discovery service is exported as a factory function that creates
+ * an array of Strands tools. These tools wrap AWS SDK calls and provide
+ * structured input/output with Zod validation.
  *
  * Based on research:
  * - docs/research/aws-account-agent/04-Cost-Explorer-Spending-Analysis.md
@@ -12,9 +14,15 @@
  * - docs/research/aws-account-agent/06-Account-Discovery-Architecture.md
  */
 
-// Cost Analyzer exports
+// Config Scanner - AWS Config resource inventory and history
 export {
-  CostAnalyzer,
+  createConfigScannerTools,
+  type ConfigAggregatorConfig,
+} from './config-scanner';
+
+// Cost Analyzer - AWS Cost Explorer integration
+export {
+  createCostAnalyzerTools,
   type CostExplorerClient,
   type CostGranularity,
   type CostMetric,
@@ -29,9 +37,9 @@ export {
   type CostAnalyzerConfig,
 } from './cost-analyzer';
 
-// Tag Organizer exports
+// Tag Organizer - Resource tagging governance
 export {
-  TagOrganizer,
+  createTagOrganizerTools,
   CHIMERA_TAG_SCHEMA,
   type ResourceGroupsTaggingClient,
   type ConfigClient,
@@ -45,9 +53,22 @@ export {
   type TagOrganizerConfig,
 } from './tag-organizer';
 
-// Resource Index exports
+// Resource Explorer - Cross-region instant search
 export {
-  ResourceIndex,
+  createResourceExplorerTools,
+  ExplorerQueryBuilder,
+  type ResourceExplorerConfig,
+} from './resource-explorer';
+
+// Stack Inventory - CloudFormation stack tracking and drift detection
+export {
+  createStackInventoryTools,
+  type StackInventoryConfig,
+} from './stack-inventory';
+
+// Resource Index - Unified in-memory resource index
+export {
+  createResourceIndexTools,
   type ResourceMetadata,
   type ResourceQuery,
   type ResourceAggregation,
