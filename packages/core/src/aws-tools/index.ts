@@ -26,40 +26,20 @@ export type {
 // Client Factory
 export { AWSClientFactory, createResourceTags } from './client-factory';
 
-// Lambda Tool
-export { LambdaTool } from './lambda-tool';
-export type {
-  CreateFunctionConfig,
-  InvokeFunctionConfig,
-  UpdateFunctionCodeConfig,
-  UpdateFunctionConfigConfig,
-} from './lambda-tool';
+// Strands Tool Factories (new format)
+export { createEC2Tools } from './ec2-tool';
+export { createS3Tools } from './s3-tool';
+export { createLambdaTools } from './lambda-tool';
+export { createCloudWatchTools } from './cloudwatch-tool';
 
-// S3 Tool
-export { S3Tool } from './s3-tool';
-export type {
-  PutObjectConfig,
-  GetObjectConfig,
-  ListObjectsConfig,
-  DeleteObjectConfig,
-  GetPresignedUrlConfig,
-  CopyObjectConfig,
-} from './s3-tool';
+// Shared utilities
+export {
+  retryWithBackoff,
+  formatToolError,
+  EC2_RETRYABLE_ERRORS,
+  S3_RETRYABLE_ERRORS,
+  LAMBDA_RETRYABLE_ERRORS,
+  CLOUDWATCH_RETRYABLE_ERRORS,
+} from './tool-utils';
 
-// EC2 Tool
-export { EC2Tool } from './ec2-tool';
-export type {
-  RunInstancesConfig,
-  DescribeInstancesConfig,
-  ModifyInstanceAttributeConfig,
-} from './ec2-tool';
-
-// CloudWatch Tool
-export { CloudWatchTool } from './cloudwatch-tool';
-export type {
-  MetricDataPoint,
-  PutMetricDataConfig,
-  StartQueryConfig,
-  PutMetricAlarmConfig,
-  DescribeAlarmsConfig,
-} from './cloudwatch-tool';
+// Legacy config types removed - now defined inline with Zod schemas in each tool file
