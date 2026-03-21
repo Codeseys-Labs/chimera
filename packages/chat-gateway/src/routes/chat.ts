@@ -4,13 +4,15 @@
 
 import { Router, Request, Response } from 'express';
 import type { Router as ExpressRouter } from 'express';
-import { createAgent, createDefaultSystemPrompt, StreamEvent } from '@chimera/core';
+import { createAgent, createDefaultSystemPrompt, StreamEvent, createBedrockModel } from '@chimera/core';
 import { streamStrandsToDSP } from '@chimera/sse-bridge';
 import { StrandsStreamEvent } from '@chimera/sse-bridge';
 import { ChatRequest, ChatResponse, ErrorResponse } from '../types';
 import { getAdapter } from '../adapters';
+import { getConfig } from '../config';
 
 const router: ExpressRouter = Router();
+const config = getConfig();
 
 /**
  * Map ChimeraAgent StreamEvent to StrandsStreamEvent
@@ -172,12 +174,18 @@ router.post('/stream', async (req: Request, res: Response) => {
       return;
     }
 
-    // Create agent instance
+    // Create agent instance with Bedrock model if enabled
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: req.tenantContext.tenantId,
       userId: req.tenantContext.userId,
       sessionId: (req.body as ChatRequest).sessionId,
+      model: config.bedrock.enabled ? createBedrockModel({
+        modelId: config.bedrock.modelId,
+        region: config.bedrock.region,
+        maxTokens: config.bedrock.maxTokens,
+        temperature: config.bedrock.temperature,
+      }) : undefined,
     });
 
     // Stream agent response through SSE bridge
@@ -286,12 +294,18 @@ router.post('/message', async (req: Request, res: Response) => {
       return;
     }
 
-    // Create agent instance
+    // Create agent instance with Bedrock model if enabled
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: req.tenantContext.tenantId,
       userId: req.tenantContext.userId,
       sessionId: (req.body as ChatRequest).sessionId,
+      model: config.bedrock.enabled ? createBedrockModel({
+        modelId: config.bedrock.modelId,
+        region: config.bedrock.region,
+        maxTokens: config.bedrock.maxTokens,
+        temperature: config.bedrock.temperature,
+      }) : undefined,
     });
 
     // Invoke agent (non-streaming)
