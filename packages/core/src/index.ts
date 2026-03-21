@@ -16,6 +16,8 @@
 export {
   ChimeraAgent,
   createAgent,
+  BedrockModel,
+  createBedrockModel,
   SystemPromptTemplate,
   createSystemPrompt,
   createDefaultSystemPrompt,
@@ -25,7 +27,8 @@ export {
   type AgentResult,
   type ToolCall,
   type StreamEvent,
-  type PromptContext
+  type PromptContext,
+  type BedrockModelConfig
 } from './agent';
 
 // Runtime components
@@ -130,6 +133,7 @@ export {
   type CreateQuotaParams,
   type RateLimiterConfig,
   type CheckRateLimitParams,
+  type DynamoDBClient as TenantDynamoDBClient,
 } from './tenant';
 
 // Billing module (cost tracking and budget management)
