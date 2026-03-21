@@ -13,6 +13,11 @@
 
 import { SystemPromptTemplate, PromptContext } from './prompt';
 import { MemoryClient, MemoryClientFactory, generateNamespace } from '../memory';
+import { ModelRouter } from '../evolution/model-router';
+import { PromptOptimizer } from '../evolution/prompt-optimizer';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import type { TaskCategory, ModelId, FeedbackEvent, FeedbackType } from '../evolution/types';
 
 /**
  * Agent configuration options
@@ -64,6 +69,21 @@ export interface AgentConfig {
     inputSchema: any;
     callback: (input: any) => Promise<string>
   }>;
+
+  /** Model router for dynamic model selection (optional) */
+  modelRouter?: ModelRouter;
+
+  /** Prompt optimizer for A/B testing (optional) */
+  promptOptimizer?: PromptOptimizer;
+
+  /** Task category for model routing (optional, defaults to 'analysis') */
+  taskCategory?: TaskCategory;
+
+  /** Active prompt experiment ID (optional) */
+  promptExperimentId?: string;
+
+  /** DynamoDB table for evolution metrics persistence (optional) */
+  evolutionTable?: string;
 }
 
 /**
@@ -125,6 +145,9 @@ export class ChimeraAgent {
   private context: AgentContext;
   private memoryClient: MemoryClient;
   private memoryInitialized: Promise<void> | null = null;
+  private ddbClient?: DynamoDBDocumentClient;
+  private currentModelId?: ModelId;
+  private currentPromptVariant?: 'a' | 'b';
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -144,6 +167,11 @@ export class ChimeraAgent {
 
     // Initialize memory with tier-based configuration (async, will complete before first use)
     this.initializeMemory(config.tier || 'basic');
+
+    // Initialize DynamoDB client if evolution table is provided
+    if (config.evolutionTable) {
+      this.ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    }
 
     // Load skills if specified and registry provided
     if (config.skills && config.skills.length > 0 && config.skillRegistry) {
@@ -296,6 +324,25 @@ export class ChimeraAgent {
       timestamp: new Date().toISOString(),
     });
 
+    // Select model via ModelRouter if available
+    if (this.config.modelRouter) {
+      const taskCategory = this.config.taskCategory || 'analysis';
+      const modelSelection = await this.config.modelRouter.selectModel({
+        tenantId: this.context.tenantId,
+        taskCategory,
+      });
+      this.currentModelId = modelSelection.selectedModel;
+
+      // Log model selection for debugging
+      if (process.env.DEBUG === 'true') {
+        console.log('[ModelRouter]', {
+          selected: modelSelection.selectedModel,
+          category: taskCategory,
+          weights: modelSelection.routingWeights,
+        });
+      }
+    }
+
     // Build prompt context
     const promptContext: PromptContext = {
       tenantId: this.context.tenantId,
@@ -303,8 +350,41 @@ export class ChimeraAgent {
       sessionId: this.context.sessionId
     };
 
-    // Render system prompt
-    const systemPrompt = this.config.systemPrompt.render(promptContext);
+    // Select prompt variant via PromptOptimizer if experiment is active
+    let systemPrompt: string;
+    if (this.config.promptOptimizer && this.config.promptExperimentId) {
+      this.currentPromptVariant = await this.config.promptOptimizer.selectPromptVariant({
+        tenantId: this.context.tenantId,
+        experimentId: this.config.promptExperimentId,
+      });
+
+      // Load prompt from S3 based on variant
+      const experiment = await (this.config.promptOptimizer as any).getExperiment(
+        this.context.tenantId,
+        this.config.promptExperimentId
+      );
+
+      if (experiment) {
+        const s3Key = this.currentPromptVariant === 'b'
+          ? experiment.variantBPromptS3
+          : experiment.variantAPromptS3;
+
+        systemPrompt = await this.config.promptOptimizer.loadPrompt(s3Key);
+
+        if (process.env.DEBUG === 'true') {
+          console.log('[PromptOptimizer]', {
+            variant: this.currentPromptVariant,
+            experimentId: this.config.promptExperimentId,
+          });
+        }
+      } else {
+        // Fallback to static prompt if experiment not found
+        systemPrompt = this.config.systemPrompt.render(promptContext);
+      }
+    } else {
+      // Use static system prompt
+      systemPrompt = this.config.systemPrompt.render(promptContext);
+    }
 
     // If no model provided, return placeholder (backward compatibility)
     if (!this.config.model) {
@@ -326,7 +406,12 @@ export class ChimeraAgent {
     }
 
     // Run ReAct loop with model
-    return await this.runReActLoop(message, systemPrompt);
+    const result = await this.runReActLoop(message, systemPrompt);
+
+    // Record outcomes to evolution subsystems
+    await this.recordEvolutionOutcomes(result);
+
+    return result;
   }
 
   /**
@@ -499,6 +584,74 @@ export class ChimeraAgent {
   }
 
   /**
+   * Record outcomes to evolution subsystems (ModelRouter, PromptOptimizer)
+   */
+  private async recordEvolutionOutcomes(result: AgentResult): Promise<void> {
+    try {
+      // Calculate quality score from result
+      const qualityScore = this.calculateQualityScore(result);
+
+      // Estimate cost (simplified - in production would use actual token counts)
+      const estimatedCost = 0.001; // Placeholder
+
+      // Record to ModelRouter if model was selected
+      if (this.config.modelRouter && this.currentModelId) {
+        const taskCategory = this.config.taskCategory || 'analysis';
+        await this.config.modelRouter.recordOutcome({
+          tenantId: this.context.tenantId,
+          taskCategory,
+          modelId: this.currentModelId,
+          qualityScore,
+        });
+      }
+
+      // Record to PromptOptimizer if variant was selected
+      if (
+        this.config.promptOptimizer &&
+        this.config.promptExperimentId &&
+        this.currentPromptVariant
+      ) {
+        await this.config.promptOptimizer.recordVariantOutcome({
+          tenantId: this.context.tenantId,
+          experimentId: this.config.promptExperimentId,
+          variant: this.currentPromptVariant,
+          qualityScore,
+          cost: estimatedCost,
+        });
+      }
+    } catch (error) {
+      console.warn('[ChimeraAgent] Failed to record evolution outcomes:', error);
+    }
+  }
+
+  /**
+   * Calculate quality score from agent result
+   * Returns 0-1 score based on completion, tool success, and response characteristics
+   */
+  private calculateQualityScore(result: AgentResult): number {
+    let score = 0.5; // Base score
+
+    // Successful completion
+    if (result.stopReason === 'end_turn') {
+      score += 0.2;
+    }
+
+    // Tool usage success rate
+    if (result.toolCalls && result.toolCalls.length > 0) {
+      const successCount = result.toolCalls.filter((tc) => !tc.error).length;
+      const successRate = successCount / result.toolCalls.length;
+      score += successRate * 0.2;
+    }
+
+    // Response has content
+    if (result.output && result.output.length > 10) {
+      score += 0.1;
+    }
+
+    return Math.max(0, Math.min(1, score));
+  }
+
+  /**
    * Perform self-reflection after each interaction
    *
    * Analyzes the interaction quality and updates evolution metrics.
@@ -522,7 +675,6 @@ export class ChimeraAgent {
       };
 
       // Store reflection metadata in memory for evolution analysis
-      // This will be aggregated by evolution subsystems to calculate health scores
       await this.memoryClient.storeMessage({
         role: 'system',
         content: JSON.stringify({
@@ -533,12 +685,39 @@ export class ChimeraAgent {
         timestamp: new Date().toISOString(),
       });
 
-      // Log reflection data (in production, this would go to CloudWatch/DynamoDB)
+      // Persist to DynamoDB for aggregation into EvolutionMetrics
+      if (this.ddbClient && this.config.evolutionTable) {
+        await this.ddbClient.send(
+          new PutCommand({
+            TableName: this.config.evolutionTable,
+            Item: {
+              PK: `TENANT#${this.context.tenantId}`,
+              SK: `REFLECTION#${new Date().toISOString()}#${result.sessionId}`,
+              type: 'self_reflection',
+              tenantId: this.context.tenantId,
+              sessionId: result.sessionId,
+              timestamp: new Date().toISOString(),
+              quality: interactionQuality,
+              modelId: this.currentModelId,
+              promptVariant: this.currentPromptVariant,
+              taskCategory: this.config.taskCategory || 'analysis',
+              // Include user message hash for pattern detection
+              userMessageHash: this.hashString(userMessage),
+              // TTL: 90 days
+              ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60,
+            },
+          })
+        );
+      }
+
+      // Log reflection data
       if (process.env.DEBUG === 'true') {
         console.log('[Self-Reflection]', {
           tenantId: this.context.tenantId,
           sessionId: result.sessionId,
           quality: interactionQuality,
+          modelId: this.currentModelId,
+          promptVariant: this.currentPromptVariant,
         });
       }
     } catch (error) {
@@ -722,6 +901,76 @@ export class ChimeraAgent {
    */
   getMemoryClient(): MemoryClient {
     return this.memoryClient;
+  }
+
+  /**
+   * Capture user feedback signal
+   *
+   * Stores feedback events to DynamoDB for evolution subsystems to consume.
+   * Feedback signals (thumbs up/down, corrections) train ModelRouter and PromptOptimizer.
+   */
+  async captureFeedback(params: {
+    feedbackType: FeedbackType;
+    feedbackValue?: string;
+    turnIndex: number;
+  }): Promise<void> {
+    if (!this.ddbClient || !this.config.evolutionTable) {
+      console.warn('[ChimeraAgent] Cannot capture feedback: DynamoDB client not configured');
+      return;
+    }
+
+    try {
+      const feedbackEvent: FeedbackEvent = {
+        tenantId: this.context.tenantId,
+        sessionId: this.context.sessionId,
+        turnIndex: params.turnIndex,
+        feedbackType: params.feedbackType,
+        feedbackValue: params.feedbackValue,
+        modelUsed: this.currentModelId || ('us.anthropic.claude-sonnet-4-6-v1:0' as ModelId),
+        taskCategory: this.config.taskCategory || 'analysis',
+        agentResponse: '', // Would be populated from conversation history
+        userMessage: '', // Would be populated from conversation history
+        processed: false,
+        consumedBy: [],
+        timestamp: new Date().toISOString(),
+      };
+
+      await this.ddbClient.send(
+        new PutCommand({
+          TableName: this.config.evolutionTable,
+          Item: {
+            PK: `TENANT#${this.context.tenantId}`,
+            SK: `FEEDBACK#${feedbackEvent.timestamp}#${this.context.sessionId}`,
+            ...feedbackEvent,
+            // TTL: 90 days
+            ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60,
+          },
+        })
+      );
+
+      if (process.env.DEBUG === 'true') {
+        console.log('[Feedback]', {
+          type: params.feedbackType,
+          sessionId: this.context.sessionId,
+          turnIndex: params.turnIndex,
+        });
+      }
+    } catch (error) {
+      console.error('[ChimeraAgent] Failed to capture feedback:', error);
+    }
+  }
+
+  /**
+   * Simple string hash for deduplication (not cryptographic)
+   */
+  private hashString(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString(36);
   }
 }
 
