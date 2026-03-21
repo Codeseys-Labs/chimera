@@ -11,5 +11,8 @@ export * from './types';
 // Client interface and factory
 export * from './client';
 
+// In-memory client implementation
+export * from './in-memory-client';
+
 // Namespace utilities
 export * from './namespace';
