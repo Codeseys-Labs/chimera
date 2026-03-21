@@ -20,9 +20,9 @@
 			"chimera-bbb5",
 			"chimera-2e8e"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T00:06:47.420Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:10.235Z"
 	},
 	{
 		"id": "group-2947bf59",
@@ -32,9 +32,9 @@
 			"chimera-bd8e",
 			"chimera-1912"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T04:15:56.508Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:10.642Z"
 	},
 	{
 		"id": "group-5330b800",
@@ -43,9 +43,9 @@
 			"chimera-9f14",
 			"chimera-efd9"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T05:16:54.343Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:10.891Z"
 	},
 	{
 		"id": "group-f2f547dc",
@@ -56,9 +56,9 @@
 			"chimera-f6d1",
 			"chimera-cacf"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T07:43:40.354Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:11.258Z"
 	},
 	{
 		"id": "group-168bb7c8",
@@ -68,9 +68,9 @@
 			"chimera-9dc8",
 			"chimera-1fc2"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T16:19:16.772Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:11.585Z"
 	},
 	{
 		"id": "group-d8762c96",
@@ -84,9 +84,9 @@
 			"chimera-83f9",
 			"chimera-17ff"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T17:02:32.056Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:12.492Z"
 	},
 	{
 		"id": "group-3866018b",
@@ -96,9 +96,9 @@
 			"chimera-3180",
 			"chimera-586a"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T18:27:29.334Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:13.096Z"
 	},
 	{
 		"id": "group-79cb18e4",
@@ -110,9 +110,9 @@
 			"chimera-be5a",
 			"chimera-b98b"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T18:55:52.771Z",
-		"completedAt": null
+		"completedAt": "2026-03-20T23:43:13.852Z"
 	},
 	{
 		"id": "group-c5c5ffa9",
@@ -121,8 +121,42 @@
 			"chimera-8717",
 			"chimera-63ab"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T20:54:44.000Z",
+		"completedAt": "2026-03-20T23:43:14.196Z"
+	},
+	{
+		"id": "group-416a1c3d",
+		"name": "merge-cleanup-batch",
+		"memberIssueIds": [
+			"chimera-dc9f"
+		],
+		"status": "active",
+		"createdAt": "2026-03-20T23:49:18.660Z",
+		"completedAt": null
+	},
+	{
+		"id": "group-73ff1a7a",
+		"name": "project-review-batch",
+		"memberIssueIds": [
+			"chimera-7caa",
+			"chimera-247b",
+			"chimera-7de5"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T00:03:32.576Z",
+		"completedAt": null
+	},
+	{
+		"id": "group-50953b4d",
+		"name": "batch1-research-fix",
+		"memberIssueIds": [
+			"chimera-6dd5",
+			"chimera-5ec5",
+			"chimera-6a22"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T00:42:09.544Z",
 		"completedAt": null
 	}
 ]
