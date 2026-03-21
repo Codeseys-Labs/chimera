@@ -118,34 +118,57 @@ jobs:
       - name: CDK Bootstrap (if needed)
         working-directory: infra
         run: npx cdk bootstrap --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - Network Stack
         working-directory: infra
-        run: npx cdk deploy ChimeraNetworkStack --require-approval never
+        run: npx cdk deploy "Chimera-Network-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - Data Stack
         working-directory: infra
-        run: npx cdk deploy ChimeraDataStack --require-approval never
+        run: npx cdk deploy "Chimera-Data-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - Security Stack
         working-directory: infra
-        run: npx cdk deploy ChimeraSecurityStack --require-approval never
+        run: npx cdk deploy "Chimera-Security-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - Observability Stack
         working-directory: infra
-        run: npx cdk deploy ChimeraObservabilityStack --require-approval never
+        run: npx cdk deploy "Chimera-Observability-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - Platform Runtime Stack
         working-directory: infra
-        run: npx cdk deploy ChimeraPlatformRuntimeStack --require-approval never --context imageTag=${{ needs.build-images.outputs.git-sha }}
+        run: npx cdk deploy "Chimera-PlatformRuntime-${DEPLOY_ENV}" --require-approval never --context imageTag="${IMAGE_TAG}"
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+          IMAGE_TAG: ${{ needs.build-images.outputs.git-sha }}
 
       - name: CDK Deploy - Chat Stack
         working-directory: infra
-        run: npx cdk deploy ChimeraChatStack --require-approval never
+        run: npx cdk deploy "Chimera-Chat-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - Tenant Stack (template)
         working-directory: infra
-        run: npx cdk deploy ChimeraTenantStack --require-approval never
+        run: npx cdk deploy "Chimera-Tenant-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+
+      - name: CDK Deploy - Pipeline Stack
+        working-directory: infra
+        run: npx cdk deploy "Chimera-Pipeline-${DEPLOY_ENV}" --require-approval never
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
   # Job 3: Canary deployment - route 5% traffic to new version
   deploy-canary:
