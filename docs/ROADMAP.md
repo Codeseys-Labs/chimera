@@ -24,14 +24,14 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 |------|--------|---------|
 | **Research** | ✅ **100% Complete** | 118 docs, 112K+ lines, 18 ADRs |
 | **CDK Infrastructure** | ✅ **11 stacks, production-quality** | 4,400+ LOC across Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration |
-| **Agent Runtime** | ✅ **BUILT (Python)** | `packages/agents/chimera_agent.py` (8,442 LOC) — Strands SDK + AgentCore Runtime integration • ReAct loop with streaming • AgentCore Memory (STM + LTM) • Multi-tenant context injection |
+| **Agent Runtime** | ✅ **BUILT (Python)** | `packages/agents/chimera_agent.py` (273 LOC) — Strands SDK + AgentCore Runtime integration • ReAct loop with streaming • AgentCore Memory (STM + LTM) • Multi-tenant context injection |
 | **AWS Tools** | ✅ **25 tools implemented** | 19 TypeScript tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock) + 5 Python tools + media processors |
-| **Core Modules** | ✅ **20 modules, 58,733 LOC** | agent, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity |
+| **Core Modules** | ✅ **21 modules, ~46,500 LOC** | agent, auth, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity |
 | **@chimera/shared** | ✅ **Complete** | Canonical type definitions |
 | **@chimera/sse-bridge** | ✅ **Ship-ready** | Strands-to-Vercel DSP bridge with 26 tests |
 | **@chimera/chat-gateway** | 🚧 **Framework ready** | Express server, middleware, routes, adapter stubs (Slack, Discord, Teams, Telegram) |
 | **@chimera/cli** | ✅ **Built** | Commands: deploy, tenant, session, skill, connect, status |
-| **Test Coverage** | 🚧 **High coverage, some failures** | 760 pass / 81 fail / 19 errors = 841 tests across 60 files |
+| **Test Coverage** | 🚧 **High coverage, some failures** | 760 pass / 81 fail / 19 errors = 841 tests across 41+ files |
 
 ### What Remains
 
@@ -85,7 +85,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 **What Was Built:**
 
 1. **Strands Agent Integration** ✅
-   - [x] Python agent runtime (`packages/agents/chimera_agent.py`, 8,442 LOC)
+   - [x] Python agent runtime (`packages/agents/chimera_agent.py`, 273 LOC)
    - [x] Strands SDK ReAct loop with streaming
    - [x] System prompt template with multi-tenant context injection
    - [x] BedrockModel integration (Claude via Bedrock)
@@ -294,7 +294,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 ## Dependency Graph
 
 ```
-Phase 0 (Foundation) --- ~85% complete
+Phase 0 (Foundation) --- 100% complete
   |
   v
 Phase 1 (Working Agent) <-- CRITICAL PATH
@@ -361,11 +361,11 @@ Phase 2               Phase 3           Phase 7
 |--------|-------|
 | **Packages** | 6 (core, agents, shared, sse-bridge, chat-gateway, cli) |
 | **CDK Stacks** | 11 stacks (4,400+ LOC) |
-| **TypeScript LOC** | 58,733 lines (packages/core/src/) |
-| **Python Agent Runtime** | 8,442 lines (chimera_agent.py + tools/) |
+| **TypeScript LOC** | ~46,500 lines (packages/core/src/) |
+| **Python Agent Runtime** | 273 lines (chimera_agent.py + tools/) |
 | **AWS Tool Implementations** | 25 tools (19 TypeScript + 5 Python + media processors) |
-| **Core Modules** | 20 (agent, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity) |
-| **Test Files** | 60 files with 841 tests (760 pass, 81 fail, 19 errors) |
+| **Core Modules** | 21 (agent, auth, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity) |
+| **Test Files** | 41+ files with 841 tests (760 pass, 81 fail, 19 errors) |
 | **Test Assertions** | 1,884 expect() calls |
 | **Research Documentation** | 118 docs, 112,000+ lines |
 | **Architecture Decision Records** | 18 ADRs |
