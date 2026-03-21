@@ -391,8 +391,8 @@ export class S3Tool {
       return {
         success: true,
         data: {
-          etag: response.CopyObjectResult?.ETag!,
-          lastModified: response.CopyObjectResult?.LastModified!,
+          etag: response.CopyObjectResult?.ETag ?? '',
+          lastModified: response.CopyObjectResult?.LastModified ?? new Date(),
           versionId: response.VersionId,
         },
         metadata: {

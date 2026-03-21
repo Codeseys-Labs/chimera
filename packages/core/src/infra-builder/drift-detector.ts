@@ -22,17 +22,23 @@ let DescribeStackResourcesCommandImpl: any;
 let DetectStackDriftCommandImpl: any;
 let DescribeStackResourceDriftsCommandImpl: any;
 
-try {
-  const cfnModule = require('@aws-sdk/client-cloudformation');
-  CloudFormationClientImpl = cfnModule.CloudFormationClient;
-  DescribeStacksCommandImpl = cfnModule.DescribeStacksCommand;
-  DescribeStackResourcesCommandImpl = cfnModule.DescribeStackResourcesCommand;
-  DetectStackDriftCommandImpl = cfnModule.DetectStackDriftCommand;
-  DescribeStackResourceDriftsCommandImpl = cfnModule.DescribeStackResourceDriftsCommand;
-} catch (e) {
-  // SDK not available - drift detector will require peer dependency installation
-  console.warn('AWS CloudFormation SDK not available. Install @aws-sdk/client-cloudformation to use drift detection.');
+// Initialize SDK imports dynamically (async initialization required)
+async function initializeSDK() {
+  try {
+    const cfnModule = await import('@aws-sdk/client-cloudformation');
+    CloudFormationClientImpl = cfnModule.CloudFormationClient;
+    DescribeStacksCommandImpl = cfnModule.DescribeStacksCommand;
+    DescribeStackResourcesCommandImpl = cfnModule.DescribeStackResourcesCommand;
+    DetectStackDriftCommandImpl = cfnModule.DetectStackDriftCommand;
+    DescribeStackResourceDriftsCommandImpl = cfnModule.DescribeStackResourceDriftsCommand;
+  } catch (e) {
+    // SDK not available - drift detector will require peer dependency installation
+    console.warn('AWS CloudFormation SDK not available. Install @aws-sdk/client-cloudformation to use drift detection.');
+  }
 }
+
+// Initialize SDK immediately (but don't await here)
+void initializeSDK();
 
 /**
  * Drift detection request
@@ -253,7 +259,7 @@ export class InfrastructureDriftDetector {
     return drifts.map((drift) => {
       const propertyDifferences: PropertyDifference[] = (
         drift.PropertyDifferences || []
-      ).map((diff) => ({
+      ).map((diff: any) => ({
         propertyPath: diff.PropertyPath || '',
         expectedValue: JSON.stringify(diff.ExpectedValue),
         actualValue: JSON.stringify(diff.ActualValue),

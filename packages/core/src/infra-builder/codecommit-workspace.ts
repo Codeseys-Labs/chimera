@@ -19,8 +19,7 @@ import {
   PutFileCommand,
   GetBranchCommand,
   ListRepositoriesCommand,
-  type Repository,
-  type BranchInfo,
+  FileModeTypeEnum,
 } from '@aws-sdk/client-codecommit';
 
 import type {
@@ -256,12 +255,23 @@ export class CodeCommitWorkspaceManager {
       let lastCommitId = parentCommitId;
 
       for (const file of files) {
+        // Map file mode string to FileModeTypeEnum
+        // Note: AWS SDK v3 CodeCommit only supports NORMAL, EXECUTABLE, and SYMLINK
+        const fileModeMap: Record<string, FileModeTypeEnum> = {
+          '100644': FileModeTypeEnum.NORMAL,
+          '100755': FileModeTypeEnum.EXECUTABLE,
+          '040000': FileModeTypeEnum.NORMAL, // Directory not supported, use NORMAL
+          '160000': FileModeTypeEnum.NORMAL, // Submodule not supported, use NORMAL
+          '120000': FileModeTypeEnum.SYMLINK,
+        };
+        const fileMode = file.fileMode ? fileModeMap[file.fileMode] : FileModeTypeEnum.NORMAL;
+
         const putFileCommand = new PutFileCommand({
           repositoryName,
           branchName,
           fileContent: Buffer.from(file.content, 'utf-8'),
           filePath: file.filePath,
-          fileMode: file.fileMode ?? '100644',
+          fileMode,
           parentCommitId: lastCommitId,
           commitMessage: files.length === 1 ? commitMessage : `${commitMessage} (${file.filePath})`,
           name: authorName ?? this.context.agentId,
@@ -318,7 +328,7 @@ export class CodeCommitWorkspaceManager {
     repositoryName: string,
     branchName: string,
     commitId: string
-  ): Promise<InfraOperationResult<BranchInfo>> {
+  ): Promise<InfraOperationResult<any>> {
     const startTime = Date.now();
 
     try {
