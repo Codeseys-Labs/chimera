@@ -11,6 +11,7 @@ import cors from 'cors';
 import path from 'path';
 import { extractTenantContext } from './middleware/tenant';
 import { rateLimitMiddleware, recordMetricsMiddleware } from './middleware/rate-limit';
+import authRouter from './routes/auth';
 import chatRouter from './routes/chat';
 import healthRouter from './routes/health';
 import slackRouter from './routes/slack';
@@ -29,6 +30,9 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Health check route (no auth required)
 app.use('/', healthRouter);
+
+// Auth routes (OAuth callback, token exchange, user info)
+app.use('/auth', authRouter);
 
 // Tenant provisioning API (administrative, requires authentication)
 app.use('/tenants', extractTenantContext);
