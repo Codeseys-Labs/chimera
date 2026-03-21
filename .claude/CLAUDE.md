@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-evo-optimize
-- **Task ID:** chimera-3395
+- **Agent Name:** builder-media-proc
+- **Task ID:** chimera-14e9
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-evo-optimize/chimera-3395
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize
-- **Parent:** lead-p6-evolution
+- **Branch:** overstory/builder-media-proc/chimera-14e9
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc
+- **Parent:** lead-multimodal
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,27 +181,27 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `packages/core/src/evolution/prompt-optimizer.ts`
-- `packages/core/src/evolution/model-router.ts`
-- `packages/core/src/evolution/experiment-runner.ts`
-- `tests/unit/evolution/prompt-optimizer.test.ts`
-- `tests/unit/evolution/model-router.test.ts`
-- `tests/unit/evolution/experiment-runner.test.ts`
+- `packages/core/src/media/types.ts`
+- `packages/core/src/media/media-processor.ts`
+- `packages/core/src/media/index.ts`
+- `packages/core/src/media/__tests__/media-processor.test.ts`
+- `packages/core/src/index.ts`
+- `docs/architecture/agent-architecture.md`
 
 ## Expertise
 
@@ -215,26 +215,26 @@ ml prime typescript
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-evo-optimize**.
+Use `ov mail` for all communication. Your address is **builder-media-proc**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-evo-optimize
+ov mail check --agent builder-media-proc
 
 # Send a status update to your parent
-ov mail send --to lead-p6-evolution --subject "status" \
-  --body "Progress update here" --type status --agent builder-evo-optimize
+ov mail send --to lead-multimodal --subject "status" \
+  --body "Progress update here" --type status --agent builder-media-proc
 
 # Ask a question
-ov mail send --to lead-p6-evolution --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-evo-optimize
+ov mail send --to lead-multimodal --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-media-proc
 
 # Report completion
-ov mail send --to lead-p6-evolution --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-evo-optimize
+ov mail send --to lead-multimodal --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-media-proc
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-evo-optimize
+ov mail reply <message-id> --body "Your reply" --agent builder-media-proc
 ```
 
 ## Spawning Sub-Workers
@@ -248,20 +248,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-evo-optimize/chimera-3395)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-evo-optimize` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-p6-evolution: `ov mail send --to lead-p6-evolution --subject "Worker done: chimera-3395" --body "Quality gates passed." --type worker_done --agent builder-evo-optimize`
-7. **Close issue:** `sd close chimera-3395 --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-media-proc/chimera-14e9)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-media-proc` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-multimodal: `ov mail send --to lead-multimodal --subject "Worker done: chimera-14e9" --body "Quality gates passed." --type worker_done --agent builder-media-proc`
+7. **Close issue:** `sd close chimera-14e9 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-evo-optimize/chimera-3395
+- Commit only to your branch: overstory/builder-media-proc/chimera-14e9
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
