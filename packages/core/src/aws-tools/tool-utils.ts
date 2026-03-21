@@ -49,6 +49,39 @@ export const CLOUDWATCH_RETRYABLE_ERRORS = [
 ];
 
 /**
+ * Retryable error codes for Transcribe operations
+ */
+export const TRANSCRIBE_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'LimitExceededException',
+  'InternalFailureException',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Rekognition operations
+ */
+export const REKOGNITION_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'ProvisionedThroughputExceededException',
+  'InternalServerError',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Textract operations
+ */
+export const TEXTRACT_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'ProvisionedThroughputExceededException',
+  'InternalServerError',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
  * Retry an operation with exponential backoff and jitter
  *
  * @param operation - Async operation to retry
@@ -111,6 +144,9 @@ export function formatToolError(
     ...S3_RETRYABLE_ERRORS,
     ...LAMBDA_RETRYABLE_ERRORS,
     ...CLOUDWATCH_RETRYABLE_ERRORS,
+    ...TRANSCRIBE_RETRYABLE_ERRORS,
+    ...REKOGNITION_RETRYABLE_ERRORS,
+    ...TEXTRACT_RETRYABLE_ERRORS,
   ];
 
   return JSON.stringify({

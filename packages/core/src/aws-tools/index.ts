@@ -31,6 +31,9 @@ export { createEC2Tools } from './ec2-tool';
 export { createS3Tools } from './s3-tool';
 export { createLambdaTools } from './lambda-tool';
 export { createCloudWatchTools } from './cloudwatch-tool';
+export { createTranscribeTools } from './transcribe-tool';
+export { createRekognitionTools } from './rekognition-tool';
+export { createTextractTools } from './textract-tool';
 
 // Shared utilities
 export {
@@ -40,6 +43,9 @@ export {
   S3_RETRYABLE_ERRORS,
   LAMBDA_RETRYABLE_ERRORS,
   CLOUDWATCH_RETRYABLE_ERRORS,
+  TRANSCRIBE_RETRYABLE_ERRORS,
+  REKOGNITION_RETRYABLE_ERRORS,
+  TEXTRACT_RETRYABLE_ERRORS,
 } from './tool-utils';
 
 // Legacy config types removed - now defined inline with Zod schemas in each tool file
