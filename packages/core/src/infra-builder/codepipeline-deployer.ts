@@ -134,13 +134,15 @@ export class CodePipelineDeployer {
             ],
           },
         ],
-        tags: [
-          { key: 'tenantId', value: this.context.tenantId },
-          { key: 'agentId', value: this.context.agentId },
-          { key: 'ManagedBy', value: `chimera-agent-${this.context.tenantId}` },
-          ...(config.tags ? Object.entries(config.tags).map(([key, value]) => ({ key, value })) : []),
-        ],
       };
+
+      // Tags for the pipeline (passed separately to CreatePipelineCommand)
+      const pipelineTags = [
+        { key: 'tenantId', value: this.context.tenantId },
+        { key: 'agentId', value: this.context.agentId },
+        { key: 'ManagedBy', value: `chimera-agent-${this.context.tenantId}` },
+        ...(config.tags ? Object.entries(config.tags).map(([key, value]) => ({ key, value })) : []),
+      ];
 
       // Add approval stage if required
       if (config.requireApproval) {
@@ -156,7 +158,7 @@ export class CodePipelineDeployer {
                 version: '1',
               },
               configuration: {
-                NotificationArn: config.approvalTopicArn,
+                NotificationArn: config.approvalTopicArn || '',
                 CustomData: `Deployment approval required for stack: ${config.stackName}`,
                 ExternalEntityLink: `https://console.aws.amazon.com/cloudformation/home?region=${this.context.region}#/stacks/changesets`,
               },
@@ -188,7 +190,7 @@ export class CodePipelineDeployer {
         ],
       });
 
-      const command = new CreatePipelineCommand({ pipeline });
+      const command = new CreatePipelineCommand({ pipeline, tags: pipelineTags });
       const response = await this.pipelineClient.send(command);
 
       const pipelineArn = `arn:aws:codepipeline:${this.context.region}:${this.extractAccountId(config.roleArn)}:${config.pipelineName}`;
@@ -281,14 +283,17 @@ export class CodePipelineDeployer {
       const execution = response.pipelineExecution!;
       const pipelineArn = `arn:aws:codepipeline:${this.context.region}:*:${pipelineName}`;
 
+      // Cast to access properties that may not be in the type definition
+      const executionAny = execution as any;
+
       const result: PipelineExecution = {
         pipelineArn,
         executionId: executionId,
         pipelineName,
         status: execution.status as PipelineStatus,
         pipelineVersion: execution.pipelineVersion,
-        startTime: execution.statusSummary?.startTime?.toISOString() ?? new Date().toISOString(),
-        endTime: execution.statusSummary?.lastUpdateTime?.toISOString(),
+        startTime: executionAny.startTime?.toISOString?.() ?? new Date().toISOString(),
+        endTime: executionAny.lastUpdateTime?.toISOString?.(),
       };
 
       return {
@@ -450,14 +455,14 @@ export class CodePipelineDeployer {
 
       const changes: ResourceChange[] = (response.Changes ?? []).map((change: Change) => ({
         action: change.ResourceChange?.Action as any,
-        logicalResourceId: change.ResourceChange?.LogicalResourceId!,
+        logicalResourceId: change.ResourceChange?.LogicalResourceId ?? '',
         physicalResourceId: change.ResourceChange?.PhysicalResourceId,
-        resourceType: change.ResourceChange?.ResourceType!,
+        resourceType: change.ResourceChange?.ResourceType ?? '',
         replacement: change.ResourceChange?.Replacement as any,
         scope: change.ResourceChange?.Scope as any,
         details: change.ResourceChange?.Details?.map((detail: any) => ({
           target: {
-            attribute: detail.Target?.Attribute!,
+            attribute: detail.Target?.Attribute ?? '',
             name: detail.Target?.Name,
             requiresRecreation: detail.Target?.RequiresRecreation as any,
           },
@@ -466,13 +471,16 @@ export class CodePipelineDeployer {
         })),
       }));
 
+      // Cast response to access properties that may not be in the type definition
+      const responseAny = response as any;
+
       const changeSet: ChangeSetSummary = {
         changeSetId: response.ChangeSetId!,
         changeSetName: response.ChangeSetName!,
         stackName: response.StackName!,
-        changeSetType: response.ChangeSetType as any,
-        executionStatus: response.ExecutionStatus as any,
-        status: response.Status as any,
+        changeSetType: responseAny.ChangeSetType,
+        executionStatus: responseAny.ExecutionStatus,
+        status: responseAny.Status,
         statusReason: response.StatusReason,
         createdAt: response.CreationTime?.toISOString() ?? new Date().toISOString(),
         changes,

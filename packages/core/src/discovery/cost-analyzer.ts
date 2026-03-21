@@ -175,7 +175,7 @@ export class CostAnalyzer {
       },
       Granularity: params.granularity || 'DAILY',
       Metrics: params.metrics || ['UnblendedCost'],
-      GroupBy: params.groupBy,
+      GroupBy: params.groupBy?.map(g => ({ Type: g.type, Key: g.key })),
       Filter: this.buildFilter(params.filter),
     });
 
@@ -293,12 +293,21 @@ export class CostAnalyzer {
 
     const { GetCostForecastCommand } = await import('@aws-sdk/client-cost-explorer');
 
+    // Convert CostMetric to AWS SDK Metric format
+    const metricMap: Record<CostMetric, string> = {
+      'UnblendedCost': 'UNBLENDED_COST',
+      'BlendedCost': 'BLENDED_COST',
+      'UsageQuantity': 'USAGE_QUANTITY',
+      'AmortizedCost': 'AMORTIZED_COST',
+    };
+    const metric = params.metric ? metricMap[params.metric] : 'UNBLENDED_COST';
+
     const command = new GetCostForecastCommand({
       TimePeriod: {
         Start: params.timePeriod.start,
         End: params.timePeriod.end,
       },
-      Metric: params.metric || 'UNBLENDED_COST',
+      Metric: metric as any,
       Granularity: params.granularity || 'DAILY',
       Filter: this.buildFilter(params.filter),
     });
