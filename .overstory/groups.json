@@ -191,5 +191,16 @@
 		"status": "active",
 		"createdAt": "2026-03-21T05:52:46.860Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-b616fa11",
+		"name": "batch-p2-p3",
+		"memberIssueIds": [
+			"chimera-781e",
+			"chimera-2c60"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T07:05:09.593Z",
+		"completedAt": null
 	}
 ]
