@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chimera Chat</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Chimera Chat</h1>
+      <div class="status" id="status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Disconnected</span>
+      </div>
+    </header>
+
+    <main>
+      <div class="chat-container" id="chat-container">
+        <div class="welcome-message">
+          <h2>Welcome to Chimera</h2>
+          <p>Start a conversation with your AI assistant.</p>
+        </div>
+      </div>
+
+      <div class="input-container">
+        <form id="chat-form">
+          <input
+            type="text"
+            id="message-input"
+            placeholder="Type your message..."
+            autocomplete="off"
+            disabled
+          />
+          <button type="submit" id="send-button" disabled>Send</button>
+        </form>
+      </div>
+    </main>
+
+    <footer>
+      <p>AWS Chimera - Multi-Tenant Agent Platform</p>
+    </footer>
+  </div>
+
+  <script src="/chat.js"></script>
+</body>
+</html>
