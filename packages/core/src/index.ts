@@ -425,3 +425,17 @@ export {
 
 // Multi-Account module (cross-account governance and management)
 export * from './multi-account';
+
+// Auth module (user pairing and identity resolution)
+export {
+  UserPairingService,
+  type UserPairingServiceConfig,
+  type ChatPlatform,
+  type UserPairing,
+  type CreateUserPairingParams,
+  type GetUserPairingParams,
+  type GetPairingsByCognitoParams,
+  type UpdateUserPairingParams,
+  type RevokeUserPairingParams,
+  type ResolvedUserContext,
+} from './auth';
