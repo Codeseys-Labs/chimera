@@ -199,6 +199,30 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import json
+import boto3
+import os
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
+
+dynamodb = boto3.resource('dynamodb')
+s3 = boto3.client('s3')
+
+def extract_tool_sequence(conversation):
+    """Extract ordered list of tool calls from conversation."""
+    tools = []
+    for turn in conversation.get('turns', []):
+        if turn.get('type') == 'assistant' and 'tool_calls' in turn:
+            for tool_call in turn['tool_calls']:
+                tools.append(tool_call.get('name', 'unknown'))
+    return tools
+
+def generate_ngrams(sequence, n):
+    """Generate n-grams from tool sequence."""
+    if len(sequence) < n:
+        return []
+    return [tuple(sequence[i:i+n]) for i in range(len(sequence) - n + 1)]
+
 def handler(event, context):
     """
     Detect repeated multi-step tool sequences using n-gram extraction.
@@ -206,11 +230,79 @@ def handler(event, context):
     Analyzes conversation logs with sliding window, identifies patterns
     that appear >= min_occurrences times.
     """
-    # TODO: Implement pattern detection algorithm
+    tenant_id = event['tenant_id']
+    min_occurrences = event.get('min_occurrences', 5)
+    ngram_size = event.get('ngram_size', 3)
+    lookback_days = event.get('lookback_days', 7)
+
+    table_name = os.environ['EVOLUTION_TABLE']
+    table = dynamodb.Table(table_name)
+
+    # Query conversation logs from last N days
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=lookback_days)
+
+    # Scan for recent conversation logs (in production, use GSI with timestamp)
+    response = table.query(
+        KeyConditionExpression='PK = :pk AND SK BETWEEN :start AND :end',
+        ExpressionAttributeValues={
+            ':pk': f'TENANT#{tenant_id}#LOGS',
+            ':start': start_time.isoformat(),
+            ':end': end_time.isoformat()
+        },
+        Limit=1000
+    )
+
+    # Extract tool sequences from conversations
+    all_ngrams = []
+    conversation_count = 0
+
+    for item in response.get('Items', []):
+        conversation = item.get('conversation', {})
+        tool_sequence = extract_tool_sequence(conversation)
+
+        if len(tool_sequence) >= ngram_size:
+            ngrams = generate_ngrams(tool_sequence, ngram_size)
+            all_ngrams.extend(ngrams)
+            conversation_count += 1
+
+    # Count pattern frequencies
+    pattern_counts = Counter(all_ngrams)
+
+    # Filter patterns by minimum occurrence threshold
+    frequent_patterns = [
+        {
+            'pattern': ' -> '.join(pattern),
+            'count': count,
+            'confidence': round(count / conversation_count, 2) if conversation_count > 0 else 0
+        }
+        for pattern, count in pattern_counts.items()
+        if count >= min_occurrences
+    ]
+
+    # Sort by frequency
+    frequent_patterns.sort(key=lambda x: x['count'], reverse=True)
+
+    # Store detected patterns for skill generation
+    if frequent_patterns:
+        patterns_key = f'TENANT#{tenant_id}#PATTERNS#{datetime.utcnow().isoformat()}'
+        table.put_item(
+            Item={
+                'PK': patterns_key,
+                'SK': 'DETECTED',
+                'patterns': frequent_patterns[:10],  # Top 10
+                'analyzed_conversations': conversation_count,
+                'detection_timestamp': datetime.utcnow().isoformat(),
+                'ttl': int((datetime.utcnow() + timedelta(days=90)).timestamp())
+            }
+        )
+
     return {
-        'tenant_id': event['tenant_id'],
-        'patterns_found': 0,
-        'top_patterns': []
+        'tenant_id': tenant_id,
+        'patterns_found': len(frequent_patterns),
+        'top_patterns': frequent_patterns[:5],  # Return top 5
+        'analyzed_conversations': conversation_count,
+        'detection_timestamp': datetime.utcnow().isoformat()
     }
 `),
       timeout: cdk.Duration.minutes(5),
@@ -300,14 +392,108 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import json
+import boto3
+import os
+from datetime import datetime
+
+s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+
 def handler(event, context):
     """
     Roll back evolution change using pre-state snapshot from S3.
+
+    Restores previous state for:
+    - Prompt variants (S3 snapshot -> DynamoDB)
+    - Auto-generated skills (S3 snapshot -> file system)
+    - Memory state (S3 snapshot -> DynamoDB)
     """
-    # TODO: Implement rollback logic
+    event_id = event['event_id']
+    rollback_type = event['rollback_type']  # 'prompt', 'skill', 'memory'
+    tenant_id = event['tenant_id']
+
+    artifacts_bucket = os.environ['ARTIFACTS_BUCKET']
+    evolution_table_name = os.environ['EVOLUTION_TABLE']
+    table = dynamodb.Table(evolution_table_name)
+
+    # Retrieve snapshot metadata from S3
+    snapshot_key = f'snapshots/{tenant_id}/{rollback_type}/{event_id}/snapshot.json'
+
+    try:
+        response = s3.get_object(Bucket=artifacts_bucket, Key=snapshot_key)
+        snapshot_data = json.loads(response['Body'].read().decode('utf-8'))
+    except s3.exceptions.NoSuchKey:
+        return {
+            'status': 'rollback_failed',
+            'error': 'Snapshot not found',
+            'event_id': event_id
+        }
+    except Exception as e:
+        return {
+            'status': 'rollback_failed',
+            'error': str(e),
+            'event_id': event_id
+        }
+
+    # Restore based on rollback type
+    try:
+        if rollback_type == 'prompt':
+            # Restore prompt variant to DynamoDB
+            table.put_item(Item={
+                'PK': f'TENANT#{tenant_id}#PROMPT',
+                'SK': 'ACTIVE',
+                'prompt_text': snapshot_data['prompt_text'],
+                'version': snapshot_data['version'],
+                'restored_from': event_id,
+                'restored_at': datetime.utcnow().isoformat()
+            })
+
+        elif rollback_type == 'skill':
+            # Mark auto-generated skill as inactive
+            table.update_item(
+                Key={
+                    'PK': f'TENANT#{tenant_id}#SKILL#{snapshot_data["skill_id"]}',
+                    'SK': 'METADATA'
+                },
+                UpdateExpression='SET #status = :inactive, restored_at = :now',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':inactive': 'INACTIVE',
+                    ':now': datetime.utcnow().isoformat()
+                }
+            )
+
+        elif rollback_type == 'memory':
+            # Restore memory items in batch
+            for memory_item in snapshot_data.get('memories', []):
+                table.put_item(Item=memory_item)
+
+        # Log rollback event to audit table
+        table.put_item(Item={
+            'PK': f'TENANT#{tenant_id}#AUDIT',
+            'SK': f'ROLLBACK#{datetime.utcnow().isoformat()}',
+            'event_id': event_id,
+            'rollback_type': rollback_type,
+            'snapshot_key': snapshot_key,
+            'restored_at': datetime.utcnow().isoformat(),
+            'request_id': context.aws_request_id
+        })
+
+    except Exception as e:
+        return {
+            'status': 'rollback_failed',
+            'error': str(e),
+            'event_id': event_id,
+            'rollback_type': rollback_type
+        }
+
     return {
         'status': 'rolled_back',
-        'event_id': event['event_id']
+        'event_id': event_id,
+        'rollback_type': rollback_type,
+        'snapshot_key': snapshot_key,
+        'restored_at': datetime.utcnow().isoformat()
     }
 `),
       timeout: cdk.Duration.minutes(5),

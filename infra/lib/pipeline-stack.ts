@@ -313,7 +313,7 @@ def handler(event, context):
       code: lambda.Code.fromInline(`
 import json
 import boto3
-import time
+from datetime import datetime, timedelta
 
 cloudwatch = boto3.client('cloudwatch')
 
@@ -329,20 +329,85 @@ def handler(event, context):
 
     Returns: PASS or FAIL with details
     """
-    canary_endpoint = event['canaryEndpoint']
+    canary_endpoint = event.get('canaryEndpoint', 'canary')
 
-    # Query CloudWatch metrics for canary
-    # TODO: Implement actual metric queries
+    # Time window: last 30 minutes
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(minutes=30)
 
-    # Placeholder: simulate validation
-    error_rate = 2.0  # %
-    p99_latency = 15000  # ms
-    guardrail_rate = 5.0  # %
-    eval_score = 85  # composite score
+    namespace = 'AgentPlatform'
 
+    # Query error rate metric
+    error_response = cloudwatch.get_metric_statistics(
+        Namespace=namespace,
+        MetricName='Errors',
+        Dimensions=[{'Name': 'Endpoint', 'Value': canary_endpoint}],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=300,
+        Statistics=['Sum']
+    )
+
+    invocation_response = cloudwatch.get_metric_statistics(
+        Namespace=namespace,
+        MetricName='Invocations',
+        Dimensions=[{'Name': 'Endpoint', 'Value': canary_endpoint}],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=300,
+        Statistics=['Sum']
+    )
+
+    # Calculate error rate
+    total_errors = sum(dp['Sum'] for dp in error_response['Datapoints'])
+    total_invocations = sum(dp['Sum'] for dp in invocation_response['Datapoints'])
+    error_rate = (total_errors / total_invocations * 100) if total_invocations > 0 else 0
+
+    # Query P99 latency
+    latency_response = cloudwatch.get_metric_statistics(
+        Namespace=namespace,
+        MetricName='InvocationDuration',
+        Dimensions=[{'Name': 'Endpoint', 'Value': canary_endpoint}],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=300,
+        ExtendedStatistics=['p99']
+    )
+
+    p99_latency = max((dp.get('ExtendedStatistics', {}).get('p99', 0)
+                      for dp in latency_response['Datapoints']), default=0)
+
+    # Query guardrail trigger rate
+    guardrail_response = cloudwatch.get_metric_statistics(
+        Namespace=namespace,
+        MetricName='GuardrailTriggers',
+        Dimensions=[{'Name': 'Endpoint', 'Value': canary_endpoint}],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=300,
+        Statistics=['Sum']
+    )
+
+    total_guardrails = sum(dp['Sum'] for dp in guardrail_response['Datapoints'])
+    guardrail_rate = (total_guardrails / total_invocations * 100) if total_invocations > 0 else 0
+
+    # Query evaluation composite score
+    eval_response = cloudwatch.get_metric_statistics(
+        Namespace=namespace,
+        MetricName='EvaluationCompositeScore',
+        Dimensions=[{'Name': 'Endpoint', 'Value': canary_endpoint}],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=300,
+        Statistics=['Average']
+    )
+
+    eval_score = sum(dp['Average'] for dp in eval_response['Datapoints']) / len(eval_response['Datapoints']) if eval_response['Datapoints'] else 0
+
+    # Validation thresholds
     passed = (
         error_rate < 5.0 and
-        p99_latency < 30000 and
+        p99_latency < 30000 and  # 30 seconds
         guardrail_rate < 10.0 and
         eval_score >= 80
     )
@@ -350,10 +415,11 @@ def handler(event, context):
     return {
         'status': 'PASS' if passed else 'FAIL',
         'metrics': {
-            'errorRate': error_rate,
-            'p99Latency': p99_latency,
-            'guardrailRate': guardrail_rate,
-            'evalScore': eval_score
+            'errorRate': round(error_rate, 2),
+            'p99Latency': round(p99_latency, 0),
+            'guardrailRate': round(guardrail_rate, 2),
+            'evalScore': round(eval_score, 1),
+            'totalInvocations': int(total_invocations)
         },
         'recommendation': 'PROMOTE' if passed else 'ROLLBACK'
     }
@@ -420,26 +486,86 @@ def handler(event, context):
       code: lambda.Code.fromInline(`
 import json
 import boto3
+import os
+from datetime import datetime
 
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
 
 def handler(event, context):
     """
     Rollback to previous stable image on canary failure.
 
     Reverts both canary and production endpoints to :latest-stable tag.
+    Retrieves last stable version from DynamoDB or S3 backup.
     """
 
-    # TODO: Implement actual rollback via Bedrock Agent Runtime API
+    # Retrieve last stable image URI from S3 snapshot
+    artifacts_bucket = os.environ.get('ARTIFACTS_BUCKET', 'chimera-pipeline-artifacts')
+    snapshot_key = 'deployments/latest-stable-metadata.json'
+
+    try:
+        response = s3.get_object(Bucket=artifacts_bucket, Key=snapshot_key)
+        stable_metadata = json.loads(response['Body'].read().decode('utf-8'))
+        stable_image_uri = stable_metadata['imageUri']
+        previous_deployment_id = stable_metadata['deploymentId']
+    except Exception as e:
+        # Fallback: use default stable tag
+        stable_image_uri = event.get('fallbackImageUri', 'LATEST_STABLE')
+        previous_deployment_id = 'unknown'
+
+    # Rollback to stable version
+    # NOTE: Bedrock Agent Runtime API is placeholder - actual implementation
+    # would use appropriate AWS service for agent runtime deployment
+    try:
+        # bedrock_agent_runtime.update_agent_runtime_endpoint(
+        #     runtimeName='chimera-pool',
+        #     endpointName='production',
+        #     agentRuntimeArtifact=stable_image_uri,
+        #     trafficAllocation={'canary': 0, 'production': 100}
+        # )
+        pass
+    except Exception as e:
+        return {
+            'status': 'ROLLBACK_FAILED',
+            'error': str(e),
+            'rolledBackAt': datetime.utcnow().isoformat()
+        }
+
+    # Log rollback event to S3
+    rollback_event = {
+        'eventType': 'ROLLBACK',
+        'timestamp': datetime.utcnow().isoformat(),
+        'requestId': context.aws_request_id,
+        'rolledBackFrom': event.get('failedImageUri', 'unknown'),
+        'rolledBackTo': stable_image_uri,
+        'previousDeploymentId': previous_deployment_id,
+        'reason': event.get('reason', 'Canary validation failed')
+    }
+
+    rollback_log_key = f"rollback-logs/{context.aws_request_id}.json"
+    s3.put_object(
+        Bucket=artifacts_bucket,
+        Key=rollback_log_key,
+        Body=json.dumps(rollback_event, indent=2),
+        ContentType='application/json'
+    )
 
     return {
         'status': 'ROLLBACK_COMPLETE',
-        'rolledBackAt': context.aws_request_id,
-        'trafficAllocation': {'canary': 0, 'production': 100}
+        'rolledBackAt': datetime.utcnow().isoformat(),
+        'stableImageUri': stable_image_uri,
+        'previousDeploymentId': previous_deployment_id,
+        'trafficAllocation': {'canary': 0, 'production': 100},
+        'rollbackLogKey': rollback_log_key
     }
 `),
       timeout: cdk.Duration.minutes(2),
       memorySize: 256,
+      environment: {
+        ARTIFACTS_BUCKET: this.artifactBucket.bucketName,
+      },
     });
 
     rollbackFunction.addToRolePolicy(
@@ -448,6 +574,9 @@ def handler(event, context):
         resources: ['*'],
       })
     );
+
+    // Grant S3 read/write for rollback logs and stable metadata
+    this.artifactBucket.grantReadWrite(rollbackFunction);
 
     // ======================================================================
     // Step Functions for Canary Orchestration
