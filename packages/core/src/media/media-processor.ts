@@ -10,6 +10,7 @@
 import {
   StartTranscriptionJobCommand,
   GetTranscriptionJobCommand,
+  LanguageCode,
 } from '@aws-sdk/client-transcribe';
 import {
   DetectLabelsCommand,
@@ -19,6 +20,7 @@ import {
 import {
   StartDocumentAnalysisCommand,
   GetDocumentAnalysisCommand,
+  Block,
 } from '@aws-sdk/client-textract';
 import type {
   MediaInput,
@@ -193,7 +195,7 @@ export class MediaProcessor {
 
     const command = new StartTranscriptionJobCommand({
       TranscriptionJobName: jobName,
-      LanguageCode: options?.languageCode || 'en-US',
+      LanguageCode: (options?.languageCode as LanguageCode) || LanguageCode.EN_US,
       Media: {
         MediaFileUri: s3Uri,
       },
@@ -295,8 +297,9 @@ export class MediaProcessor {
       confidence:
         labelsResponse.Labels?.[0]?.Confidence || 0,
       metadata: {
-        width: labelsResponse.ImageProperties?.Width,
-        height: labelsResponse.ImageProperties?.Height,
+        // ImageProperties structure varies by SDK version
+        width: undefined,
+        height: undefined,
       },
       raw: {
         labels: labelsResponse,
@@ -332,14 +335,19 @@ export class MediaProcessor {
     });
 
     const startResponse = await this.config.textractClient.send(command);
-    const jobId = startResponse.JobId!;
+
+    if (!startResponse.JobId) {
+      throw new Error('Textract failed to return JobId');
+    }
+
+    const jobId = startResponse.JobId;
 
     // Poll for completion
     const result = await this.waitForDocumentAnalysis(jobId);
 
     // Extract text from blocks
-    const textBlocks = result.Blocks?.filter((block) => block.BlockType === 'LINE') || [];
-    const text = textBlocks.map((block) => block.Text).join('\n');
+    const textBlocks = result.Blocks?.filter((block: Block) => block.BlockType === 'LINE') || [];
+    const text = textBlocks.map((block: Block) => block.Text).join('\n');
 
     return {
       type: 'document-analysis',

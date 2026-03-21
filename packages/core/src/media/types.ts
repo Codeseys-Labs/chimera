@@ -7,21 +7,16 @@
 
 import type {
   TranscribeClient,
-  StartTranscriptionJobCommandInput,
   TranscriptionJob,
 } from '@aws-sdk/client-transcribe';
 import type {
   RekognitionClient,
-  DetectLabelsCommandInput,
-  DetectTextCommandInput,
-  DetectFacesCommandInput,
   Label,
   TextDetection,
   FaceDetail,
 } from '@aws-sdk/client-rekognition';
 import type {
   TextractClient,
-  StartDocumentAnalysisCommandInput,
   DocumentMetadata,
   Block,
 } from '@aws-sdk/client-textract';
