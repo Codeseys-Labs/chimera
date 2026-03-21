@@ -67,7 +67,7 @@ phases:
       - echo "========================================="
       - export IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}
       - echo "Building image with tag $IMAGE_TAG..."
-      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f packages/core/Dockerfile packages/core/
+      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f packages/agents/Dockerfile packages/agents/
       - echo ""
 
       - echo "========================================="
