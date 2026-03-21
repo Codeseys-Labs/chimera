@@ -226,5 +226,21 @@
 		"status": "active",
 		"createdAt": "2026-03-21T18:04:42.454Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-5783178f",
+		"name": "gap-fix-batch",
+		"memberIssueIds": [
+			"chimera-51c9",
+			"chimera-2e12",
+			"chimera-9e8d",
+			"chimera-82fc",
+			"chimera-caea",
+			"chimera-cade",
+			"chimera-14e9"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T18:30:51.628Z",
+		"completedAt": null
 	}
 ]
