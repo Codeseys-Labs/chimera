@@ -49,6 +49,181 @@ export const CLOUDWATCH_RETRYABLE_ERRORS = [
 ];
 
 /**
+ * Retryable error codes for ECS operations
+ */
+export const ECS_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'ServerException',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for DynamoDB operations
+ */
+export const DYNAMODB_RETRYABLE_ERRORS = [
+  'ProvisionedThroughputExceededException',
+  'RequestLimitExceeded',
+  'ThrottlingException',
+  'InternalServerError',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for EFS operations
+ */
+export const EFS_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalServerError',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for IAM operations
+ */
+export const IAM_RETRYABLE_ERRORS = [
+  'ServiceFailureException',
+  'ThrottlingException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for CloudFront operations
+ */
+export const CLOUDFRONT_RETRYABLE_ERRORS = [
+  'TooManyRequestsException',
+  'ServiceUnavailable',
+  'ThrottlingException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Route53 operations
+ */
+export const ROUTE53_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for WAFv2 operations
+ */
+export const WAFV2_RETRYABLE_ERRORS = [
+  'WAFServiceLinkedRoleErrorException',
+  'WAFInternalErrorException',
+  'WAFUnavailableEntityException',
+  'ThrottlingException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for RDS operations
+ */
+export const RDS_RETRYABLE_ERRORS = [
+  'RequestLimitExceeded',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'InternalFailure',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Redshift operations
+ */
+export const REDSHIFT_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalFailure',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Glue operations
+ */
+export const GLUE_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalServiceException',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Athena operations
+ */
+export const ATHENA_RETRYABLE_ERRORS = [
+  'TooManyRequestsException',
+  'ThrottlingException',
+  'InternalServerException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for OpenSearch operations
+ */
+export const OPENSEARCH_RETRYABLE_ERRORS = [
+  'LimitExceededException',
+  'InternalException',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for CodeBuild operations
+ */
+export const CODEBUILD_RETRYABLE_ERRORS = [
+  'AccountLimitExceededException',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Bedrock operations
+ */
+export const BEDROCK_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalServerException',
+  'ServiceUnavailableException',
+  'ModelTimeoutException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for SageMaker operations
+ */
+export const SAGEMAKER_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalFailure',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Step Functions operations
+ */
+export const SFN_RETRYABLE_ERRORS = [
+  'TooManyRequestsException',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for SQS operations
+ */
+export const SQS_RETRYABLE_ERRORS = [
+  'RequestThrottled',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'InternalFailure',
+  'TimeoutError',
+];
+
+/**
  * Retry an operation with exponential backoff and jitter
  *
  * @param operation - Async operation to retry
@@ -111,6 +286,23 @@ export function formatToolError(
     ...S3_RETRYABLE_ERRORS,
     ...LAMBDA_RETRYABLE_ERRORS,
     ...CLOUDWATCH_RETRYABLE_ERRORS,
+    ...ECS_RETRYABLE_ERRORS,
+    ...DYNAMODB_RETRYABLE_ERRORS,
+    ...EFS_RETRYABLE_ERRORS,
+    ...IAM_RETRYABLE_ERRORS,
+    ...CLOUDFRONT_RETRYABLE_ERRORS,
+    ...ROUTE53_RETRYABLE_ERRORS,
+    ...WAFV2_RETRYABLE_ERRORS,
+    ...RDS_RETRYABLE_ERRORS,
+    ...REDSHIFT_RETRYABLE_ERRORS,
+    ...GLUE_RETRYABLE_ERRORS,
+    ...ATHENA_RETRYABLE_ERRORS,
+    ...OPENSEARCH_RETRYABLE_ERRORS,
+    ...CODEBUILD_RETRYABLE_ERRORS,
+    ...BEDROCK_RETRYABLE_ERRORS,
+    ...SAGEMAKER_RETRYABLE_ERRORS,
+    ...SFN_RETRYABLE_ERRORS,
+    ...SQS_RETRYABLE_ERRORS,
   ];
 
   return JSON.stringify({
