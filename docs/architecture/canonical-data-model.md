@@ -4,10 +4,10 @@ version: 1.0.1
 status: canonical
 last_updated: 2026-03-21
 supersedes:
-  - docs/research/architecture-reviews/ClawCore-Architecture-Review-Platform-IaC.md (single-table design)
-  - docs/research/architecture-reviews/ClawCore-Final-Architecture-Plan.md (6-table overview)
-  - docs/research/architecture-reviews/ClawCore-AWS-Component-Blueprint.md (6-table with details)
-  - docs/research/architecture-reviews/ClawCore-Architecture-Review-Multi-Tenant.md (enhanced tenant config)
+  - docs/research/architecture-reviews/Chimera-Architecture-Review-Platform-IaC.md (single-table design)
+  - docs/research/architecture-reviews/Chimera-Final-Architecture-Plan.md (6-table overview)
+  - docs/research/architecture-reviews/Chimera-AWS-Component-Blueprint.md (6-table with details)
+  - docs/research/architecture-reviews/Chimera-Architecture-Review-Multi-Tenant.md (enhanced tenant config)
 authority: |
   This document is the SINGLE SOURCE OF TRUTH for all DynamoDB table schemas in the AWS Chimera platform.
   All implementation code, CDK stacks, API handlers, and documentation MUST reference this specification.
@@ -179,11 +179,11 @@ SK: PROFILE | CONFIG#features | CONFIG#models | CONFIG#tools | CONFIG#channels |
   enabledChannels: ["web", "slack", "discord"],
   slack: {
     workspaceId: "T01234567",
-    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:clawcore/tenant/org-acme-corp/slack-bot-token"
+    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:chimera/tenant/org-acme-corp/slack-bot-token"
   },
   discord: {
     guildId: "987654321",
-    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:clawcore/tenant/org-acme-corp/discord-bot-token"
+    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:chimera/tenant/org-acme-corp/discord-bot-token"
   }
 }
 ```
@@ -846,22 +846,26 @@ for tenant in allTenants:
 **Problem:** Gap analysis (docs/research/enhancement/00-Gap-Analysis-Report.md) identified 4 incompatible DynamoDB schemas across the research corpus.
 
 #### Design 1: Single-Table Pattern
+<<<<<<< HEAD
 - **Source:** `ClawCore-Architecture-Review-Platform-IaC.md`
+=======
+- **Source:** `Chimera-Architecture-Review-Platform-IaC.md`
+>>>>>>> overstory/builder-docs-fix2/chimera-c9ec
 - **Schema:** 1 table (`chimera-platform`) with SK overloading
 - **Verdict:** ❌ Rejected — TTL conflicts, encryption conflicts, harder to manage isolation
 
 #### Design 2: 6-Table Overview
-- **Source:** `ClawCore-Final-Architecture-Plan.md`
+- **Source:** `Chimera-Final-Architecture-Plan.md`
 - **Schema:** 6 tables with simple `SK=META` for tenant config
 - **Verdict:** ✅ **Adopted as base** — clear separation of concerns, implemented in code
 
 #### Design 3: 6-Table with Details
-- **Source:** `ClawCore-AWS-Component-Blueprint.md`
+- **Source:** `Chimera-AWS-Component-Blueprint.md`
 - **Schema:** Same 6 tables with detailed GSI specs, TTL, encryption
 - **Verdict:** ✅ Merged into canonical spec (added operational details)
 
 #### Design 4: Enhanced Tenant Config
-- **Source:** `ClawCore-Architecture-Review-Multi-Tenant.md`
+- **Source:** `Chimera-Architecture-Review-Multi-Tenant.md`
 - **Schema:** 6 tables with multi-item tenant config pattern (CONFIG#*, BILLING#*, QUOTA#*)
 - **Verdict:** ✅ Merged into canonical spec (enhanced pattern for atomicity and IAM granularity)
 
@@ -880,10 +884,10 @@ for tenant in allTenants:
 ### Cross-References
 
 This canonical specification supersedes and resolves contradictions in:
-- ✅ `docs/research/architecture-reviews/ClawCore-Final-Architecture-Plan.md` (Section 3, lines 100-115)
-- ✅ `docs/research/architecture-reviews/ClawCore-AWS-Component-Blueprint.md` (lines 135-226)
-- ✅ `docs/research/architecture-reviews/ClawCore-Architecture-Review-Multi-Tenant.md` (lines 911-980)
-- ✅ `docs/research/architecture-reviews/ClawCore-Architecture-Review-Platform-IaC.md` (lines 150-161)
+- ✅ `docs/research/architecture-reviews/Chimera-Final-Architecture-Plan.md` (Section 3, lines 100-115)
+- ✅ `docs/research/architecture-reviews/Chimera-AWS-Component-Blueprint.md` (lines 135-226)
+- ✅ `docs/research/architecture-reviews/Chimera-Architecture-Review-Multi-Tenant.md` (lines 911-980)
+- ✅ `docs/research/architecture-reviews/Chimera-Architecture-Review-Platform-IaC.md` (lines 150-161)
 - ✅ `docs/research/validation/02-multi-tenant-isolation-ddb.md` (Part B, lines 263-453)
 
 **Authority:** All future architecture documents, CDK code, API handlers, and SDKs MUST reference this document as the single source of truth for DynamoDB schemas.
