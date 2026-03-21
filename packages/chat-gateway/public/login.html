@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chimera - Login</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .login-container {
+      max-width: 400px;
+      margin: 10vh auto;
+      padding: 2rem;
+      background-color: var(--bg-primary);
+      border-radius: 1rem;
+      box-shadow: var(--shadow);
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .login-header h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .login-header p {
+      color: var(--text-secondary);
+    }
+
+    .login-button {
+      width: 100%;
+      padding: 1rem;
+      background-color: var(--bg-user);
+      color: var(--text-inverse);
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .login-button:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+
+    .login-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .error-message {
+      margin-top: 1rem;
+      padding: 1rem;
+      background-color: var(--status-disconnected);
+      color: var(--text-inverse);
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 1rem;
+      height: 1rem;
+      margin-left: 0.5rem;
+      border: 2px solid var(--text-inverse);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-header">
+      <h1>Chimera</h1>
+      <p>Multi-Tenant Agent Platform</p>
+    </div>
+
+    <button id="login-button" class="login-button">
+      Sign in with Cognito
+    </button>
+
+    <div id="error" style="display: none;" class="error-message"></div>
+  </div>
+
+  <script src="/auth.js"></script>
+</body>
+</html>
