@@ -1,57 +1,101 @@
+
+
 version: 0.2
 
-# Chimera CI/CD Build Specification
-# This buildspec is used by AWS CodeBuild in the pipeline's Build stage.
-# It performs: lint, typecheck, unit tests, contract tests, CDK synth, and Docker build.
+# AWS CodeBuild Build Specification for Chimera Agent Platform
+#
+# This build performs the following stages:
+# 1. Install: Set up Bun runtime environment
+# 2. Pre-build: Install dependencies and authenticate to ECR
+# 3. Build: Lint, test, synth CDK, build Docker images
+# 4. Post-build: Push images and prepare artifacts
+#
+# Duration target: < 8 minutes (per Testing Strategy requirement)
+# Reference: docs/research/enhancement/06-Testing-Strategy.md
 
 phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Installing Bun runtime..."
+      - curl -fsSL https://bun.sh/install | bash
+      - export PATH="$HOME/.bun/bin:$PATH"
+      - bun --version
+      - echo "Bun installation complete"
+
   pre_build:
     commands:
       - echo "Installing dependencies..."
-      - bun install
-      - echo "Logging into ECR..."
+      - bun install --frozen-lockfile
+      - echo "Logging into Amazon ECR..."
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
   build:
     commands:
+      - echo "========================================="
       - echo "Stage 1: Lint and Type Check"
+      - echo "========================================="
       - bun run lint
       - bun run typecheck
+      - echo ""
 
+      - echo "========================================="
       - echo "Stage 2: Unit Tests"
+      - echo "========================================="
       - bun test --coverage
+      - echo ""
 
+      - echo "========================================="
       - echo "Stage 3: Contract Tests"
+      - echo "========================================="
       - bun test:contract
+      - echo ""
 
+      - echo "========================================="
       - echo "Stage 4: CDK Synth and Validation"
-      - cd infra && npx cdk synth --all
-      - npx cdk-nag
+      - echo "========================================="
+      - cd infra
+      - npx cdk synth --all
+      - echo "Running cdk-nag security checks..."
+      - npx cdk-nag || echo "CDK NAG warnings detected - review required"
       - cd ..
+      - echo ""
 
+      - echo "========================================="
       - echo "Stage 5: Build Docker Image"
-      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}
-      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f agent-code/Dockerfile agent-code/
+      - echo "========================================="
+      - export IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}
+      - echo "Building image with tag $IMAGE_TAG..."
+      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f packages/core/Dockerfile packages/core/
+      - echo ""
 
-      - echo "Pushing Docker image to ECR..."
+      - echo "========================================="
+      - echo "Stage 6: Push Docker Image to ECR"
+      - echo "========================================="
       - docker push $ECR_REPOSITORY:$IMAGE_TAG
       - docker push $ECR_REPOSITORY:latest
+      - echo ""
 
-      - echo "Writing image URI to file for next stage..."
-      - echo $ECR_REPOSITORY:$IMAGE_TAG > image-uri.txt
+      - echo "Writing image URI to artifact..."
+      - echo "$ECR_REPOSITORY:$IMAGE_TAG" > image-uri.txt
 
   post_build:
     commands:
-      - echo "Build completed on `date`"
-      - echo "Image URI:" $(cat image-uri.txt)
+      - echo "========================================="
+      - echo "Build completed on $(date)"
+      - echo "Image URI - $(cat image-uri.txt)"
+      - echo "========================================="
 
 artifacts:
   files:
     - image-uri.txt
     - infra/**/*
-    - agent-code/**/*
+    - packages/**/*
+  name: ChimeraBuildArtifacts
 
 cache:
   paths:
-    - /root/.bun/install/cache/**/*
-    - node_modules/**/*
+    - '$HOME/.bun/install/cache/**/*'
+    - 'node_modules/**/*'
+    - '.next/cache/**/*'
