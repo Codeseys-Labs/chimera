@@ -10,6 +10,9 @@ import {
   validateNamespace,
   generateSessionNamespace,
   extractSessionId,
+  generateSwarmNamespace,
+  generateAgentNamespace,
+  parseScopedNamespace,
 } from '../namespace';
 import { InMemoryClient } from '../in-memory-client';
 import { Message } from '../types';
@@ -229,5 +232,132 @@ describe('Memory namespace isolation', () => {
     expect(ns1).toBe('tenant-tenant-1-user-alice');
     expect(ns2).toBe('tenant-tenant-1-user-bob');
     expect(ns3).toBe('tenant-tenant-2-user-alice');
+  });
+});
+
+describe('Scoped namespace utilities', () => {
+  describe('generateSwarmNamespace', () => {
+    it('should generate SWARM scope namespace', () => {
+      const namespace = generateSwarmNamespace('acme-corp', 'chimera-39d5');
+      expect(namespace).toBe('tenant-acme-corp-swarm-chimera-39d5');
+    });
+
+    it('should throw error if tenantId is missing', () => {
+      expect(() => generateSwarmNamespace('', 'chimera-39d5')).toThrow();
+    });
+
+    it('should throw error if swarmId is missing', () => {
+      expect(() => generateSwarmNamespace('acme-corp', '')).toThrow();
+    });
+
+    it('should handle hyphenated IDs', () => {
+      const namespace = generateSwarmNamespace('tenant-123', 'task-abc-def');
+      expect(namespace).toBe('tenant-tenant-123-swarm-task-abc-def');
+    });
+  });
+
+  describe('generateAgentNamespace', () => {
+    it('should generate AGENT scope namespace', () => {
+      const namespace = generateAgentNamespace('acme-corp', 'builder-memory-tiers');
+      expect(namespace).toBe('tenant-acme-corp-agent-builder-memory-tiers');
+    });
+
+    it('should throw error if tenantId is missing', () => {
+      expect(() => generateAgentNamespace('', 'builder-memory-tiers')).toThrow();
+    });
+
+    it('should throw error if agentId is missing', () => {
+      expect(() => generateAgentNamespace('acme-corp', '')).toThrow();
+    });
+
+    it('should handle hyphenated IDs', () => {
+      const namespace = generateAgentNamespace('tenant-123', 'agent-abc-def');
+      expect(namespace).toBe('tenant-tenant-123-agent-agent-abc-def');
+    });
+  });
+
+  describe('parseScopedNamespace', () => {
+    it('should parse SWARM scope namespace', () => {
+      const result = parseScopedNamespace('tenant-acme-corp-swarm-chimera-39d5');
+      expect(result).not.toBeNull();
+      expect(result?.tenantId).toBe('acme-corp');
+      expect(result?.scope).toBe('SWARM');
+      expect(result?.scopeId).toBe('chimera-39d5');
+    });
+
+    it('should parse AGENT scope namespace', () => {
+      const result = parseScopedNamespace('tenant-acme-corp-agent-builder-memory-tiers');
+      expect(result).not.toBeNull();
+      expect(result?.tenantId).toBe('acme-corp');
+      expect(result?.scope).toBe('AGENT');
+      expect(result?.scopeId).toBe('builder-memory-tiers');
+    });
+
+    it('should parse SESSION scope namespace with explicit sessionId', () => {
+      const result = parseScopedNamespace('tenant-acme-corp-user-alice-session-session-123');
+      expect(result).not.toBeNull();
+      expect(result?.tenantId).toBe('acme-corp');
+      expect(result?.scope).toBe('SESSION');
+      expect(result?.scopeId).toBe('session-123');
+      expect(result?.userId).toBe('alice');
+    });
+
+    it('should parse legacy SESSION scope namespace (no explicit sessionId)', () => {
+      const result = parseScopedNamespace('tenant-acme-corp-user-alice');
+      expect(result).not.toBeNull();
+      expect(result?.tenantId).toBe('acme-corp');
+      expect(result?.scope).toBe('SESSION');
+      expect(result?.scopeId).toBe('default');
+      expect(result?.userId).toBe('alice');
+    });
+
+    it('should handle hyphenated IDs in SWARM namespace', () => {
+      const result = parseScopedNamespace('tenant-tenant-123-swarm-task-abc-def');
+      expect(result).not.toBeNull();
+      expect(result?.tenantId).toBe('tenant-123');
+      expect(result?.scope).toBe('SWARM');
+      expect(result?.scopeId).toBe('task-abc-def');
+    });
+
+    it('should handle hyphenated IDs in AGENT namespace', () => {
+      const result = parseScopedNamespace('tenant-tenant-123-agent-agent-abc-def');
+      expect(result).not.toBeNull();
+      expect(result?.tenantId).toBe('tenant-123');
+      expect(result?.scope).toBe('AGENT');
+      expect(result?.scopeId).toBe('agent-abc-def');
+    });
+
+    it('should return null for invalid namespace', () => {
+      const result = parseScopedNamespace('invalid-namespace');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Scope isolation', () => {
+    it('should generate distinct namespaces for different scopes', () => {
+      const sessionNs = generateSessionNamespace('acme-corp', 'alice', 'session-123');
+      const swarmNs = generateSwarmNamespace('acme-corp', 'chimera-39d5');
+      const agentNs = generateAgentNamespace('acme-corp', 'builder-memory-tiers');
+
+      // All should be different
+      expect(sessionNs).not.toBe(swarmNs);
+      expect(sessionNs).not.toBe(agentNs);
+      expect(swarmNs).not.toBe(agentNs);
+
+      // Verify patterns
+      expect(sessionNs).toBe('tenant-acme-corp-user-alice-session-session-123');
+      expect(swarmNs).toBe('tenant-acme-corp-swarm-chimera-39d5');
+      expect(agentNs).toBe('tenant-acme-corp-agent-builder-memory-tiers');
+    });
+
+    it('should correctly identify scope from namespace', () => {
+      const sessionResult = parseScopedNamespace('tenant-acme-corp-user-alice-session-session-123');
+      const swarmResult = parseScopedNamespace('tenant-acme-corp-swarm-chimera-39d5');
+      const agentResult = parseScopedNamespace('tenant-acme-corp-agent-builder-memory-tiers');
+
+      expect(sessionResult?.scope).toBe('SESSION');
+      expect(swarmResult?.scope).toBe('SWARM');
+      expect(agentResult?.scope).toBe('AGENT');
+    });
   });
 });

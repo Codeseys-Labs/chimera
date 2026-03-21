@@ -163,3 +163,49 @@ export interface MessageToolResult {
   content: string;
   isError: boolean;
 }
+
+/**
+ * Memory scope determines visibility and lifetime
+ *
+ * SESSION: Single conversation, dies when session ends (maps to AgentCore STM)
+ * SWARM: Shared across agents on same task (multi-agent collaboration)
+ * AGENT: Persistent knowledge for specific agent across all sessions (maps to AgentCore LTM)
+ */
+export type MemoryScope = 'SESSION' | 'SWARM' | 'AGENT';
+
+/**
+ * Tiered memory configuration
+ * Combines all three memory scopes with appropriate clients
+ */
+export interface TieredMemoryConfig {
+  /** Tenant identifier */
+  tenantId: string;
+
+  /** User identifier */
+  userId: string;
+
+  /** Session identifier (for SESSION scope) */
+  sessionId: string;
+
+  /** Optional swarm/task identifier (for SWARM scope) */
+  swarmId?: string;
+
+  /** Optional agent identifier (for AGENT scope) */
+  agentId?: string;
+
+  /** Base AgentCore memory configuration */
+  memoryConfig: AgentCoreMemoryConfig;
+
+  /** AWS region for Bedrock AgentCore */
+  region?: string;
+}
+
+/**
+ * Memory entry with scope metadata
+ */
+export interface ScopedMemoryEntry extends MemoryEntry {
+  scope: MemoryScope;
+  scopeId: string; // sessionId, swarmId, or agentId
+  agentId?: string; // Which agent wrote this (for SWARM scope)
+  expiresAt?: string; // ISO 8601, for SESSION scope TTL
+}
