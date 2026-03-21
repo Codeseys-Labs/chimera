@@ -333,13 +333,13 @@ export class RequestPipeline {
         remaining: result.remainingTokens,
       };
     } catch (error: any) {
-      // Fail open on rate limiter errors (log and allow)
+      // Fail closed on rate limiter errors (deny and alert)
       console.error('Rate limiter error:', error);
       return {
-        allowed: true,
+        allowed: false,
         error: {
           code: 'RATE_LIMITER_ERROR',
-          message: 'Rate limiter unavailable, allowing request',
+          message: 'Rate limiter unavailable, denying request',
         },
       };
     }
