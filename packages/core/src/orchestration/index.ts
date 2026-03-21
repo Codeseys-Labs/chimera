@@ -71,3 +71,31 @@ export {
   type CronExecution,
   type CronSchedulerConfig
 } from './cron-scheduler';
+
+// Background Tasks
+export {
+  BackgroundTaskManager,
+  createBackgroundTaskManager,
+  startBackgroundTaskTool,
+  type BackgroundTaskStatus,
+  type BackgroundTask,
+  type TaskSubmissionResult
+} from './background-task';
+
+// A2A Protocol
+export {
+  A2AProtocol,
+  createA2AProtocol,
+  A2AMessageBuilder,
+  type A2AMessageType,
+  type MessagePriority,
+  type A2AMessage,
+  type A2APayload,
+  type TaskRequest,
+  type TaskResponse,
+  type QueryRequest,
+  type QueryResponse,
+  type EventNotification,
+  type BroadcastMessage,
+  type RoutingConfig
+} from './a2a-protocol';
