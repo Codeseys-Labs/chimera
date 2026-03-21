@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "dev": "bun run --watch src/server.ts",
     "test": "jest",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

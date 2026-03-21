@@ -12,7 +12,7 @@
     "deploy": "cdk deploy",
     "test": "jest",
     "test:unit": "jest --testPathPattern=test/",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint ."
   },
   "dependencies": {
     "aws-cdk-lib": "^2.175.0",
