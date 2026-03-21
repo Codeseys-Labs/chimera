@@ -53,6 +53,29 @@ const tenantService = new TenantService({
 });
 
 /**
+ * Authorization helper: Check if request is from platform admin
+ *
+ * Platform admins have special tenant ID or admin role.
+ * In production, this would check JWT claims or IAM roles.
+ */
+function isPlatformAdmin(req: Request): boolean {
+  const adminTenantId = process.env.PLATFORM_ADMIN_TENANT_ID || 'chimera-platform';
+  return req.tenantContext?.tenantId === adminTenantId;
+}
+
+/**
+ * Authorization helper: Check if request can access target tenant
+ *
+ * Users can access their own tenant or if they are platform admin.
+ */
+function canAccessTenant(req: Request, targetTenantId: string): boolean {
+  if (isPlatformAdmin(req)) {
+    return true;
+  }
+  return req.tenantContext?.tenantId === targetTenantId;
+}
+
+/**
  * POST /tenants
  *
  * Create a new tenant
@@ -68,6 +91,18 @@ const tenantService = new TenantService({
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
+    // Authorization: Only platform admins can create tenants
+    if (!isPlatformAdmin(req)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Only platform administrators can create tenants',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const { tenantId, name, tier, adminEmail, dataRegion, features, models, billing } = req.body;
 
     // Validate required fields
@@ -148,6 +183,18 @@ router.get('/:tenantId', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req.params;
 
+    // Authorization: Can only access own tenant or if platform admin
+    if (!canAccessTenant(req, tenantId)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'You can only access your own tenant profile',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const profile = await tenantService.getTenantProfile(tenantId);
 
     if (!profile) {
@@ -187,6 +234,19 @@ router.get('/:tenantId', async (req: Request, res: Response) => {
 router.patch('/:tenantId', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req.params;
+
+    // Authorization: Can only update own tenant or if platform admin
+    if (!canAccessTenant(req, tenantId)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'You can only update your own tenant profile',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const updates = req.body;
 
     // Check if tenant exists
@@ -232,6 +292,19 @@ router.patch('/:tenantId', async (req: Request, res: Response) => {
 router.post('/:tenantId/suspend', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req.params;
+
+    // Authorization: Only platform admins can suspend tenants
+    if (!isPlatformAdmin(req)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Only platform administrators can suspend tenants',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const { reason } = req.body;
 
     // Check if tenant exists
@@ -276,6 +349,18 @@ router.post('/:tenantId/activate', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req.params;
 
+    // Authorization: Only platform admins can activate tenants
+    if (!isPlatformAdmin(req)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Only platform administrators can activate tenants',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     // Check if tenant exists
     const existing = await tenantService.getTenantProfile(tenantId);
     if (!existing) {
@@ -316,6 +401,18 @@ router.post('/:tenantId/activate', async (req: Request, res: Response) => {
  */
 router.get('/query/tier/:tier', async (req: Request, res: Response) => {
   try {
+    // Authorization: Only platform admins can query all tenants
+    if (!isPlatformAdmin(req)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Only platform administrators can query tenants',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const { tier } = req.params;
     const { status } = req.query;
 
@@ -361,6 +458,18 @@ router.get('/query/tier/:tier', async (req: Request, res: Response) => {
  */
 router.get('/query/status/:status', async (req: Request, res: Response) => {
   try {
+    // Authorization: Only platform admins can query all tenants
+    if (!isPlatformAdmin(req)) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Only platform administrators can query tenants',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const { status } = req.params;
 
     // Validate status
