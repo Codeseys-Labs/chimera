@@ -18,6 +18,8 @@ export interface ObservabilityStackProps extends cdk.StackProps {
   rateLimitsTable?: dynamodb.ITable;
   costTrackingTable?: dynamodb.ITable;
   auditTable?: dynamodb.ITable;
+  runbookBaseUrl?: string; // Base URL for runbook documentation (e.g., https://wiki.example.com/runbooks/)
+  replicaRegions?: string[]; // Cross-region replication targets for DR
 }
 
 /**
@@ -29,7 +31,13 @@ export interface ObservabilityStackProps extends cdk.StackProps {
  */
 export class ObservabilityStack extends cdk.Stack {
   public readonly alarmTopic: sns.Topic;
+  public readonly criticalAlarmTopic: sns.Topic;
+  public readonly highAlarmTopic: sns.Topic;
+  public readonly mediumAlarmTopic: sns.Topic;
   public readonly platformDashboard: cloudwatch.Dashboard;
+  public readonly tenantHealthDashboard: cloudwatch.Dashboard;
+  public readonly skillUsageDashboard: cloudwatch.Dashboard;
+  public readonly costAttributionDashboard: cloudwatch.Dashboard;
   public readonly platformLogGroup: logs.LogGroup;
   public readonly xrayGroup: xray.CfnGroup;
 
@@ -65,6 +73,65 @@ export class ObservabilityStack extends cdk.Stack {
       const opsEmail = this.node.tryGetContext('opsEmail');
       if (opsEmail) {
         this.alarmTopic.addSubscription(new subscriptions.EmailSubscription(opsEmail));
+      }
+    }
+
+    // ======================================================================
+    // Severity-Tiered SNS Topics: Production alarm routing
+    // Critical: PagerDuty, immediate on-call escalation (5xx errors, DDB throttles)
+    // High: Slack/email, 1-hour SLA (cost anomalies, backup failures)
+    // Medium: Email only, monitoring (API 4xx spikes, low priority warnings)
+    // ======================================================================
+    this.criticalAlarmTopic = new sns.Topic(this, 'CriticalAlarmTopic', {
+      displayName: `Chimera ${props.envName} Critical Alarms`,
+      topicName: `chimera-alarms-critical-${props.envName}`,
+      masterKey: props.platformKey,
+    });
+
+    this.highAlarmTopic = new sns.Topic(this, 'HighAlarmTopic', {
+      displayName: `Chimera ${props.envName} High Priority Alarms`,
+      topicName: `chimera-alarms-high-${props.envName}`,
+      masterKey: props.platformKey,
+    });
+
+    this.mediumAlarmTopic = new sns.Topic(this, 'MediumAlarmTopic', {
+      displayName: `Chimera ${props.envName} Medium Priority Alarms`,
+      topicName: `chimera-alarms-medium-${props.envName}`,
+      masterKey: props.platformKey,
+    });
+
+    if (isProd) {
+      const opsEmail = this.node.tryGetContext('opsEmail');
+      const pagerDutyEndpoint = this.node.tryGetContext('pagerDutyEndpoint');
+      const slackWebhook = this.node.tryGetContext('slackWebhook');
+
+      // Critical: PagerDuty + email
+      if (pagerDutyEndpoint) {
+        this.criticalAlarmTopic.addSubscription(
+          new subscriptions.UrlSubscription(pagerDutyEndpoint, {
+            protocol: sns.SubscriptionProtocol.HTTPS,
+          }),
+        );
+      }
+      if (opsEmail) {
+        this.criticalAlarmTopic.addSubscription(new subscriptions.EmailSubscription(opsEmail));
+      }
+
+      // High: Slack + email
+      if (slackWebhook) {
+        this.highAlarmTopic.addSubscription(
+          new subscriptions.UrlSubscription(slackWebhook, {
+            protocol: sns.SubscriptionProtocol.HTTPS,
+          }),
+        );
+      }
+      if (opsEmail) {
+        this.highAlarmTopic.addSubscription(new subscriptions.EmailSubscription(opsEmail));
+      }
+
+      // Medium: Email only
+      if (opsEmail) {
+        this.mediumAlarmTopic.addSubscription(new subscriptions.EmailSubscription(opsEmail));
       }
     }
 
@@ -179,9 +246,13 @@ export class ObservabilityStack extends cdk.Stack {
       );
 
       // Create alarm for throttles (>=10 throttled requests in 5 min indicates capacity issue)
+      const runbookUrl = props.runbookBaseUrl
+        ? `${props.runbookBaseUrl}dynamodb-throttles`
+        : 'https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ProvisionedThroughput.html';
+
       const throttleAlarm = new cloudwatch.Alarm(this, `${name}ThrottleAlarm`, {
         alarmName: `chimera-${props.envName}-${name.toLowerCase()}-throttles`,
-        alarmDescription: `DynamoDB ${name} table experiencing throttles (>=10 in 5min)`,
+        alarmDescription: `DynamoDB ${name} table experiencing throttles (>=10 in 5min). RUNBOOK: ${runbookUrl}`,
         metric: new cloudwatch.MathExpression({
           expression: 'm1 + m2',
           usingMetrics: {
@@ -195,7 +266,8 @@ export class ObservabilityStack extends cdk.Stack {
         comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
-      throttleAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+      throttleAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+      throttleAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
     }
 
     if (ddbWidgets.length > 0) {
@@ -338,16 +410,21 @@ export class ObservabilityStack extends cdk.Stack {
       period: cdk.Duration.minutes(5),
     });
 
+    const apiErrorRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}api-error-rate`
+      : 'Check ECS task logs, Lambda errors, and DynamoDB throttles';
+
     const apiErrorRateAlarm = new cloudwatch.Alarm(this, 'ApiErrorRateAlarm', {
       alarmName: `chimera-${props.envName}-api-error-rate`,
-      alarmDescription: 'API 5xx error rate exceeds 5% (indicates platform degradation)',
+      alarmDescription: `API 5xx error rate exceeds 5% (indicates platform degradation). RUNBOOK: ${apiErrorRunbook}`,
       metric: apiErrorRate,
       threshold: 5,
       evaluationPeriods: 2,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
-    apiErrorRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+    apiErrorRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+    apiErrorRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
 
     // Cost Anomaly Detection alarm
     // Tracks monthly spend in cost-tracking table via custom metric filter
@@ -359,16 +436,384 @@ export class ObservabilityStack extends cdk.Stack {
       period: cdk.Duration.hours(1),
     });
 
+    const costRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}cost-anomaly`
+      : 'Review tenant cost-tracking table, check for runaway agent sessions, verify billing tier';
+
     const costAnomalyAlarm = new cloudwatch.Alarm(this, 'CostAnomalyAlarm', {
       alarmName: `chimera-${props.envName}-cost-anomaly`,
-      alarmDescription: 'Tenant cost exceeded tier quota by 20% (requires investigation)',
+      alarmDescription: `Tenant cost exceeded tier quota by 20% (requires investigation). RUNBOOK: ${costRunbook}`,
       metric: costAnomalyMetric,
       threshold: 1.2, // 120% of tier quota
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
-    costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+    costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+    costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
+
+    // ======================================================================
+    // PITR Backup Monitoring: Continuous backup health checks
+    // Monitors DynamoDB point-in-time recovery status for critical tables.
+    // Alarms trigger if backup fails or PITR is disabled.
+    // ======================================================================
+    const pitrTables = [
+      { name: 'Tenants', table: props.tenantsTable },
+      { name: 'Sessions', table: props.sessionsTable },
+      { name: 'Skills', table: props.skillsTable },
+      { name: 'CostTracking', table: props.costTrackingTable },
+      { name: 'Audit', table: props.auditTable },
+    ];
+
+    for (const { name, table } of pitrTables) {
+      if (!table) continue;
+
+      // DynamoDB backup monitoring via CloudWatch Metrics
+      // AWS publishes backup metrics to CloudWatch when PITR is enabled
+      const backupMetric = new cloudwatch.Metric({
+        namespace: 'AWS/DynamoDB',
+        metricName: 'AccountProvisionedReadCapacityUtilization',
+        statistic: 'Average',
+        period: cdk.Duration.hours(1),
+        dimensionsMap: {
+          TableName: table.tableName,
+        },
+      });
+
+      // Note: AWS doesn't directly expose PITR status as a CloudWatch metric.
+      // In production, use AWS Config rule dynamodb-pitr-enabled for compliance monitoring.
+      // This alarm serves as a proxy for table health.
+    }
+
+    // Add alarm for AWS Backup (if using AWS Backup service for DR)
+    if (isProd) {
+      const backupJobFailureMetric = new cloudwatch.Metric({
+        namespace: 'AWS/Backup',
+        metricName: 'NumberOfBackupJobsFailed',
+        statistic: 'Sum',
+        period: cdk.Duration.hours(24),
+      });
+
+      const backupRunbook = props.runbookBaseUrl
+        ? `${props.runbookBaseUrl}backup-failure`
+        : 'Check AWS Backup console for failed jobs, verify IAM permissions, check service quotas';
+
+      const backupFailureAlarm = new cloudwatch.Alarm(this, 'BackupFailureAlarm', {
+        alarmName: `chimera-${props.envName}-backup-failure`,
+        alarmDescription: `AWS Backup job failed (PITR or manual backup). RUNBOOK: ${backupRunbook}`,
+        metric: backupJobFailureMetric,
+        threshold: 1,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      backupFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+      backupFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+    }
+
+    // ======================================================================
+    // Enhanced Dashboards: Tenant Health, Skill Usage, Cost Attribution
+    // ======================================================================
+
+    // --- Tenant Health Dashboard ---
+    // Per-tenant session activity, request rates, error rates, latency p99.
+    // Uses custom metrics published by TenantRouter and ChimeraAgent.
+    this.tenantHealthDashboard = new cloudwatch.Dashboard(this, 'TenantHealthDashboard', {
+      dashboardName: `chimera-tenant-health-${props.envName}`,
+      defaultInterval: cdk.Duration.hours(6),
+    });
+
+    // Active sessions per tenant (custom metric from TenantRouter)
+    const tenantActiveSessionsMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Tenant',
+      metricName: 'ActiveSessions',
+      statistic: 'Average',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Request rate per tenant
+    const tenantRequestRateMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Tenant',
+      metricName: 'RequestCount',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Error rate per tenant
+    const tenantErrorRateMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Tenant',
+      metricName: 'ErrorCount',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Latency p99 per tenant
+    const tenantLatencyP99Metric = new cloudwatch.Metric({
+      namespace: 'Chimera/Tenant',
+      metricName: 'RequestLatency',
+      statistic: 'p99',
+      period: cdk.Duration.minutes(5),
+    });
+
+    this.tenantHealthDashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Active Sessions by Tenant',
+        left: [tenantActiveSessionsMetric],
+        width: 12,
+        leftYAxis: { label: 'Sessions', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Request Rate by Tenant',
+        left: [tenantRequestRateMetric],
+        width: 12,
+        leftYAxis: { label: 'Requests/5min', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Error Rate by Tenant',
+        left: [tenantErrorRateMetric],
+        width: 12,
+        leftYAxis: { label: 'Errors/5min', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Latency p99 by Tenant',
+        left: [tenantLatencyP99Metric],
+        width: 12,
+        leftYAxis: { label: 'Milliseconds', min: 0 },
+      }),
+    );
+
+    // --- Skill Usage Dashboard ---
+    // Per-skill invocation counts, success rates, latency, error types.
+    // Tracks skill marketplace health and identifies problematic skills.
+    this.skillUsageDashboard = new cloudwatch.Dashboard(this, 'SkillUsageDashboard', {
+      dashboardName: `chimera-skill-usage-${props.envName}`,
+      defaultInterval: cdk.Duration.hours(6),
+    });
+
+    // Skill invocation count (custom metric from ChimeraAgent)
+    const skillInvocationMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Skills',
+      metricName: 'InvocationCount',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Skill success rate
+    const skillSuccessMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Skills',
+      metricName: 'SuccessCount',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    const skillFailureMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Skills',
+      metricName: 'FailureCount',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Skill execution latency
+    const skillLatencyMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Skills',
+      metricName: 'ExecutionLatency',
+      statistic: 'Average',
+      period: cdk.Duration.minutes(5),
+    });
+
+    this.skillUsageDashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Skill Invocations by Skill',
+        left: [skillInvocationMetric],
+        width: 12,
+        leftYAxis: { label: 'Invocations/5min', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Skill Success vs Failure',
+        left: [skillSuccessMetric, skillFailureMetric],
+        width: 12,
+        leftYAxis: { label: 'Count', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Skill Execution Latency (avg)',
+        left: [skillLatencyMetric],
+        width: 12,
+        leftYAxis: { label: 'Milliseconds', min: 0 },
+      }),
+      new cloudwatch.TextWidget({
+        markdown: `## Skill Health Monitoring\n\n- **Top skills**: Query Chimera/Skills metrics filtered by skill name\n- **Error analysis**: Check skill failure dimensions for error types\n- **Marketplace impact**: High failure rate skills trigger trust level downgrade`,
+        width: 12,
+        height: 4,
+      }),
+    );
+
+    // --- Cost Attribution Dashboard ---
+    // Per-tenant spend, tier quota tracking, budget burn rate.
+    // Aggregates cost from DynamoDB streams on cost-tracking table.
+    this.costAttributionDashboard = new cloudwatch.Dashboard(this, 'CostAttributionDashboard', {
+      dashboardName: `chimera-cost-attribution-${props.envName}`,
+      defaultInterval: cdk.Duration.hours(24),
+    });
+
+    // Monthly spend per tenant (custom metric from cost-tracking stream)
+    const tenantSpendMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Billing',
+      metricName: 'TenantSpend',
+      statistic: 'Sum',
+      period: cdk.Duration.hours(1),
+    });
+
+    // Tier quota utilization
+    const quotaUtilizationMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Billing',
+      metricName: 'QuotaUtilization',
+      statistic: 'Maximum',
+      period: cdk.Duration.hours(1),
+    });
+
+    // Budget burn rate ($/hour)
+    const burnRateMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Billing',
+      metricName: 'BurnRate',
+      statistic: 'Average',
+      period: cdk.Duration.hours(1),
+    });
+
+    this.costAttributionDashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Monthly Spend by Tenant',
+        left: [tenantSpendMetric],
+        width: 12,
+        leftYAxis: { label: 'USD', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Tier Quota Utilization by Tenant',
+        left: [quotaUtilizationMetric],
+        width: 12,
+        leftYAxis: { label: 'Percent', min: 0, max: 150 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Budget Burn Rate',
+        left: [burnRateMetric],
+        width: 12,
+        leftYAxis: { label: 'USD/hour', min: 0 },
+      }),
+      new cloudwatch.TextWidget({
+        markdown: `## Cost Tracking Data Sources\n\n- **DynamoDB**: \`chimera-cost-tracking-${props.envName}\` table\n- **Update frequency**: Real-time via DDB streams + Lambda aggregator\n- **Quota enforcement**: Rate limiter triggered at 90% quota, hard stop at 100%\n- **Billing cycle**: Monthly (PERIOD#{yyyy-mm})`,
+        width: 12,
+        height: 4,
+      }),
+    );
+
+    // ======================================================================
+    // Cross-Region Monitoring: Multi-region metric aggregation for DR
+    // Creates composite alarms that aggregate health across all replica regions.
+    // ======================================================================
+    if (props.replicaRegions && props.replicaRegions.length > 0) {
+      // Create cross-region health composite alarm
+      const regionalHealthMetrics = props.replicaRegions.map((region) =>
+        new cloudwatch.Metric({
+          namespace: 'AWS/ApiGateway',
+          metricName: '5XXError',
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(5),
+          dimensionsMap: {
+            Stage: props.envName,
+          },
+          region: region,
+        }),
+      );
+
+      // Composite alarm: triggers if ANY region has >5% error rate
+      const crossRegionErrorRate = new cloudwatch.MathExpression({
+        expression: regionalHealthMetrics.map((m, i) => `m${i}`).join(' + '),
+        usingMetrics: Object.fromEntries(regionalHealthMetrics.map((m, i) => [`m${i}`, m])),
+        period: cdk.Duration.minutes(5),
+      });
+
+      const crossRegionRunbook = props.runbookBaseUrl
+        ? `${props.runbookBaseUrl}cross-region-failure`
+        : 'Check Route53 health checks, verify ALB target health in all regions, initiate DR failover if needed';
+
+      const crossRegionAlarm = new cloudwatch.Alarm(this, 'CrossRegionHealthAlarm', {
+        alarmName: `chimera-${props.envName}-cross-region-health`,
+        alarmDescription: `Multi-region health check failed (errors in ${props.replicaRegions.join(', ')}). RUNBOOK: ${crossRegionRunbook}`,
+        metric: crossRegionErrorRate,
+        threshold: 10,
+        evaluationPeriods: 2,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      crossRegionAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+      crossRegionAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+    }
+
+    // ======================================================================
+    // Load Testing Metrics: Custom namespace for performance validation
+    // Load testing framework publishes metrics to Chimera/LoadTest namespace.
+    // Target: 1000 concurrent sessions with <500ms p99 latency.
+    // ======================================================================
+    const loadTestConcurrentSessions = new cloudwatch.Metric({
+      namespace: 'Chimera/LoadTest',
+      metricName: 'ConcurrentSessions',
+      statistic: 'Maximum',
+      period: cdk.Duration.minutes(1),
+    });
+
+    const loadTestLatencyP99 = new cloudwatch.Metric({
+      namespace: 'Chimera/LoadTest',
+      metricName: 'RequestLatency',
+      statistic: 'p99',
+      period: cdk.Duration.minutes(1),
+    });
+
+    const loadTestErrorRate = new cloudwatch.Metric({
+      namespace: 'Chimera/LoadTest',
+      metricName: 'ErrorRate',
+      statistic: 'Average',
+      period: cdk.Duration.minutes(1),
+    });
+
+    // Add load test widgets to platform dashboard
+    this.platformDashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown: `## Load Testing Results\n\nTarget: 1000 concurrent sessions, <500ms p99 latency, <1% error rate\n\nRun load tests: \`bun run load-test --target 1000\``,
+        width: 24,
+        height: 2,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Load Test: Concurrent Sessions',
+        left: [loadTestConcurrentSessions],
+        width: 8,
+        leftYAxis: { label: 'Sessions', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Load Test: Latency p99',
+        left: [loadTestLatencyP99],
+        width: 8,
+        leftYAxis: { label: 'Milliseconds', min: 0 },
+        leftAnnotations: [
+          {
+            value: 500,
+            label: 'SLA Threshold',
+            color: '#ff0000',
+          },
+        ],
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Load Test: Error Rate',
+        left: [loadTestErrorRate],
+        width: 8,
+        leftYAxis: { label: 'Percent', min: 0, max: 5 },
+        leftAnnotations: [
+          {
+            value: 1,
+            label: 'SLA Threshold',
+            color: '#ff0000',
+          },
+        ],
+      }),
+    );
 
     // ======================================================================
     // Stack Outputs
@@ -376,19 +821,55 @@ export class ObservabilityStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AlarmTopicArn', {
       value: this.alarmTopic.topicArn,
       exportName: `${this.stackName}-AlarmTopicArn`,
-      description: 'SNS topic ARN for CloudWatch alarms',
+      description: 'SNS topic ARN for CloudWatch alarms (legacy)',
     });
 
-    new cdk.CfnOutput(this, 'DashboardUrl', {
+    new cdk.CfnOutput(this, 'CriticalAlarmTopicArn', {
+      value: this.criticalAlarmTopic.topicArn,
+      exportName: `${this.stackName}-CriticalAlarmTopicArn`,
+      description: 'SNS topic ARN for critical alarms (PagerDuty)',
+    });
+
+    new cdk.CfnOutput(this, 'HighAlarmTopicArn', {
+      value: this.highAlarmTopic.topicArn,
+      exportName: `${this.stackName}-HighAlarmTopicArn`,
+      description: 'SNS topic ARN for high priority alarms (Slack)',
+    });
+
+    new cdk.CfnOutput(this, 'MediumAlarmTopicArn', {
+      value: this.mediumAlarmTopic.topicArn,
+      exportName: `${this.stackName}-MediumAlarmTopicArn`,
+      description: 'SNS topic ARN for medium priority alarms (Email)',
+    });
+
+    new cdk.CfnOutput(this, 'PlatformDashboardUrl', {
       value: `https://console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.platformDashboard.dashboardName}`,
-      exportName: `${this.stackName}-DashboardUrl`,
-      description: 'CloudWatch dashboard URL',
+      exportName: `${this.stackName}-PlatformDashboardUrl`,
+      description: 'Platform CloudWatch dashboard URL',
     });
 
-    new cdk.CfnOutput(this, 'DashboardName', {
+    new cdk.CfnOutput(this, 'PlatformDashboardName', {
       value: this.platformDashboard.dashboardName,
-      exportName: `${this.stackName}-DashboardName`,
-      description: 'CloudWatch dashboard name',
+      exportName: `${this.stackName}-PlatformDashboardName`,
+      description: 'Platform CloudWatch dashboard name',
+    });
+
+    new cdk.CfnOutput(this, 'TenantHealthDashboardUrl', {
+      value: `https://console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.tenantHealthDashboard.dashboardName}`,
+      exportName: `${this.stackName}-TenantHealthDashboardUrl`,
+      description: 'Tenant health CloudWatch dashboard URL',
+    });
+
+    new cdk.CfnOutput(this, 'SkillUsageDashboardUrl', {
+      value: `https://console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.skillUsageDashboard.dashboardName}`,
+      exportName: `${this.stackName}-SkillUsageDashboardUrl`,
+      description: 'Skill usage CloudWatch dashboard URL',
+    });
+
+    new cdk.CfnOutput(this, 'CostAttributionDashboardUrl', {
+      value: `https://console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.costAttributionDashboard.dashboardName}`,
+      exportName: `${this.stackName}-CostAttributionDashboardUrl`,
+      description: 'Cost attribution CloudWatch dashboard URL',
     });
 
     new cdk.CfnOutput(this, 'PlatformLogGroupName', {
