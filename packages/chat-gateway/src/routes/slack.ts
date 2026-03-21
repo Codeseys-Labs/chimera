@@ -54,9 +54,13 @@ interface SlackEventCallback {
 function verifySlackSignature(req: Request): boolean {
   const slackSigningSecret = process.env.SLACK_SIGNING_SECRET;
 
-  // Skip verification in development if secret not configured
+  // Fail hard if secret not configured in production
   if (!slackSigningSecret) {
-    console.warn('SLACK_SIGNING_SECRET not set - skipping signature verification');
+    if (process.env.NODE_ENV === 'production') {
+      console.error('SLACK_SIGNING_SECRET not set in production - rejecting request');
+      return false;
+    }
+    console.warn('SLACK_SIGNING_SECRET not set - skipping signature verification (development only)');
     return true;
   }
 

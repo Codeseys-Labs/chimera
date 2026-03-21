@@ -93,9 +93,16 @@ export function rateLimitMiddleware(resource: string = 'api-requests', cost: num
 
       next();
     } catch (error) {
-      // Log error but don't block request (fail open for availability)
+      // Fail closed: reject request on DDB error to prevent DoS attacks
       console.error('Rate limit check error:', error);
-      next();
+      res.status(503).json({
+        error: {
+          code: 'RATE_LIMIT_SERVICE_UNAVAILABLE',
+          message: 'Rate limiting service temporarily unavailable. Please try again.',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
     }
   };
 }

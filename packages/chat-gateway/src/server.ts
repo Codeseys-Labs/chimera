@@ -30,7 +30,8 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // Health check route (no auth required)
 app.use('/', healthRouter);
 
-// Tenant provisioning API (administrative, no tenant context required)
+// Tenant provisioning API (administrative, requires authentication)
+app.use('/tenants', extractTenantContext);
 app.use('/tenants', tenantRouter);
 
 // Apply tenant middleware and rate limiting to all /chat/* and /slack/* routes
