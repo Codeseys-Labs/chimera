@@ -17,6 +17,22 @@ from bedrock_agentcore.memory.integrations.strands import AgentCoreMemorySession
 from tools.hello_world import hello_world_tool
 from tools.s3_tools import list_s3_buckets, get_bucket_info
 from tools.ec2_tools import list_ec2_instances, get_ec2_instance_details
+from tools.codecommit_tools import (
+    list_codecommit_repos,
+    get_repo_info,
+    git_clone_repo,
+    git_commit_push,
+    get_commit_history
+)
+from tools.codepipeline_tools import (
+    list_pipelines,
+    get_pipeline_details,
+    check_pipeline_status,
+    trigger_pipeline,
+    get_pipeline_execution_details,
+    create_pipeline,
+    delete_pipeline
+)
 
 
 # Initialize AgentCore app
@@ -153,6 +169,20 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         get_bucket_info,
         list_ec2_instances,
         get_ec2_instance_details,
+        # CodeCommit tools for self-evolution
+        list_codecommit_repos,
+        get_repo_info,
+        git_clone_repo,
+        git_commit_push,
+        get_commit_history,
+        # CodePipeline tools for CI/CD automation
+        list_pipelines,
+        get_pipeline_details,
+        check_pipeline_status,
+        trigger_pipeline,
+        get_pipeline_execution_details,
+        create_pipeline,
+        delete_pipeline,
     ])
 
     # TODO: Phase 2 - Add tier-gating for AWS tools
