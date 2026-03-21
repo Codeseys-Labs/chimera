@@ -49,7 +49,6 @@ export const CLOUDWATCH_RETRYABLE_ERRORS = [
 ];
 
 /**
-<<<<<<< HEAD
  * Retryable error codes for Transcribe operations
  */
 export const TRANSCRIBE_RETRYABLE_ERRORS = [
@@ -68,7 +67,21 @@ export const REKOGNITION_RETRYABLE_ERRORS = [
   'ProvisionedThroughputExceededException',
   'InternalServerError',
   'ServiceUnavailableException',
-=======
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Textract operations
+ */
+export const TEXTRACT_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'ProvisionedThroughputExceededException',
+  'InternalServerError',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
  * Retryable error codes for ECS operations
  */
 export const ECS_RETRYABLE_ERRORS = [
@@ -188,20 +201,10 @@ export const OPENSEARCH_RETRYABLE_ERRORS = [
   'InternalException',
   'ThrottlingException',
   'ServiceUnavailable',
->>>>>>> overstory/builder-infra/chimera-cade
   'TimeoutError',
 ];
 
 /**
-<<<<<<< HEAD
- * Retryable error codes for Textract operations
- */
-export const TEXTRACT_RETRYABLE_ERRORS = [
-  'ThrottlingException',
-  'ProvisionedThroughputExceededException',
-  'InternalServerError',
-  'ServiceUnavailableException',
-=======
  * Retryable error codes for CodeBuild operations
  */
 export const CODEBUILD_RETRYABLE_ERRORS = [
@@ -250,7 +253,6 @@ export const SQS_RETRYABLE_ERRORS = [
   'ThrottlingException',
   'ServiceUnavailable',
   'InternalFailure',
->>>>>>> overstory/builder-infra/chimera-cade
   'TimeoutError',
 ];
 
@@ -317,11 +319,9 @@ export function formatToolError(
     ...S3_RETRYABLE_ERRORS,
     ...LAMBDA_RETRYABLE_ERRORS,
     ...CLOUDWATCH_RETRYABLE_ERRORS,
-<<<<<<< HEAD
     ...TRANSCRIBE_RETRYABLE_ERRORS,
     ...REKOGNITION_RETRYABLE_ERRORS,
     ...TEXTRACT_RETRYABLE_ERRORS,
-=======
     ...ECS_RETRYABLE_ERRORS,
     ...DYNAMODB_RETRYABLE_ERRORS,
     ...EFS_RETRYABLE_ERRORS,
@@ -339,7 +339,6 @@ export function formatToolError(
     ...SAGEMAKER_RETRYABLE_ERRORS,
     ...SFN_RETRYABLE_ERRORS,
     ...SQS_RETRYABLE_ERRORS,
->>>>>>> overstory/builder-infra/chimera-cade
   ];
 
   return JSON.stringify({
