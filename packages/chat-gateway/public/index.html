@@ -9,10 +9,18 @@
 <body>
   <div class="container">
     <header>
-      <h1>Chimera Chat</h1>
-      <div class="status" id="status">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Disconnected</span>
+      <div>
+        <h1>Chimera Chat</h1>
+        <p id="user-info" style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;"></p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 1rem;">
+        <div class="status" id="status">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">Disconnected</span>
+        </div>
+        <button id="logout-button" style="padding: 0.5rem 1rem; background-color: var(--text-secondary); color: var(--text-inverse); border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.875rem;">
+          Logout
+        </button>
       </div>
     </header>
 
@@ -43,6 +51,25 @@
     </footer>
   </div>
 
+  <script src="/auth.js"></script>
   <script src="/chat.js"></script>
+  <script>
+    // Display user info
+    const userInfo = window.ChimeraAuth?.getUserInfo();
+    if (userInfo) {
+      const userInfoEl = document.getElementById('user-info');
+      if (userInfoEl) {
+        userInfoEl.textContent = `${userInfo.email || userInfo.sub} • ${userInfo.tenantId}`;
+      }
+    }
+
+    // Wire up logout button
+    const logoutButton = document.getElementById('logout-button');
+    if (logoutButton) {
+      logoutButton.addEventListener('click', () => {
+        window.ChimeraAuth?.logout();
+      });
+    }
+  </script>
 </body>
 </html>

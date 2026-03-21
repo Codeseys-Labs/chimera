@@ -7,8 +7,6 @@
 
 // Configuration
 const API_BASE = window.location.origin;
-const TENANT_ID = 'demo-tenant'; // In production, get from auth token
-const USER_ID = 'demo-user';
 const RECONNECT_DELAY = 2000; // 2 seconds
 const MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -119,17 +117,24 @@ async function sendMessage(message) {
   const contentDiv = addMessage('assistant', '', true);
 
   try {
+    // Get access token from auth
+    const accessToken = window.ChimeraAuth?.getAccessToken();
+    const userInfo = window.ChimeraAuth?.getUserInfo();
+
+    if (!accessToken || !userInfo) {
+      throw new Error('Not authenticated');
+    }
+
     const response = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Tenant-ID': TENANT_ID,
-        'X-User-ID': USER_ID,
+        'Authorization': `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         messages: [{ role: 'user', content: message }],
-        tenantId: TENANT_ID,
-        userId: USER_ID,
+        tenantId: userInfo.tenantId,
+        userId: userInfo.sub,
         sessionId: sessionId,
         platform: 'web',
       }),
