@@ -389,10 +389,21 @@ def handler(event, context):
       memorySize: 512,
     });
 
-    // Grant Bedrock invocation permissions (scoped to tenant's role)
+    // Grant Bedrock invocation permissions scoped to tenant's role and models
+    const stack = cdk.Stack.of(this);
     invokeAgentFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['bedrock:InvokeAgent', 'bedrock:InvokeModel'],
-      resources: ['*'], // TODO: Scope to tenant's allowed models
+      actions: ['bedrock:InvokeAgent'],
+      resources: [
+        `arn:aws:bedrock:${stack.region}:${stack.account}:agent/chimera-*`,
+      ],
+    }));
+    // Model invocation scoped to allowed models for this tier
+    const modelPatterns = this.getModelPatternsForTier(tier);
+    invokeAgentFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel'],
+      resources: modelPatterns.map(
+        p => `arn:aws:bedrock:${stack.region}::foundation-model/${p}`,
+      ),
     }));
 
     // Grant DynamoDB access for session tracking
