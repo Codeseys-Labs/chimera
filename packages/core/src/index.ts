@@ -405,5 +405,23 @@ export {
   type ProductionReadinessChecklist,
 } from './swarm';
 
+// Media Processing module (multi-modal AWS service integration)
+export {
+  MediaProcessor,
+  createMediaProcessor,
+  type MediaType,
+  type MediaInput,
+  type MediaTypeDetection,
+  type MediaProcessingResult,
+  type TranscriptionResult,
+  type ImageAnalysisResult,
+  type DocumentAnalysisResult,
+  type MediaProcessorConfig,
+  type MediaProcessingOptions,
+  type TranscribeOptions,
+  type RekognitionOptions,
+  type TextractOptions,
+} from './media';
+
 // Multi-Account module (cross-account governance and management)
 export * from './multi-account';
