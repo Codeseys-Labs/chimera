@@ -147,7 +147,7 @@ export class SkillValidator {
     if (filesystem.read) {
       for (const pattern of filesystem.read) {
         // Check for overly broad patterns
-        if (pattern === '**' || pattern === '**/*' || pattern === '/*') {
+        if (pattern === '**' || pattern === '**/*' || pattern === '/*' || pattern === '/**') {
           if (trustLevel !== 'platform') {
             errors.push(
               `Filesystem read: overly broad pattern "${pattern}" (only platform skills allowed)`
