@@ -440,11 +440,20 @@ export class SkillTrustEngine {
    * Real implementation would use a proper glob library like minimatch
    */
   private matchGlob(path: string, pattern: string): boolean {
-    // Convert glob to regex (simplified)
-    const regexPattern = pattern
-      .replace(/\*\*/g, '.*') // ** matches anything
-      .replace(/\*/g, '[^/]*') // * matches anything except /
-      .replace(/\?/g, '[^/]'); // ? matches single char except /
+    // Replace glob patterns with placeholders first
+    let regexPattern = pattern
+      .replace(/\*\*/g, '<!DOUBLESTAR!>') // ** → temporary placeholder
+      .replace(/\*/g, '<!STAR!>') // * → temporary placeholder
+      .replace(/\?/g, '<!QUESTION!>'); // ? → temporary placeholder
+
+    // Escape special regex characters
+    regexPattern = regexPattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+
+    // Replace placeholders with regex equivalents
+    regexPattern = regexPattern
+      .replace(/<!DOUBLESTAR!>/g, '.*') // ** matches anything including /
+      .replace(/<!STAR!>/g, '[^/]*') // * matches anything except /
+      .replace(/<!QUESTION!>/g, '[^/]'); // ? matches single char except /
 
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(path);

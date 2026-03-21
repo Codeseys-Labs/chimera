@@ -20,6 +20,7 @@ import {
 export interface DynamoDBClient {
   query(params: any): Promise<any>;
   put(params: any): Promise<any>;
+  update(params: any): Promise<any>;
   delete(params: any): Promise<any>;
   get(params: any): Promise<any>;
   scan(params: any): Promise<any>;
@@ -71,7 +72,7 @@ export class SkillRegistry {
     };
 
     const result = await this.config.dynamodb.get(params);
-    return result.Item as Skill | null;
+    return result.Item ? (result.Item as Skill) : null;
   }
 
   /**
@@ -302,7 +303,7 @@ export class SkillRegistry {
     };
 
     const result = await this.config.dynamodb.get(params);
-    return result.Item as SkillInstall | null;
+    return result.Item ? (result.Item as SkillInstall) : null;
   }
 
   /**
@@ -362,7 +363,7 @@ export class SkillRegistry {
       },
     };
 
-    await this.config.dynamodb.put(params);
+    await this.config.dynamodb.update(params);
   }
 
   /**
@@ -381,7 +382,7 @@ export class SkillRegistry {
       },
     };
 
-    await this.config.dynamodb.put(params);
+    await this.config.dynamodb.update(params);
   }
 
   /**
