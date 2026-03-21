@@ -1,419 +1,426 @@
 # AWS Chimera - Implementation Roadmap
 
-> **Status:** Phase 0 planning complete. Monorepo setup in progress.
+> **Status:** Research complete. Phase 0 nearing completion. Agent runtime is the critical path.
 >
-> **Last Updated:** 2026-03-19
+> **Last Updated:** 2026-03-21
 
 ---
 
 ## Overview
 
-AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore, Strands Agents, and Vercel Chat SDK. This roadmap tracks progress through 8 implementation phases, from foundation to production deployment.
+AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore, Strands Agents, and Vercel Chat SDK. Unlike traditional AI assistants, Chimera agents are **operators** with first-class access to AWS accounts — they inspect, build, deploy, and monitor infrastructure autonomously.
 
-**Total Timeline:** 16-18 weeks (4 months)
+**Core Differentiator:** The agent has AWS account access, not computer access. This is an AWS-native rebuild of OpenClaw/NemoClaw patterns, purpose-built for cloud infrastructure operations.
+
+**Architecture:** Bun monorepo, 11 CDK stacks, 5 packages, 18 ADRs, AgentCore Runtime (MicroVM isolation).
+
+---
+
+## Current State (2026-03-21)
+
+### What's Done
+
+| Area | Status | Details |
+|------|--------|---------|
+| Research | **100% Complete** | 118 docs, 112K+ lines, 18 ADRs |
+| CDK Infrastructure | **11 stacks, production-quality** | 4,400+ LOC across Network, Data, Security, Observability, API, Chat, Tenant, Pipeline, Skill Pipeline, Evolution, Orchestration |
+| @chimera/shared | **Types complete** | Canonical type definitions |
+| @chimera/sse-bridge | **Ship-ready** | ~700 LOC, 26 tests, Strands-to-Vercel DSP bridge |
+| @chimera/chat-gateway | **Framework done** | Express server, middleware, routes, adapter stubs |
+| @chimera/core | **60% real, 40% scaffolded** | 42K LOC — AWS tools, discovery, skills, tenant, billing are real; agent runtime is placeholder |
+| @chimera/cli | **Local-only** | init, deploy, skill, channel commands |
+| Quality Gates | **All green** | typecheck: 0 errors, lint: 0 errors, tests: 132 pass / 4 skip / 0 fail |
+
+### What's Not Done (Critical Gap)
+
+**The agent runtime is entirely placeholder.** `ChimeraAgent.invoke()` returns hardcoded text. There is no Strands SDK integration, no AgentCore Runtime wiring, no working agent loop. Everything else — tools, infrastructure, types, tests — orbits an agent that doesn't exist yet.
 
 ---
 
 ## Roadmap Phases
 
-### ✅ Research & Architecture (Completed)
+### Phase 0: Foundation (NEARLY COMPLETE)
 
-**Deliverables:**
-- [x] OpenClaw/NemoClaw/OpenFang competitive analysis (8 docs, 6,991 lines)
-- [x] AgentCore & Strands research (9 docs, 10,848 lines)
-- [x] Architecture reviews (6 specialist reviews)
-- [x] Enhancement documents (9 docs, ~10,000+ lines)
-- [x] Canonical DynamoDB schema (6-table design)
-- [x] SSE bridge package implementation
-- [x] Skill format compatibility research
+**Status:** ~85% complete
 
-**Research Corpus:** 40,000+ lines of documentation
+**What's Done:**
+- [x] Monorepo setup (Bun workspaces, TypeScript project references)
+- [x] CDK infrastructure scaffold — all 11 stacks implemented:
+  - [x] NetworkStack (VPC, subnets, NAT gateway, security groups) — 167 LOC
+  - [x] DataStack (DynamoDB 6 tables, S3, EFS) — 320 LOC
+  - [x] SecurityStack (Cognito, IAM roles, Cedar policies, KMS) — 210 LOC
+  - [x] ObservabilityStack (CloudWatch, X-Ray, alarms) — 406 LOC
+  - [x] APIStack (HTTP API + WebSocket + authorizer) — 441 LOC
+  - [x] ChatStack (ECS Fargate, SSE bridge) — 345 LOC
+  - [x] TenantOnboardingStack (per-tenant isolation) — 694 LOC
+  - [x] PipelineStack (CI/CD, CodePipeline, CodeBuild) — 639 LOC
+  - [x] SkillPipelineStack (skill security pipeline) — 352 LOC
+  - [x] EvolutionStack (self-modification infrastructure) — 577 LOC
+  - [x] OrchestrationStack (Step Functions, multi-agent) — 280 LOC
+- [x] Quality gates passing (typecheck, lint, tests)
+- [x] Canonical DynamoDB schema (6-table design with GSI patterns)
+- [x] 18 Architecture Decision Records
+- [x] Shared types package (@chimera/shared)
 
-**Key Decisions:**
-- 6-table DynamoDB design (multi-tenant isolation)
-- 8-stack CDK architecture (separation of concerns)
-- MCP protocol for tool marketplace
-- Bedrock AgentCore Runtime (MicroVM isolation)
-- Vercel Chat SDK (10+ chat platforms)
-
-**Seeds Issues:** `chimera-bbb5`, `chimera-0070`, `chimera-2e8e`, `chimera-ec1a`, `chimera-efac`, `chimera-0382`, `chimera-efa3`, `chimera-4646`, `chimera-e55a`, `chimera-0079`
-
----
-
-### 🚧 Phase 0: Foundation (Weeks 1-2)
-
-**Status:** In Progress
-
-**Goal:** Infrastructure scaffold with core AWS services
-
-**Deliverables:**
-- [ ] Monorepo setup (Bun workspaces + Turborepo)
-- [ ] CDK infrastructure scaffold
-  - [ ] NetworkStack (VPC, subnets, NAT gateway, security groups)
-  - [ ] DataStack (DynamoDB 6 tables, S3, EFS)
-  - [ ] SecurityStack (Cognito, IAM roles, Cedar policies, KMS)
-  - [ ] ObservabilityStack (CloudWatch, X-Ray, alarms)
-- [ ] CI/CD pipeline (CodePipeline + CodeBuild)
-- [ ] Local dev environment setup
-
-**Dependencies:** None
-
-**Seeds Issue:** [`chimera-5a87`](../.seeds/issues.jsonl)
-
-**Infrastructure Files:**
-```
-infra/
-├── lib/
-│   ├── network-stack.ts       # ✅ Exists
-│   ├── data-stack.ts          # ✅ Exists (6 DDB tables defined)
-│   ├── security-stack.ts      # ✅ Exists
-│   └── observability-stack.ts # ❌ TODO
-├── constructs/
-│   └── tenant-agent.ts        # ❌ TODO (L3 construct)
-└── bin/
-    └── chimera.ts             # ❌ TODO
-```
+**What Remains:**
+- [ ] `cdk synth` verification — confirm all 11 stacks produce valid CloudFormation
+- [ ] `cdk deploy` to staging — at least NetworkStack + DataStack
+- [ ] L3 construct: `TenantAgent` (encapsulates 15+ resources per tenant)
+- [ ] Local dev environment documentation
 
 **Acceptance Criteria:**
-- [ ] `cdk synth` generates valid CloudFormation
-- [ ] `cdk deploy NetworkStack` provisions VPC
-- [ ] `cdk deploy DataStack` creates 6 DynamoDB tables
+- [ ] `cdk synth` generates valid CloudFormation for all stacks
+- [ ] `cdk deploy NetworkStack` provisions VPC in staging
 - [ ] Local dev environment documented in README
 
 ---
 
-### 📦 Phase 1: Single Agent (Weeks 3-6)
+### Phase 1: Working Agent (CRITICAL PATH)
 
-**Status:** Ready to start after Phase 0
+**Status:** Not started — this is the #1 priority
 
-**Goal:** End-to-end single-tenant agent execution
+**Goal:** A real agent that can receive a message, reason with an LLM, use AWS tools, and return a useful response. Everything else is secondary.
+
+**Why This Is Critical:** The entire platform exists to serve an agent. 42K lines of code (tools, discovery, billing, skills) are built around an agent that currently returns `[Placeholder]`. Phase 1 replaces the placeholder with a working Strands agent on AgentCore Runtime.
 
 **Deliverables:**
-- [ ] AgentCore Runtime integration
-  - [ ] MicroVM session provisioning
-  - [ ] Strands agent runtime configuration
-  - [ ] AgentCore Memory (STM + LTM)
-- [ ] Skill management system
-  - [ ] Skill registry (DynamoDB `chimera-skills` table)
-  - [ ] SKILL.md parser
-  - [ ] Skill execution via AgentCore Gateway
-- [ ] Basic chat interface (terminal-only MVP)
-- [ ] Session lifecycle management
 
-**Dependencies:** Phase 0
+1. **Strands Agent Integration**
+   - [ ] Add `@anthropic-ai/strands` SDK dependency
+   - [ ] Replace `ChimeraAgent` placeholder with real Strands agent loop
+   - [ ] Wire system prompt template to Strands agent config
+   - [ ] Implement streaming via Strands native streaming
+   - [ ] Reference: [Integration Guide](research/agentcore-strands/10-Chimera-Integration-Guide.md)
 
-**Seeds Issue:** [`chimera-fb27`](../.seeds/issues.jsonl)
+2. **AgentCore Runtime Wiring**
+   - [ ] Configure `BedrockAgentCoreApp` entry point
+   - [ ] Session lifecycle: create, invoke, terminate
+   - [ ] AgentCore Memory integration (STM + LTM with tenant-scoped namespaces)
+   - [ ] MicroVM session provisioning
+   - [ ] Reference: [AgentCore Runtime Architecture](research/agentcore-strands/)
 
-**Package Structure:**
-```
-packages/
-├── core/
-│   ├── agent-runtime/         # Strands agent config
-│   ├── skill-registry/        # Skill CRUD + parser
-│   └── session-manager/       # Session lifecycle
-└── shared/
-    ├── types/                 # TypeScript types
-    └── schemas/               # Zod schemas
-```
+3. **AWS Account Tools (Core Differentiator)**
+   - [ ] Wire existing tools (EC2, S3, Lambda, CloudWatch — 2,400+ LOC) into Strands agent
+   - [ ] Wire existing discovery modules (Config scanner, Resource Explorer, Cost analyzer, Stack inventory, Tag organizer) into agent
+   - [ ] Add IAM scoping for tool execution (least-privilege per tenant)
+   - [ ] Test real AWS API calls through agent
+   - [ ] Reference: [AWS API Tools Research](research/aws-account-agent/01-AWS-API-First-Class-Tools.md)
+
+4. **End-to-End Validation**
+   - [ ] Agent receives message, invokes Strands, calls AWS tools, returns real response
+   - [ ] Terminal chat MVP works end-to-end
+   - [ ] Unit tests for agent invocation
+   - [ ] Integration test: agent + real AWS SDK mock
+
+**Dependencies:** Phase 0 (cdk synth verification)
+
+**Key Research References:**
+- [OpenClaw + NemoClaw Deep Dive](research/openclaw-nemoclaw-openfang/00-Deep-Dive-Summary.md) — patterns to replicate/surpass
+- [AgentCore + Strands Integration Guide](research/agentcore-strands/10-Chimera-Integration-Guide.md) — wiring sequence
+- [ADR-003: Strands Agent Framework](architecture/decisions/ADR-003-strands-agent-framework.md)
+- [ADR-007: AgentCore MicroVM](architecture/decisions/ADR-007-agentcore-microvm.md)
 
 **Acceptance Criteria:**
-- [ ] Agent can execute a hardcoded skill
-- [ ] AgentCore Memory persists across turns
-- [ ] Terminal chat interface works end-to-end
-- [ ] Unit tests pass for core modules
+- [ ] `ChimeraAgent.invoke("list my S3 buckets")` returns real S3 bucket data
+- [ ] Agent uses Strands agent loop (not hardcoded responses)
+- [ ] AgentCore Memory persists context across turns
+- [ ] Terminal chat works end-to-end with real LLM responses
 
 ---
 
-### 💬 Phase 2: Chat Gateway (Weeks 7-8)
+### Phase 2: Chat Gateway and Multi-Platform
 
-**Status:** Blocked by Phase 1
+**Status:** Framework exists, needs agent integration
 
-**Goal:** Multi-platform chat support with streaming
+**Goal:** Connect the working agent to multiple chat platforms via the SSE bridge and chat gateway.
 
-**Deliverables:**
-- [ ] ECS Fargate deployment
-  - [ ] Chat Gateway service
-  - [ ] SSE Bridge service (Strands → Vercel DSP)
-- [ ] API Gateway (HTTP API + WebSocket)
-- [ ] Vercel Chat SDK integration
-  - [ ] Slack channel adapter
-  - [ ] Web chat UI
-  - [ ] Discord channel adapter (stretch)
-- [ ] Streaming response handling
+**What Already Exists:**
+- @chimera/sse-bridge — ship-ready (Strands to Vercel Data Stream Protocol)
+- @chimera/chat-gateway — Express server, middleware, routes
+- Adapter stubs for Slack, Discord
+- ChatStack CDK (ECS Fargate deployment)
+- APIStack CDK (HTTP API + WebSocket)
 
-**Dependencies:** Phase 1
+**What Remains:**
+- [ ] Wire chat gateway to working agent (from Phase 1)
+- [ ] Complete Slack adapter (OAuth + Events API)
+- [ ] Complete web chat UI
+- [ ] WebSocket reconnection handling
+- [ ] ECS Fargate deployment config
+- [ ] Streaming response end-to-end (agent to SSE bridge to client)
 
-**Seeds Issue:** [`chimera-6f0e`](../.seeds/issues.jsonl)
-
-**Package Structure:**
-```
-packages/
-├── chat-gateway/
-│   ├── routes/                # Express.js routes
-│   ├── adapters/              # Slack, Discord, Teams
-│   └── websocket/             # WebSocket handler
-└── sse-bridge/                # ✅ Exists (Strands → Vercel DSP)
-    ├── src/
-    │   ├── bridge.ts          # Core translation logic
-    │   ├── stream.ts          # StreamEvent handlers
-    │   └── protocol.ts        # Vercel Data Stream Protocol
-    └── examples/
-        └── express-server.ts
-```
+**Dependencies:** Phase 1 (working agent)
 
 **Acceptance Criteria:**
-- [ ] Slack bot responds to messages
+- [ ] Slack bot responds with real agent output
 - [ ] Web UI shows streaming responses
-- [ ] WebSocket connection handles reconnects
-- [ ] 99th percentile latency < 500ms
+- [ ] WebSocket handles reconnects gracefully
 
 ---
 
-### 🧩 Phase 3: Skill Ecosystem (Weeks 9-10)
+### Phase 3: Skill Ecosystem
 
-**Status:** Blocked by Phase 2
+**Status:** Scaffolded — registry, discovery, installer, trust engine exist in packages/core/src/skills/
 
 **Goal:** Public skill marketplace with security pipeline
 
-**Deliverables:**
-- [ ] Skill authoring SDKs
-  - [ ] `@chimera/sdk-typescript`
-  - [ ] `@chimera/sdk-python`
-- [ ] MCP integration (AgentCore Gateway)
-  - [ ] MCP server discovery
-  - [ ] Tool routing via Gateway
-- [ ] Security pipeline (learned from ClawHavoc attack)
-  - [ ] Static analysis (AST scanning)
-  - [ ] Dependency audit (OSV database)
-  - [ ] Sandbox testing
-  - [ ] Cryptographic signing
+**What Already Exists:**
+- Skill registry, discovery, installer, MCP gateway client, trust engine, validator (7 modules in packages/core/src/skills/)
+- SkillPipelineStack CDK (7-stage security pipeline)
+- SKILL.md v2 spec + shared types
+- [ADR-009: Universal Skill Adapter](architecture/decisions/ADR-009-universal-skill-adapter.md)
+- [ADR-018: SKILL.md v2](architecture/decisions/ADR-018-skill-md-v2.md)
+
+**What Remains:**
+- [ ] Make scaffolded skill modules functional (real DynamoDB queries, real MCP connections)
+- [ ] Skill authoring SDK (@chimera/sdk-typescript)
+- [ ] MCP server integration via AgentCore Gateway
+- [ ] Security pipeline activation (AST scanning, dependency audit, sandbox testing, signing)
 - [ ] Skill registry UI
 
-**Dependencies:** Phase 2
+**Dependencies:** Phase 1 (working agent to execute skills)
 
-**Seeds Issue:** TBD
-
-**5-Tier Trust Model:**
-```
-Platform (built-in)
-  ↓
-Verified (Cedar policies)
-  ↓
-Community (sandbox)
-  ↓
-Private (tenant policies)
-  ↓
-Experimental (dev-only)
-```
+**Can Parallelize With:** Phase 2 (skill backend is independent of chat frontend)
 
 **Acceptance Criteria:**
-- [ ] Developer can publish a skill
+- [ ] Developer can publish a skill via SDK
 - [ ] Security pipeline blocks malicious skills
-- [ ] MCP server tools accessible via AgentCore Gateway
-- [ ] 100+ MCP servers tested
+- [ ] Agent can discover and use MCP server tools
+- [ ] 5-tier trust model enforced (Platform, Verified, Community, Private, Experimental)
 
 ---
 
-### 🏢 Phase 4: Multi-Tenant (Weeks 11-12)
+### Phase 4: Multi-Tenant Production
 
-**Status:** Blocked by Phase 3
+**Status:** Scaffolded — tenant modules, billing, rate limiting exist
 
 **Goal:** Production-ready multi-tenant isolation
 
-**Deliverables:**
-- [ ] Tenant router (Cognito JWT → DynamoDB)
-- [ ] Per-tenant IAM isolation
-  - [ ] DynamoDB LeadingKeys policies
-  - [ ] Cedar policy engine integration
-  - [ ] S3 bucket-per-tenant
-  - [ ] KMS CMK-per-tenant
-- [ ] Rate limiting (token bucket in `chimera-rate-limits`)
-- [ ] Cost tracking (per-tenant billing in `chimera-cost-tracking`)
-- [ ] Tenant provisioning API
+**What Already Exists:**
+- TenantOnboardingStack CDK (694 LOC — per-tenant IAM, KMS, DynamoDB)
+- Tenant service module (packages/core/src/tenant/)
+- Billing module (packages/core/src/billing/)
+- Rate limiting types
+- [ADR-002: Cedar Policy Engine](architecture/decisions/ADR-002-cedar-policy-engine.md)
+- [ADR-014: Token Bucket Rate Limiting](architecture/decisions/ADR-014-token-bucket-rate-limiting.md)
 
-**Dependencies:** Phase 3
+**What Remains:**
+- [ ] Tenant router (Cognito JWT to DynamoDB lookup to tenant context)
+- [ ] Per-tenant IAM activation (DynamoDB LeadingKeys, S3 bucket-per-tenant, KMS CMK-per-tenant)
+- [ ] Cedar policy engine integration
+- [ ] Rate limiting (token bucket in chimera-rate-limits table)
+- [ ] Cost tracking activation (per-tenant billing in chimera-cost-tracking)
+- [ ] Tenant provisioning API + self-service onboarding
 
-**Seeds Issue:** TBD
-
-**Multi-Tenant Tiers:**
-| Tier | AgentCore Runtime | Memory Strategy | Cost |
-|------|-------------------|-----------------|------|
-| Basic | Shared endpoint | SUMMARY only | ~$10/tenant/mo |
-| Advanced | Shared endpoint | SUMMARY + USER_PREFERENCE | ~$50/tenant/mo |
-| Premium | Shared endpoint | All strategies | ~$150/tenant/mo |
-| Enterprise | Dedicated endpoint | Custom | Custom pricing |
+**Dependencies:** Phase 1 (working agent), Phase 3 (skill isolation per tenant)
 
 **Acceptance Criteria:**
-- [ ] GSI queries enforce `tenantId` FilterExpression
 - [ ] Cross-tenant data leakage tests pass
-- [ ] Rate limits prevent abuse
-- [ ] Cost attribution per tenant accurate
+- [ ] GSI queries enforce tenantId FilterExpression
+- [ ] Rate limits prevent abuse (token bucket with 5min TTL)
+- [ ] Cost attribution accurate per tenant
 
 ---
 
-### ⏰ Phase 5: Cron & Orchestration (Weeks 13-14)
+### Phase 5: Orchestration and Scheduling
 
-**Status:** Blocked by Phase 4
+**Status:** Scaffolded — OrchestrationStack CDK, swarm module exist
 
-**Goal:** Scheduled tasks and multi-agent patterns
+**Goal:** Multi-agent workflows and scheduled tasks
 
-**Deliverables:**
-- [ ] EventBridge scheduler integration
-- [ ] Cron session type (MicroVM for scheduled tasks)
-- [ ] Multi-agent orchestration patterns
-  - [ ] A2A protocol (agent-to-agent)
-  - [ ] Shared memory (ElastiCache/Redis)
-  - [ ] Task queuing (SQS)
-- [ ] Step Functions workflow orchestration
+**What Already Exists:**
+- OrchestrationStack CDK (Step Functions, SQS, EventBridge)
+- Swarm module (packages/core/src/swarm/)
+- Orchestration module (packages/core/src/orchestration/)
+- [ADR-008: EventBridge Nervous System](architecture/decisions/ADR-008-eventbridge-nervous-system.md)
 
-**Dependencies:** Phase 4
+**What Remains:**
+- [ ] EventBridge scheduler integration (cron sessions)
+- [ ] A2A protocol for agent-to-agent communication
+- [ ] Shared memory (ElastiCache/Redis) for multi-agent coordination
+- [ ] Task queuing (SQS) with retry/DLQ
+- [ ] Step Functions workflow templates
 
-**Seeds Issue:** TBD
+**Dependencies:** Phase 4 (multi-tenant isolation for orchestrated agents)
 
-**Orchestration Patterns:**
-- User → Agent → Agent (mediation)
-- User + Agent → Shared Memory ← Agent + User (collaboration)
-- User → Agent A → SQS → Agent B (task delegation)
+**Can Parallelize With:** Phase 3 and Phase 4 (orchestration engine is independent of skill/tenant details)
 
 **Acceptance Criteria:**
-- [ ] Cron job executes on schedule
+- [ ] Cron job executes agent on schedule
 - [ ] Multi-agent workflow completes end-to-end
 - [ ] Shared memory prevents race conditions
-- [ ] SQS retries failed tasks
 
 ---
 
-### 🧬 Phase 6: Self-Evolution (Weeks 15-16)
+### Phase 6: Self-Evolution
 
-**Status:** Blocked by Phase 5
+**Status:** Scaffolded — EvolutionStack CDK, 7 evolution modules exist
 
 **Goal:** Platform autonomously improves itself
 
-**Deliverables:**
-- [ ] Prompt A/B testing framework
-  - [ ] Variant management (Canopy)
-  - [ ] Metric collection (CloudWatch)
-  - [ ] Winner detection (statistical significance)
-- [ ] Auto-skill generation
-  - [ ] Pattern detection from usage logs
-  - [ ] SKILL.md synthesis
-  - [ ] Security validation
-- [ ] Model routing optimization
-  - [ ] Latency/cost/quality tradeoffs
-  - [ ] Dynamic model selection
-- [ ] Self-modifying IaC
-  - [ ] DynamoDB-driven CDK synthesis
-  - [ ] Cedar policy constraints
+**What Already Exists:**
+- EvolutionStack CDK (577 LOC)
+- 7 evolution modules: auto-skill-gen, experiment-runner, iac-modifier, model-router, prompt-optimizer, safety-harness, types
+- [ADR-011: Self-Modifying IaC](architecture/decisions/ADR-011-self-modifying-iac.md)
+- [ADR-017: Multi-Provider LLM](architecture/decisions/ADR-017-multi-provider-llm.md)
 
-**Dependencies:** Phase 5
+**What Remains:**
+- [ ] Prompt A/B testing framework (variant management, metric collection, winner detection)
+- [ ] Auto-skill generation (pattern detection, SKILL.md synthesis, security validation)
+- [ ] Model routing optimization (latency/cost/quality tradeoffs)
+- [ ] Self-modifying IaC (DynamoDB-driven CDK synthesis with Cedar policy constraints)
+- [ ] Evolution safety harness activation (rate limits, rollback, approval gates)
 
-**Seeds Issue:** TBD
-
-**Evolution Guardrails:**
-- Cedar policies limit infrastructure changes
-- Human-in-the-loop approval for risky changes
-- Rollback mechanism for failed experiments
+**Dependencies:** Phase 5 (scheduling for experiments), Phase 3 (skills for auto-generation)
 
 **Acceptance Criteria:**
-- [ ] Prompt A/B test declares winner
+- [ ] Prompt A/B test declares winner with statistical significance
 - [ ] Auto-generated skill passes security pipeline
-- [ ] Model router selects optimal model per request
-- [ ] Self-modified infrastructure deploys successfully
+- [ ] Self-modified infrastructure deploys successfully with rollback capability
 
 ---
 
-### 🚀 Phase 7: Production (Weeks 17-18)
+### Phase 7: Production Hardening
 
-**Status:** Blocked by Phase 6
+**Status:** PipelineStack CDK exists, ObservabilityStack exists
 
-**Goal:** Production-ready deployment with observability
+**Goal:** Production deployment with observability and disaster recovery
 
-**Deliverables:**
-- [ ] CI/CD pipeline (CodePipeline)
-  - [ ] Automated testing
-  - [ ] CDK deployment
-  - [ ] Blue/green deployments
-- [ ] Monitoring dashboards
-  - [ ] CloudWatch alarms
-  - [ ] X-Ray tracing
-  - [ ] Custom metrics
-- [ ] Disaster recovery
-  - [ ] PITR backups (DynamoDB)
-  - [ ] Cross-region replication
-- [ ] Load testing
-  - [ ] 1000 concurrent sessions
-  - [ ] Skill execution latency
+**What Already Exists:**
+- PipelineStack CDK (639 LOC — CodePipeline, CodeBuild, blue/green)
+- ObservabilityStack CDK (406 LOC — CloudWatch, X-Ray, alarms)
 
-**Dependencies:** Phase 6
+**What Remains:**
+- [ ] CI/CD pipeline activation and testing
+- [ ] Monitoring dashboards (tenant health, skill usage, cost attribution)
+- [ ] Disaster recovery (PITR backups, cross-region replication)
+- [ ] Load testing (1000 concurrent sessions)
+- [ ] Runbook documentation for all alarms
 
-**Seeds Issue:** TBD
+**Dependencies:** Phase 4 (multi-tenant production is prerequisite)
 
-**Observability Stack:**
-```
-CloudWatch
-  ├── Metrics (latency, error rate, cost)
-  ├── Logs (structured JSON)
-  └── Alarms (PagerDuty integration)
-X-Ray
-  ├── Distributed tracing
-  └── Service map
-Custom Dashboards
-  ├── Tenant health
-  ├── Skill usage
-  └── Cost attribution
-```
+**Can Parallelize With:** Phase 5, Phase 6 (monitoring/CI-CD work is independent)
 
 **Acceptance Criteria:**
 - [ ] Load test handles 1000 concurrent sessions
 - [ ] 99.9% uptime over 30 days
-- [ ] Mean time to recovery (MTTR) < 5 minutes
-- [ ] All alarms documented in runbooks
+- [ ] MTTR < 5 minutes
+- [ ] All alarms have documented runbooks
 
 ---
 
 ## Dependency Graph
 
 ```
-Phase 0 (Foundation)
-  ↓
-Phase 1 (Single Agent)
-  ↓
-Phase 2 (Chat Gateway)
-  ↓
-Phase 3 (Skill Ecosystem)
-  ↓
-Phase 4 (Multi-Tenant)
-  ↓
-Phase 5 (Cron & Orchestration)
-  ↓
-Phase 6 (Self-Evolution)
-  ↓
-Phase 7 (Production)
+Phase 0 (Foundation) --- ~85% complete
+  |
+  v
+Phase 1 (Working Agent) <-- CRITICAL PATH
+  |
+  +---------------------+------------------+
+  v                     v                  v
+Phase 2               Phase 3           Phase 7
+(Chat Gateway)        (Skill Ecosystem)  (Production - CI/CD)
+  |                     |                  |
+  +---------+-----------+                  |
+            v                              |
+          Phase 4                          |
+          (Multi-Tenant)                   |
+            |                              |
+            +------------------------------+
+            v
+          Phase 5
+          (Orchestration)
+            |
+            v
+          Phase 6
+          (Self-Evolution)
 ```
 
-**Critical Path:** All phases are sequential. No parallel work until Phase 1 completes.
+**Key insight:** After Phase 1, Phases 2, 3, and 7 can proceed in parallel. This cuts the critical path significantly compared to the original strictly-sequential plan.
 
 ---
 
-## What's Next?
+## Research Corpus
 
-### Immediate (This Week)
-1. ✅ Create CLAUDE.md development workflow guide
-2. ✅ Create docs/ROADMAP.md (this file)
-3. ⏳ Complete monorepo setup (Bun workspaces + Turborepo)
-4. ⏳ Finalize NetworkStack, DataStack, SecurityStack in CDK
+### Competitive Analysis (8 docs)
+- `docs/research/openclaw-nemoclaw-openfang/` — OpenClaw architecture, NemoClaw enterprise security, OpenFang agent OS, ClawHavoc supply chain analysis
+- **Key takeaway:** OpenClaw is personal AI OS; Chimera differentiator is AWS-native account access
 
-### Next Sprint (Phase 0 Completion)
-1. Implement ObservabilityStack (CloudWatch, X-Ray)
-2. Create L3 construct: `TenantAgent`
-3. Set up CI/CD pipeline (CodePipeline)
-4. Deploy Phase 0 infrastructure to staging account
+### AgentCore and Strands (10 docs)
+- `docs/research/agentcore-strands/` — Runtime, Memory, Gateway, Code Interpreter, Browser, Identity, **Integration Guide**
+- **Key takeaway:** `BedrockAgentCoreApp` + `StrandsAgentProvider` + `AgentCoreMemory` is the wiring sequence
 
-### Phase 1 Kickoff (Week 3)
-1. Integrate AgentCore Runtime SDK
-2. Build Strands agent configuration
-3. Implement skill registry (DynamoDB CRUD)
-4. Create terminal-based chat MVP
+### AWS Account Agent (32 docs)
+- `docs/research/aws-account-agent/` — AWS tools, discovery, Well-Architected, infrastructure-as-capability, activity logging, autonomous problem-solving, self-improvement
+- **Key takeaway:** 25 core AWS services prioritized across 4 tiers; discovery triad (Config + Resource Explorer + CloudFormation)
+
+### Architecture Reviews (6 docs)
+- `docs/research/architecture-reviews/` — Final architecture plan, component blueprint, multi-tenant review, security review, self-evolution engine, skill ecosystem
+
+### Collaboration Research (6 docs)
+- `docs/research/collaboration/` — Communication patterns, real-time/async, shared memory, user-through-agent
+
+### Enhancement and Integration (16 docs)
+- `docs/research/enhancement/` + `docs/research/integration-enhancement/`
+
+### Skills Research (9 docs)
+- `docs/research/skills/` — Skill format compatibility, MCP integration, OpenClaw/Claude Code/AgentCore patterns
+
+### Architecture Decision Records (18 ADRs)
+- `docs/architecture/decisions/ADR-001` through `ADR-018`
+- Covers: DynamoDB schema, Cedar policies, Strands framework, Vercel AI SDK, CDK IaC, monorepo structure, AgentCore MicroVM, EventBridge, skill adapters, hybrid storage, self-modifying IaC, Well-Architected, CodeCommit/Pipeline, rate limiting, Bun/mise toolchain, memory strategy, multi-provider LLM, SKILL.md v2
+
+---
+
+## Codebase Metrics
+
+| Metric | Value |
+|--------|-------|
+| Research documents | 118 files |
+| Research lines | 112,000+ |
+| Architecture Decision Records | 18 |
+| CDK stacks | 11 (4,400+ LOC) |
+| Packages | 5 (core, shared, sse-bridge, chat-gateway, cli) |
+| Package source code | 42,000+ LOC |
+| Test files | 9 (132 passing, 4 skipped) |
+| Quality gates | All green (typecheck, lint, tests) |
+| AWS tool implementations | 4 (EC2, S3, Lambda, CloudWatch — 2,400+ LOC) |
+| Discovery modules | 7 (Config, Resource Explorer, Cost, Stacks, Tags, Index) |
+| Skill modules | 7 (Registry, Discovery, Installer, MCP Gateway, Trust, Validator) |
+| Evolution modules | 7 (Auto-skill, Experiments, IaC modifier, Model router, Prompt optimizer, Safety) |
+
+---
+
+## What's Next
+
+### Immediate Priority
+1. Verify `cdk synth` for all 11 stacks (Phase 0 completion)
+2. **Begin Phase 1: Replace ChimeraAgent placeholder with real Strands agent**
+3. Wire existing AWS tools into agent (EC2, S3, Lambda, CloudWatch)
+
+### Week 1-2
+1. Strands SDK integration + AgentCore Runtime wiring
+2. AWS tools connected to agent loop
+3. Terminal chat producing real LLM responses
+
+### Week 3-4
+1. End-to-end agent validation (message to LLM to AWS tools to response)
+2. Begin Phase 2 (chat gateway wiring) and Phase 3 (skill activation) in parallel
+
+### Week 5-8
+1. Multi-platform chat (Slack, web UI)
+2. Skill marketplace activation
+3. CI/CD pipeline testing (Phase 7 early start)
+
+### Week 9-12
+1. Multi-tenant production (Phase 4)
+2. Orchestration and scheduling (Phase 5)
+
+### Week 13-16
+1. Self-evolution activation (Phase 6)
+2. Production hardening (Phase 7 completion)
+3. Load testing and DR validation
 
 ---
 
@@ -424,99 +431,37 @@ Phase 7 (Production)
 | ID | Title | Type | Completed |
 |----|-------|------|-----------|
 | `chimera-bbb5` | Resolve DynamoDB schema contradictions | research | 2026-03-18 |
-| `chimera-0070` | Rename Chimera → Chimera throughout docs | task | 2026-03-18 |
+| `chimera-0070` | Rename ClawCore to Chimera throughout docs | task | 2026-03-18 |
 | `chimera-2e8e` | Implement SSE bridge | task | 2026-03-19 |
-| `chimera-ec1a` | Research: Platform Architecture & Multi-Tenancy Validation | research | 2026-03-19 |
-| `chimera-efac` | Research: Agent Collaboration & Communication Layer | research | 2026-03-19 |
-| `chimera-0382` | Research: Self-Evolution, ML Experiments & Advanced Capabilities | research | 2026-03-19 |
-| `chimera-efa3` | Research: AWS Native & OSS Integration Enhancement | research | 2026-03-19 |
+| `chimera-ec1a` | Research: Platform Architecture and Multi-Tenancy Validation | research | 2026-03-19 |
+| `chimera-efac` | Research: Agent Collaboration and Communication Layer | research | 2026-03-19 |
+| `chimera-0382` | Research: Self-Evolution, ML Experiments and Advanced Capabilities | research | 2026-03-19 |
+| `chimera-efa3` | Research: AWS Native and OSS Integration Enhancement | research | 2026-03-19 |
 | `chimera-4646` | Improve lead agent workflow | task | 2026-03-19 |
 | `chimera-e55a` | Research: Skill format compatibility | research | 2026-03-19 |
 | `chimera-0079` | Apply DDB GSI2 updates to renamed Chimera docs | task | 2026-03-19 |
+| `chimera-6dd5` | Research: OpenClaw + NemoClaw deep dive | research | 2026-03-21 |
+| `chimera-5ec5` | Research: AgentCore + Strands integration guide | research | 2026-03-21 |
+| `chimera-6a22` | Fix foundation: typecheck, lint, tests all green | task | 2026-03-21 |
 
-### Open Issues
+### In Progress
 
-| ID | Title | Status | Phase |
-|----|-------|--------|-------|
-| `chimera-5a87` | Phase 0: Foundation | open | 0 |
-| `chimera-fb27` | Phase 1: Single Agent | open | 1 |
-| `chimera-6f0e` | Phase 2: Chat Gateway | open | 2 |
-| `chimera-9580` | Update lead agent hooks | open | infrastructure |
-
----
-
-## Research Documents
-
-### Competitive Analysis
-- `docs/research/openclaw-nemoclaw-openfang/` (8 docs, 6,991 lines)
-  - OpenClaw Framework Research
-  - NemoClaw Enterprise Security
-  - OpenFang Agent OS Research
-  - Competitive Analysis (12 dimensions)
-  - ClawHavoc Supply Chain Attack Analysis
-
-### AgentCore & Strands
-- `docs/research/agentcore-strands/` (9 docs, 10,848 lines)
-  - AgentCore Runtime Architecture
-  - Strands Agent Framework
-  - AgentCore Memory (STM + LTM)
-  - AgentCore Gateway (MCP)
-  - AgentCore Code Interpreter
-  - AgentCore Browser (CDP)
-
-### Architecture Reviews
-- `docs/research/architecture-reviews/` (6 docs)
-  - Chimera-Final-Architecture-Plan.md
-  - Chimera-AWS-Component-Blueprint.md
-  - Chimera-Architecture-Review-Multi-Tenant.md
-  - Chimera-Architecture-Review-Security.md
-  - Chimera-Self-Evolution-Engine.md
-  - Chimera-Skill-Ecosystem-Design.md
-
-### Canonical Schema
-- `docs/architecture/canonical-data-model.md` (29,784 bytes)
-  - **Authority:** Single source of truth for DynamoDB schema
-  - 6-table design with GSI patterns
-  - Enhanced multi-item tenant configuration
-  - Cross-tenant isolation patterns
-
-### Collaboration
-- `docs/research/collaboration/` (6 docs)
-  - Agent Collaboration Research Index
-  - Communication Pattern Analysis
-  - Real-Time/Async and Shared Memory
-  - User-Through-Agent Collaboration
-
-### Enhancement Documents
-- `docs/research/enhancement/` (9 docs, ~10,000 lines)
-- `docs/research/integration-enhancement/` (7 docs)
-- `docs/research/skills/` (9 docs)
-
----
-
-## Key Metrics
-
-### Research Phase (Completed)
-- **Documents:** 60+ research documents
-- **Lines:** 40,000+ lines of documentation
-- **Issues Closed:** 10 major research/architecture tasks
-- **Duration:** ~4 weeks
-
-### Implementation Phase (Weeks 1-18)
-- **Phases:** 8 sequential phases
-- **Duration:** 16-18 weeks (4 months)
-- **Team Size:** TBD (Overstory agent swarm)
-- **Deployment Target:** AWS multi-account setup
+| ID | Title | Status |
+|----|-------|--------|
+| `chimera-29e6` | Update ROADMAP.md with accurate status | in_progress |
+| `chimera-29c6` | Design greenfield agent architecture | in_progress |
 
 ---
 
 ## Resources
 
 - [CLAUDE.md](../CLAUDE.md) — Development workflow guide
+- [VISION.md](VISION.md) — Platform vision and philosophy
 - [README.md](../README.md) — Project overview
 - [AGENTS.md](../AGENTS.md) — Mulch, Seeds, Canopy quick reference
-- [docs/architecture/canonical-data-model.md](architecture/canonical-data-model.md) — DynamoDB schema
-- [packages/sse-bridge/README.md](../packages/sse-bridge/README.md) — SSE bridge documentation
+- [Canonical Data Model](architecture/canonical-data-model.md) — DynamoDB schema
+- [Integration Guide](research/agentcore-strands/10-Chimera-Integration-Guide.md) — AgentCore + Strands wiring
+- [OpenClaw Deep Dive](research/openclaw-nemoclaw-openfang/00-Deep-Dive-Summary.md) — Competitive analysis
 
 ---
 
