@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { getAdapter } from '../adapters';
 import { createAgent, createDefaultSystemPrompt } from '@chimera/core';
 import { ErrorResponse } from '../types';
+import { resolveUser } from '../middleware/user-resolution';
 
 const router: ExpressRouter = Router();
 
@@ -97,7 +98,7 @@ function verifySlackSignature(req: Request): boolean {
  * Slack Events API endpoint.
  * Handles URL verification challenge and incoming message events.
  */
-router.post('/events', async (req: Request, res: Response) => {
+router.post('/events', resolveUser, async (req: Request, res: Response) => {
   try {
     // Handle URL verification challenge
     const body = req.body as SlackChallenge | SlackEventCallback;
@@ -170,10 +171,12 @@ router.post('/events', async (req: Request, res: Response) => {
       }
 
       // Create agent and invoke
+      // Use resolved Cognito user context if available, otherwise fall back to platform user
+      const userId = req.userContext?.cognitoSub || event.user || req.tenantContext.userId;
       const agent = createAgent({
         systemPrompt: createDefaultSystemPrompt(),
         tenantId: req.tenantContext.tenantId,
-        userId: event.user || req.tenantContext.userId,
+        userId,
         sessionId: `slack_${event.channel}_${event.user}`,
       });
 
@@ -206,7 +209,7 @@ router.post('/events', async (req: Request, res: Response) => {
  * Slash commands require a response within 3 seconds, so we immediately acknowledge
  * and process the command asynchronously if needed.
  */
-router.post('/slash', async (req: Request, res: Response) => {
+router.post('/slash', resolveUser, async (req: Request, res: Response) => {
   try {
     // Verify signature
     if (!verifySlackSignature(req)) {
@@ -254,11 +257,13 @@ router.post('/slash', async (req: Request, res: Response) => {
     }
 
     // Create agent
+    // Use resolved Cognito user context if available, otherwise fall back to platform user
     const slashBody = req.body as { user_id?: string; channel_id?: string };
+    const userId = req.userContext?.cognitoSub || slashBody.user_id || req.tenantContext.userId;
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: req.tenantContext.tenantId,
-      userId: slashBody.user_id || req.tenantContext.userId,
+      userId,
       sessionId: `slack_slash_${slashBody.channel_id}_${slashBody.user_id}`,
     });
 
