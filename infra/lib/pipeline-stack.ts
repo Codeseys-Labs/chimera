@@ -157,10 +157,17 @@ export class PipelineStack extends cdk.Stack {
     });
 
     // Grant ECR push permissions
+    // GetAuthorizationToken is a global operation and requires resources: ['*']
+    buildProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ecr:GetAuthorizationToken'],
+        resources: ['*'],
+      })
+    );
+    // Scope repository operations to chimera-* repositories
     buildProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
-          'ecr:GetAuthorizationToken',
           'ecr:BatchCheckLayerAvailability',
           'ecr:GetDownloadUrlForLayer',
           'ecr:BatchGetImage',
@@ -169,7 +176,9 @@ export class PipelineStack extends cdk.Stack {
           'ecr:UploadLayerPart',
           'ecr:CompleteLayerUpload',
         ],
-        resources: ['*'],
+        resources: [
+          `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
+        ],
       })
     );
 
@@ -240,15 +249,24 @@ export class PipelineStack extends cdk.Stack {
     });
 
     // Grant test project ECR pull permissions
+    // GetAuthorizationToken is a global operation and requires resources: ['*']
+    testProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ecr:GetAuthorizationToken'],
+        resources: ['*'],
+      })
+    );
+    // Scope repository operations to chimera-* repositories
     testProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
-          'ecr:GetAuthorizationToken',
           'ecr:BatchCheckLayerAvailability',
           'ecr:GetDownloadUrlForLayer',
           'ecr:BatchGetImage',
         ],
-        resources: ['*'],
+        resources: [
+          `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
+        ],
       })
     );
 
@@ -301,7 +319,9 @@ def handler(event, context):
           'bedrock:UpdateAgentRuntimeEndpoint',
           'bedrock:GetAgentRuntimeEndpoint',
         ],
-        resources: ['*'],
+        resources: [
+          `arn:aws:bedrock:${this.region}:${this.account}:agent-runtime/chimera-*`,
+        ],
       })
     );
 
@@ -428,6 +448,8 @@ def handler(event, context):
       memorySize: 256,
     });
 
+    // CloudWatch GetMetric* operations don't support resource-level permissions
+    // They require resources: ['*'] per AWS documentation
     canaryBakeValidationFunction.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['cloudwatch:GetMetricStatistics', 'cloudwatch:GetMetricData'],
@@ -474,7 +496,9 @@ def handler(event, context):
     progressiveRolloutFunction.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['bedrock:UpdateAgentRuntimeEndpoint', 'bedrock:GetAgentRuntimeEndpoint'],
-        resources: ['*'],
+        resources: [
+          `arn:aws:bedrock:${this.region}:${this.account}:agent-runtime/chimera-*`,
+        ],
       })
     );
 
@@ -571,7 +595,9 @@ def handler(event, context):
     rollbackFunction.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['bedrock:UpdateAgentRuntimeEndpoint', 'bedrock:GetAgentRuntimeEndpoint'],
-        resources: ['*'],
+        resources: [
+          `arn:aws:bedrock:${this.region}:${this.account}:agent-runtime/chimera-*`,
+        ],
       })
     );
 
