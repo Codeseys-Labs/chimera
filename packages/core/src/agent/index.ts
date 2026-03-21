@@ -3,6 +3,7 @@
  *
  * Exports:
  * - ChimeraAgent: Main agent class wrapping Strands
+ * - BedrockModel: AWS Bedrock LLM adapter
  * - SystemPromptTemplate: Prompt templating system
  * - Helper functions for agent creation
  */
@@ -16,6 +17,12 @@ export {
   type ToolCall,
   type StreamEvent
 } from './agent';
+
+export {
+  BedrockModel,
+  createBedrockModel,
+  type BedrockModelConfig
+} from './bedrock-model';
 
 export {
   SystemPromptTemplate,
