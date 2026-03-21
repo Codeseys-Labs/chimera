@@ -19,6 +19,24 @@ import { CloudWatchLogsClient } from '@aws-sdk/client-cloudwatch-logs';
 import { TranscribeClient } from '@aws-sdk/client-transcribe';
 import { RekognitionClient } from '@aws-sdk/client-rekognition';
 import { TextractClient } from '@aws-sdk/client-textract';
+import { ECSClient } from '@aws-sdk/client-ecs';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { EFSClient } from '@aws-sdk/client-efs';
+import { IAMClient } from '@aws-sdk/client-iam';
+import { CloudFrontClient } from '@aws-sdk/client-cloudfront';
+import { Route53Client } from '@aws-sdk/client-route-53';
+import { WAFv2Client } from '@aws-sdk/client-wafv2';
+import { RDSClient } from '@aws-sdk/client-rds';
+import { RedshiftClient } from '@aws-sdk/client-redshift';
+import { GlueClient } from '@aws-sdk/client-glue';
+import { AthenaClient } from '@aws-sdk/client-athena';
+import { OpenSearchClient } from '@aws-sdk/client-opensearch';
+import { CodeBuildClient } from '@aws-sdk/client-codebuild';
+import { BedrockClient } from '@aws-sdk/client-bedrock';
+import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
+import { SageMakerClient } from '@aws-sdk/client-sagemaker';
+import { SFNClient } from '@aws-sdk/client-sfn';
+import { SQSClient } from '@aws-sdk/client-sqs';
 import type {
   AWSClientFactoryConfig,
   AWSToolContext,
@@ -34,7 +52,25 @@ type AWSClient =
   | CloudWatchLogsClient
   | TranscribeClient
   | RekognitionClient
-  | TextractClient;
+  | TextractClient
+  | ECSClient
+  | DynamoDBClient
+  | EFSClient
+  | IAMClient
+  | CloudFrontClient
+  | Route53Client
+  | WAFv2Client
+  | RDSClient
+  | RedshiftClient
+  | GlueClient
+  | AthenaClient
+  | OpenSearchClient
+  | CodeBuildClient
+  | BedrockClient
+  | BedrockRuntimeClient
+  | SageMakerClient
+  | SFNClient
+  | SQSClient;
 
 /**
  * Factory for creating and caching tenant-scoped AWS SDK clients
@@ -219,6 +255,354 @@ export class AWSClientFactory {
       context,
       (credentials, region) =>
         new TextractClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create ECS client for tenant
+   */
+  async getECSClient(context: AWSToolContext): Promise<ECSClient> {
+    return this.getOrCreateClient(
+      'ecs',
+      context,
+      (credentials, region) =>
+        new ECSClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create DynamoDB client for tenant
+   */
+  async getDynamoDBClient(context: AWSToolContext): Promise<DynamoDBClient> {
+    return this.getOrCreateClient(
+      'dynamodb',
+      context,
+      (credentials, region) =>
+        new DynamoDBClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create EFS client for tenant
+   */
+  async getEFSClient(context: AWSToolContext): Promise<EFSClient> {
+    return this.getOrCreateClient(
+      'efs',
+      context,
+      (credentials, region) =>
+        new EFSClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create IAM client for tenant
+   */
+  async getIAMClient(context: AWSToolContext): Promise<IAMClient> {
+    return this.getOrCreateClient(
+      'iam',
+      context,
+      (credentials, region) =>
+        new IAMClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create CloudFront client for tenant
+   */
+  async getCloudFrontClient(
+    context: AWSToolContext
+  ): Promise<CloudFrontClient> {
+    return this.getOrCreateClient(
+      'cloudfront',
+      context,
+      (credentials, region) =>
+        new CloudFrontClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Route53 client for tenant
+   */
+  async getRoute53Client(context: AWSToolContext): Promise<Route53Client> {
+    return this.getOrCreateClient(
+      'route53',
+      context,
+      (credentials, region) =>
+        new Route53Client({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create WAFv2 client for tenant
+   */
+  async getWAFv2Client(context: AWSToolContext): Promise<WAFv2Client> {
+    return this.getOrCreateClient(
+      'wafv2',
+      context,
+      (credentials, region) =>
+        new WAFv2Client({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create RDS client for tenant
+   */
+  async getRDSClient(context: AWSToolContext): Promise<RDSClient> {
+    return this.getOrCreateClient(
+      'rds',
+      context,
+      (credentials, region) =>
+        new RDSClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Redshift client for tenant
+   */
+  async getRedshiftClient(context: AWSToolContext): Promise<RedshiftClient> {
+    return this.getOrCreateClient(
+      'redshift',
+      context,
+      (credentials, region) =>
+        new RedshiftClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Glue client for tenant
+   */
+  async getGlueClient(context: AWSToolContext): Promise<GlueClient> {
+    return this.getOrCreateClient(
+      'glue',
+      context,
+      (credentials, region) =>
+        new GlueClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Athena client for tenant
+   */
+  async getAthenaClient(context: AWSToolContext): Promise<AthenaClient> {
+    return this.getOrCreateClient(
+      'athena',
+      context,
+      (credentials, region) =>
+        new AthenaClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create OpenSearch client for tenant
+   */
+  async getOpenSearchClient(
+    context: AWSToolContext
+  ): Promise<OpenSearchClient> {
+    return this.getOrCreateClient(
+      'opensearch',
+      context,
+      (credentials, region) =>
+        new OpenSearchClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create CodeBuild client for tenant
+   */
+  async getCodeBuildClient(context: AWSToolContext): Promise<CodeBuildClient> {
+    return this.getOrCreateClient(
+      'codebuild',
+      context,
+      (credentials, region) =>
+        new CodeBuildClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Bedrock client for tenant
+   */
+  async getBedrockClient(context: AWSToolContext): Promise<BedrockClient> {
+    return this.getOrCreateClient(
+      'bedrock',
+      context,
+      (credentials, region) =>
+        new BedrockClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Bedrock Runtime client for tenant
+   */
+  async getBedrockRuntimeClient(
+    context: AWSToolContext
+  ): Promise<BedrockRuntimeClient> {
+    return this.getOrCreateClient(
+      'bedrock-runtime',
+      context,
+      (credentials, region) =>
+        new BedrockRuntimeClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create SageMaker client for tenant
+   */
+  async getSageMakerClient(context: AWSToolContext): Promise<SageMakerClient> {
+    return this.getOrCreateClient(
+      'sagemaker',
+      context,
+      (credentials, region) =>
+        new SageMakerClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create Step Functions client for tenant
+   */
+  async getSFNClient(context: AWSToolContext): Promise<SFNClient> {
+    return this.getOrCreateClient(
+      'sfn',
+      context,
+      (credentials, region) =>
+        new SFNClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create SQS client for tenant
+   */
+  async getSQSClient(context: AWSToolContext): Promise<SQSClient> {
+    return this.getOrCreateClient(
+      'sqs',
+      context,
+      (credentials, region) =>
+        new SQSClient({
           region,
           credentials,
           maxAttempts: this.config.retryConfig.maxAttempts,
