@@ -15,6 +15,8 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp, entrypoint
 from bedrock_agentcore.memory.integrations.strands import AgentCoreMemorySessionManager
 
 from tools.hello_world import hello_world_tool
+from tools.s3_tools import list_s3_buckets, get_bucket_info
+from tools.ec2_tools import list_ec2_instances, get_ec2_instance_details
 
 
 # Initialize AgentCore app
@@ -139,18 +141,27 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
     3. Custom skills from DynamoDB registry
     4. Cedar policy filter
     """
-    # Core tools (always available - Phase 1A just hello world)
+    # Core tools (always available)
     tools = [
         hello_world_tool,
     ]
 
-    # TODO: Phase 1B - Add tier-gated AWS tools
-    # if tier in ['advanced', 'premium']:
-    #     tools.extend(load_aws_tools_tier2())
-    # if tier == 'premium':
-    #     tools.extend(load_aws_tools_tier3_4())
+    # Phase 1D: AWS tools for all tiers (validation phase)
+    # In production, these would be tier-gated
+    tools.extend([
+        list_s3_buckets,
+        get_bucket_info,
+        list_ec2_instances,
+        get_ec2_instance_details,
+    ])
 
-    # TODO: Phase 2 - Load custom skills from DynamoDB registry
+    # TODO: Phase 2 - Add tier-gating for AWS tools
+    # if tier in ['advanced', 'premium']:
+    #     tools.extend([list_s3_buckets, get_bucket_info])
+    # if tier == 'premium':
+    #     tools.extend([list_ec2_instances, get_ec2_instance_details])
+
+    # TODO: Phase 3 - Load custom skills from DynamoDB registry
     # custom_skills = load_custom_skills(tenant_id)
     # tools.extend(custom_skills)
 
