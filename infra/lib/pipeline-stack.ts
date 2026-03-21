@@ -2,6 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
 import * as codepipeline_actions from 'aws-cdk-lib/aws-codepipeline-actions';
 import * as codebuild from 'aws-cdk-lib/aws-codebuild';
+import * as codecommit from 'aws-cdk-lib/aws-codecommit';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -15,16 +17,15 @@ import { Construct } from 'constructs';
 
 export interface PipelineStackProps extends cdk.StackProps {
   envName: string;
-  repository: string;      // GitHub repo (owner/name)
+  repositoryName: string;  // CodeCommit repository name
   branch: string;          // Branch to track (default: 'main')
-  githubTokenSecretName?: string;  // Secrets Manager secret name for GitHub token
 }
 
 /**
  * CI/CD Pipeline Stack.
  *
  * Implements the multi-stage deployment pipeline from Chimera Testing Strategy:
- * 1. Source: GitHub webhook trigger
+ * 1. Source: CodeCommit repository (enables self-editing infrastructure)
  * 2. Build: Docker image + unit/contract tests (< 8 min)
  * 3. Deploy Canary: 5% traffic to canary endpoint
  * 4. Canary Bake: 30-minute monitoring + evaluation suite (auto-rollback on alarm)
@@ -37,6 +38,10 @@ export interface PipelineStackProps extends cdk.StackProps {
  * - Guardrail trigger rate > 10% for 15 minutes
  * - Evaluation composite score < 80
  *
+ * Uses CodeCommit instead of GitHub to enable agent-driven infrastructure evolution
+ * through AWS SDK CodeCommit API calls. Agents can commit CDK changes, trigger builds,
+ * and evolve their own deployment pipeline.
+ *
  * Reference:
  * - docs/research/enhancement/06-Testing-Strategy.md § 10.1 Pipeline Stages
  * - docs/research/enhancement/07-Operational-Runbook.md § 1.2 Agent Runtime Deployment
@@ -44,12 +49,37 @@ export interface PipelineStackProps extends cdk.StackProps {
 export class PipelineStack extends cdk.Stack {
   public readonly pipeline: codepipeline.Pipeline;
   public readonly artifactBucket: s3.IBucket;
+  public readonly ecrRepository: ecr.Repository;
 
   constructor(scope: Construct, id: string, props: PipelineStackProps) {
     super(scope, id, props);
 
     const isProd = props.envName === 'prod';
-    const githubTokenSecretName = props.githubTokenSecretName ?? 'github-token';
+
+    // ======================================================================
+    // ECR Repository for Agent Runtime Images
+    // ======================================================================
+
+    this.ecrRepository = new ecr.Repository(this, 'AgentRuntimeRepository', {
+      repositoryName: `chimera-agent-runtime-${props.envName}`,
+      imageScanOnPush: true,
+      imageTagMutability: ecr.TagMutability.MUTABLE,
+      lifecycleRules: [
+        {
+          description: 'Remove untagged images after 7 days',
+          tagStatus: ecr.TagStatus.UNTAGGED,
+          maxImageAge: cdk.Duration.days(7),
+          rulePriority: 1,
+        },
+        {
+          description: 'Keep last 30 images',
+          maxImageCount: 30,
+          rulePriority: 2,
+        },
+      ],
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      emptyOnDelete: !isProd,
+    });
 
     // ======================================================================
     // Artifact Bucket
@@ -107,7 +137,7 @@ export class PipelineStack extends cdk.Stack {
             value: `${this.account}.dkr.ecr.${this.region}.amazonaws.com`,
           },
           ECR_REPOSITORY: {
-            value: `${this.account}.dkr.ecr.${this.region}.amazonaws.com/chimera-agent-runtime`,
+            value: this.ecrRepository.repositoryUri,
           },
           ENV_NAME: {
             value: props.envName,
@@ -530,26 +560,28 @@ def handler(event, context):
     const sourceOutput = new codepipeline.Artifact('SourceOutput');
     const buildOutput = new codepipeline.Artifact('BuildOutput');
 
-    // Parse repository owner/name
-    const [repoOwner, repoName] = props.repository.split('/');
+    // Reference existing CodeCommit repository
+    const repository = codecommit.Repository.fromRepositoryName(
+      this,
+      'SourceRepository',
+      props.repositoryName
+    );
 
     this.pipeline = new codepipeline.Pipeline(this, 'Pipeline', {
       pipelineName: `chimera-deploy-${props.envName}`,
       artifactBucket: this.artifactBucket,
       restartExecutionOnUpdate: false,
       stages: [
-        // Stage 1: Source
+        // Stage 1: Source (CodeCommit for self-editing capability)
         {
           stageName: 'Source',
           actions: [
-            new codepipeline_actions.CodeStarConnectionsSourceAction({
-              actionName: 'GitHub_Source',
-              owner: repoOwner,
-              repo: repoName,
+            new codepipeline_actions.CodeCommitSourceAction({
+              actionName: 'CodeCommit_Source',
+              repository,
               branch: props.branch,
               output: sourceOutput,
-              connectionArn: `arn:aws:codestar-connections:${this.region}:${this.account}:connection/placeholder`,
-              triggerOnPush: true,
+              trigger: codepipeline_actions.CodeCommitTrigger.EVENTS,
             }),
           ],
         },
@@ -664,6 +696,18 @@ def handler(event, context):
       value: pipelineAlarmTopic.topicArn,
       exportName: `${this.stackName}-AlarmTopicArn`,
       description: 'SNS topic for pipeline alarms',
+    });
+
+    new cdk.CfnOutput(this, 'EcrRepositoryArn', {
+      value: this.ecrRepository.repositoryArn,
+      exportName: `${this.stackName}-EcrRepositoryArn`,
+      description: 'ECR repository ARN for agent runtime images',
+    });
+
+    new cdk.CfnOutput(this, 'EcrRepositoryUri', {
+      value: this.ecrRepository.repositoryUri,
+      exportName: `${this.stackName}-EcrRepositoryUri`,
+      description: 'ECR repository URI for agent runtime images',
     });
   }
 }
