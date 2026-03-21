@@ -14,16 +14,31 @@ import {
   SearchSkillsRequest,
 } from '@chimera/shared';
 
+import type {
+  GetCommandInput,
+  GetCommandOutput,
+  PutCommandInput,
+  PutCommandOutput,
+  UpdateCommandInput,
+  UpdateCommandOutput,
+  DeleteCommandInput,
+  DeleteCommandOutput,
+  QueryCommandInput,
+  QueryCommandOutput,
+  ScanCommandInput,
+  ScanCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
+
 /**
- * DynamoDB client interface (placeholder for AWS SDK)
+ * DynamoDB client interface
  */
 export interface DynamoDBClient {
-  query(params: any): Promise<any>;
-  put(params: any): Promise<any>;
-  update(params: any): Promise<any>;
-  delete(params: any): Promise<any>;
-  get(params: any): Promise<any>;
-  scan(params: any): Promise<any>;
+  query(params: QueryCommandInput): Promise<QueryCommandOutput>;
+  put(params: PutCommandInput): Promise<PutCommandOutput>;
+  update(params: UpdateCommandInput): Promise<UpdateCommandOutput>;
+  delete(params: DeleteCommandInput): Promise<DeleteCommandOutput>;
+  get(params: GetCommandInput): Promise<GetCommandOutput>;
+  scan(params: ScanCommandInput): Promise<ScanCommandOutput>;
 }
 
 /**
@@ -246,16 +261,19 @@ export class SkillRegistry {
    * Uses GSI-1 (Author Index) for efficient querying
    *
    * @param author - Author tenant ID
+   * @param tenantId - Tenant ID for security filtering
    * @param limit - Max results
    * @returns Skills by author
    */
-  async listByAuthor(author: string, limit: number = 20): Promise<Skill[]> {
+  async listByAuthor(author: string, tenantId: string, limit: number = 20): Promise<Skill[]> {
     const params = {
       TableName: this.config.skillsTableName,
       IndexName: 'GSI-1',
       KeyConditionExpression: 'PK = :pk',
+      FilterExpression: 'tenantId = :tenantId',
       ExpressionAttributeValues: {
         ':pk': `AUTHOR#${author}`,
+        ':tenantId': tenantId,
       },
       Limit: limit,
     };

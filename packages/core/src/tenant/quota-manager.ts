@@ -7,14 +7,25 @@
 
 import { TenantQuota, QuotaPeriod } from '@chimera/shared';
 
+import type {
+  GetCommandInput,
+  GetCommandOutput,
+  PutCommandInput,
+  PutCommandOutput,
+  UpdateCommandInput,
+  UpdateCommandOutput,
+  QueryCommandInput,
+  QueryCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
+
 /**
  * DynamoDB client interface
  */
 export interface DynamoDBClient {
-  query(params: any): Promise<any>;
-  put(params: any): Promise<any>;
-  update(params: any): Promise<any>;
-  get(params: any): Promise<any>;
+  query(params: QueryCommandInput): Promise<QueryCommandOutput>;
+  put(params: PutCommandInput): Promise<PutCommandOutput>;
+  update(params: UpdateCommandInput): Promise<UpdateCommandOutput>;
+  get(params: GetCommandInput): Promise<GetCommandOutput>;
 }
 
 /**

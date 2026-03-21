@@ -28,14 +28,25 @@ import type {
   ISOTimestamp,
 } from './types';
 
+import type {
+  GetCommandInput,
+  GetCommandOutput,
+  PutCommandInput,
+  PutCommandOutput,
+  QueryCommandInput,
+  QueryCommandOutput,
+  ScanCommandInput,
+  ScanCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
+
 /**
  * DynamoDB client interface
  */
 export interface DynamoDBClient {
-  get(params: any): Promise<any>;
-  put(params: any): Promise<any>;
-  query(params: any): Promise<any>;
-  scan(params: any): Promise<any>;
+  get(params: GetCommandInput): Promise<GetCommandOutput>;
+  put(params: PutCommandInput): Promise<PutCommandOutput>;
+  query(params: QueryCommandInput): Promise<QueryCommandOutput>;
+  scan(params: ScanCommandInput): Promise<ScanCommandOutput>;
 }
 
 /**
