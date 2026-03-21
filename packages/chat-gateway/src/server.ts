@@ -8,9 +8,11 @@
 import express, { Request, Response, NextFunction } from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
+import path from 'path';
 import { extractTenantContext } from './middleware/tenant';
 import chatRouter from './routes/chat';
 import healthRouter from './routes/health';
+import slackRouter from './routes/slack';
 import { ErrorResponse } from './types';
 
 // Create Express app
@@ -20,14 +22,21 @@ const app: Express = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
+// Serve static files for web chat UI
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 // Health check route (no auth required)
 app.use('/', healthRouter);
 
-// Apply tenant middleware to all /chat/* routes
+// Apply tenant middleware to all /chat/* and /slack/* routes
 app.use('/chat', extractTenantContext);
+app.use('/slack', extractTenantContext);
 
 // Chat routes
 app.use('/chat', chatRouter);
+
+// Slack routes
+app.use('/slack', slackRouter);
 
 // Global error handler
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
