@@ -119,33 +119,15 @@ jobs:
         working-directory: infra
         run: npx cdk bootstrap --require-approval never
 
-      - name: CDK Deploy - Network Stack
+      - name: CDK Deploy - All Stacks
         working-directory: infra
-        run: npx cdk deploy ChimeraNetworkStack --require-approval never
-
-      - name: CDK Deploy - Data Stack
-        working-directory: infra
-        run: npx cdk deploy ChimeraDataStack --require-approval never
-
-      - name: CDK Deploy - Security Stack
-        working-directory: infra
-        run: npx cdk deploy ChimeraSecurityStack --require-approval never
-
-      - name: CDK Deploy - Observability Stack
-        working-directory: infra
-        run: npx cdk deploy ChimeraObservabilityStack --require-approval never
-
-      - name: CDK Deploy - Platform Runtime Stack
-        working-directory: infra
-        run: npx cdk deploy ChimeraPlatformRuntimeStack --require-approval never --context imageTag=${{ needs.build-images.outputs.git-sha }}
-
-      - name: CDK Deploy - Chat Stack
-        working-directory: infra
-        run: npx cdk deploy ChimeraChatStack --require-approval never
-
-      - name: CDK Deploy - Tenant Stack (template)
-        working-directory: infra
-        run: npx cdk deploy ChimeraTenantStack --require-approval never
+        env:
+          IMAGE_TAG: ${{ needs.build-images.outputs.git-sha }}
+          ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
+        run: |
+          npx cdk deploy --all --require-approval never \
+            --context imageTag="$IMAGE_TAG" \
+            --context envName="$ENV_NAME"
 
   # Job 3: Canary deployment - route 5% traffic to new version
   deploy-canary:
@@ -164,15 +146,21 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update canary endpoint
+      - name: Trigger canary deployment via Step Functions
+        env:
+          IMAGE_URI: ${{ needs.build-images.outputs.image-tag }}
+          ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
         run: |
-          # Update AgentCore canary configuration
-          # This would typically update a Lambda alias or ECS task definition
-          aws lambda update-alias \
-            --function-name chimera-agent-runtime \
-            --name canary \
-            --function-version $LATEST \
-            --routing-config AdditionalVersionWeights={"$LATEST"=0.05}
+          # Trigger the canary orchestration state machine
+          STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ChimeraPipelineStack-${ENV_NAME} \
+            --query 'Stacks[0].Outputs[?OutputKey==`OrchestrationStateMachineArn`].OutputValue' \
+            --output text)
+
+          echo "Starting canary orchestration: $STATE_MACHINE_ARN"
+          aws stepfunctions start-execution \
+            --state-machine-arn "$STATE_MACHINE_ARN" \
+            --input "{\"imageUri\": \"$IMAGE_URI\"}"
 
       - name: Wait for canary deployment
         run: sleep 30
@@ -224,11 +212,11 @@ jobs:
             --min-score 80 \
             --suite production-validation
 
-  # Job 5: Progressive rollout - 25% -> 50% -> 100%
-  rollout-production:
-    name: Progressive Rollout
+  # Job 5: Monitor Step Functions orchestration (handles progressive rollout)
+  monitor-orchestration:
+    name: Monitor Progressive Rollout
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     needs: validate-canary
     permissions:
       id-token: write
@@ -240,63 +228,56 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Rollout 25% traffic
+      - name: Monitor Step Functions execution
+        env:
+          ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
         run: |
-          aws lambda update-alias \
-            --function-name chimera-agent-runtime \
-            --name production \
-            --routing-config AdditionalVersionWeights={"$LATEST"=0.25}
-          echo "Deployed to 25%, monitoring for 15 minutes..."
-          sleep 900
-
-      - name: Check 25% health
-        run: |
-          # Check CloudWatch alarms
-          ALARM_STATE=$(aws cloudwatch describe-alarms \
-            --alarm-names chimera-agent-error-rate chimera-agent-latency \
-            --query 'MetricAlarms[?StateValue==`ALARM`].AlarmName' \
+          # Get the most recent execution ARN
+          STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ChimeraPipelineStack-${ENV_NAME} \
+            --query 'Stacks[0].Outputs[?OutputKey==`OrchestrationStateMachineArn`].OutputValue' \
             --output text)
-          
-          if [ -n "$ALARM_STATE" ]; then
-            echo "ALARM triggered: $ALARM_STATE - Rolling back"
-            exit 1
-          fi
 
-      - name: Rollout 50% traffic
-        run: |
-          aws lambda update-alias \
-            --function-name chimera-agent-runtime \
-            --name production \
-            --routing-config AdditionalVersionWeights={"$LATEST"=0.50}
-          echo "Deployed to 50%, monitoring for 15 minutes..."
-          sleep 900
-
-      - name: Check 50% health
-        run: |
-          ALARM_STATE=$(aws cloudwatch describe-alarms \
-            --alarm-names chimera-agent-error-rate chimera-agent-latency \
-            --query 'MetricAlarms[?StateValue==`ALARM`].AlarmName' \
+          EXECUTION_ARN=$(aws stepfunctions list-executions \
+            --state-machine-arn "$STATE_MACHINE_ARN" \
+            --max-results 1 \
+            --query 'executions[0].executionArn' \
             --output text)
-          
-          if [ -n "$ALARM_STATE" ]; then
-            echo "ALARM triggered: $ALARM_STATE - Rolling back"
-            exit 1
-          fi
 
-      - name: Rollout 100% traffic
-        run: |
-          aws lambda update-alias \
-            --function-name chimera-agent-runtime \
-            --name production \
-            --function-version $LATEST
-          echo "Fully deployed to production"
+          echo "Monitoring execution: $EXECUTION_ARN"
+          echo "Progressive rollout stages: 5% canary -> 25% -> 50% -> 100%"
+
+          # Poll execution status
+          while true; do
+            STATUS=$(aws stepfunctions describe-execution \
+              --execution-arn "$EXECUTION_ARN" \
+              --query 'status' \
+              --output text)
+
+            echo "Current status: $STATUS"
+
+            case "$STATUS" in
+              "SUCCEEDED")
+                echo "✓ Progressive rollout completed successfully"
+                exit 0
+                ;;
+              "FAILED"|"TIMED_OUT"|"ABORTED")
+                echo "✗ Progressive rollout failed: $STATUS"
+                exit 1
+                ;;
+              "RUNNING")
+                echo "Step Functions orchestration in progress..."
+                sleep 30
+                ;;
+            esac
+          done
 
   # Job 6: Post-deployment validation
   post-deploy-validation:
     name: Post-Deploy Validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: rollout-production
+    needs: monitor-orchestration
     permissions:
       id-token: write
       contents: read
@@ -332,12 +313,21 @@ jobs:
             --threshold-multiplier 3.0
 
       - name: Tag successful deployment
+        env:
+          GIT_SHA: ${{ needs.build-images.outputs.git-sha }}
         run: |
-          IMAGE_URI="${{ needs.build-images.outputs.image-tag }}"
-          aws ecr put-image-tag \
+          # Retrieve the image manifest and re-tag as latest-stable
+          MANIFEST=$(aws ecr batch-get-image \
             --repository-name chimera-agent-runtime \
-            --image-tag "${{ needs.build-images.outputs.git-sha }}" \
-            --image-tag latest-stable
+            --image-ids imageTag="$GIT_SHA" \
+            --query 'images[0].imageManifest' \
+            --output text)
+
+          echo "Tagging image $GIT_SHA as latest-stable"
+          aws ecr put-image \
+            --repository-name chimera-agent-runtime \
+            --image-tag latest-stable \
+            --image-manifest "$MANIFEST"
 
   # Job 7: Notify deployment status
   notify:
