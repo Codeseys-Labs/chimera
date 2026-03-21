@@ -158,5 +158,16 @@
 		"status": "active",
 		"createdAt": "2026-03-21T00:42:09.544Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-cdaf1d44",
+		"name": "batch2-vision-design",
+		"memberIssueIds": [
+			"chimera-556c",
+			"chimera-29c6"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T01:06:28.858Z",
+		"completedAt": null
 	}
 ]
