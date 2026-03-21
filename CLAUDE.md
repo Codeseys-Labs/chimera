@@ -288,20 +288,23 @@ mulch sync
 
 ## CDK Infrastructure Conventions
 
-### 8-Stack Architecture
+### 11-Stack Architecture
 
 AWS Chimera uses separation-of-concerns CDK stacks:
 
 ```
 infra/lib/
-├── network-stack.ts        # VPC, subnets, NAT, security groups
-├── data-stack.ts           # DynamoDB (6 tables), S3, EFS
-├── security-stack.ts       # Cognito, IAM roles, Cedar policies, KMS
-├── observability-stack.ts  # CloudWatch, X-Ray, alarms
-├── platform-runtime-stack.ts  # AgentCore Runtime, Memory, Gateway
-├── chat-stack.ts           # ECS Fargate, API Gateway, WebSocket
-├── tenant-stack.ts         # Per-tenant IAM isolation
-└── pipeline-stack.ts       # CI/CD, CodePipeline, CodeBuild
+├── network-stack.ts            # VPC, subnets, NAT, security groups, VPC endpoints
+├── data-stack.ts               # DynamoDB (6 tables), S3 buckets
+├── security-stack.ts           # Cognito, IAM roles, Cedar policies, KMS, WAF
+├── observability-stack.ts      # CloudWatch, X-Ray, alarms, SNS topics
+├── api-stack.ts                # API Gateway REST + WebSocket, JWT auth, OpenAI-compatible endpoint
+├── skill-pipeline-stack.ts     # 7-stage skill security scanning pipeline
+├── chat-stack.ts               # ECS Fargate, ALB, SSE streaming bridge
+├── orchestration-stack.ts      # EventBridge event bus, SQS queues, agent-to-agent messaging
+├── evolution-stack.ts          # Self-evolution engine (A/B testing, auto-skills, model routing)
+├── tenant-onboarding-stack.ts  # Tenant provisioning workflow with Cedar policies
+└── pipeline-stack.ts           # CI/CD, CodePipeline, canary deployment
 ```
 
 ### L3 Construct Pattern
