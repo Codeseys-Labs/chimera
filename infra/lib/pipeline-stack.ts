@@ -85,68 +85,8 @@ export class PipelineStack extends cdk.Stack {
     // CodeBuild Project for Build Stage
     // ======================================================================
 
-    // Build spec performs: lint, typecheck, unit tests, contract tests, CDK synth, Docker build
-    const buildSpec = codebuild.BuildSpec.fromObject({
-      version: '0.2',
-      phases: {
-        pre_build: {
-          commands: [
-            'echo "Installing dependencies..."',
-            'bun install',
-            'echo "Logging into ECR..."',
-            'aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY',
-          ],
-        },
-        build: {
-          commands: [
-            'echo "Stage 1: Lint and Type Check"',
-            'bun run lint',
-            'bun run typecheck',
-            '',
-            'echo "Stage 2: Unit Tests"',
-            'bun test --coverage',
-            '',
-            'echo "Stage 3: Contract Tests"',
-            'bun test:contract',
-            '',
-            'echo "Stage 4: CDK Synth and Validation"',
-            'cd infra && npx cdk synth --all',
-            'npx cdk-nag',
-            'cd ..',
-            '',
-            'echo "Stage 5: Build Docker Image"',
-            'IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}',
-            'docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f agent-code/Dockerfile agent-code/',
-            '',
-            'echo "Pushing Docker image to ECR..."',
-            'docker push $ECR_REPOSITORY:$IMAGE_TAG',
-            'docker push $ECR_REPOSITORY:latest',
-            '',
-            'echo "Writing image URI to file for next stage..."',
-            'echo $ECR_REPOSITORY:$IMAGE_TAG > image-uri.txt',
-          ],
-        },
-        post_build: {
-          commands: [
-            'echo "Build completed on `date`"',
-            'echo "Image URI: $(cat image-uri.txt)"',
-          ],
-        },
-      },
-      artifacts: {
-        files: [
-          'image-uri.txt',
-          'infra/**/*',
-          'agent-code/**/*',
-        ],
-      },
-      cache: {
-        paths: [
-          '/root/.bun/install/cache/**/*',
-          'node_modules/**/*',
-        ],
-      },
-    });
+    // Build spec is external (buildspec.yml at repo root)
+    // Performs: lint, typecheck, unit tests, contract tests, CDK synth, Docker build
 
     const buildLogGroup = new logs.LogGroup(this, 'BuildLogGroup', {
       logGroupName: `/aws/codebuild/chimera-build-${props.envName}`,
@@ -157,7 +97,7 @@ export class PipelineStack extends cdk.Stack {
     const buildProject = new codebuild.PipelineProject(this, 'BuildProject', {
       projectName: `chimera-build-${props.envName}`,
       description: 'Build and test Chimera agent runtime',
-      buildSpec,
+      buildSpec: codebuild.BuildSpec.fromSourceFilename('buildspec.yml'),
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
         privileged: true, // Required for Docker build
@@ -198,6 +138,85 @@ export class PipelineStack extends cdk.Stack {
           'ecr:InitiateLayerUpload',
           'ecr:UploadLayerPart',
           'ecr:CompleteLayerUpload',
+        ],
+        resources: ['*'],
+      })
+    );
+
+    // ======================================================================
+    // CodeBuild Project for Test Stage
+    // ======================================================================
+
+    const testLogGroup = new logs.LogGroup(this, 'TestLogGroup', {
+      logGroupName: `/aws/codebuild/chimera-test-${props.envName}`,
+      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Integration and E2E tests run against built Docker image
+    const testProject = new codebuild.PipelineProject(this, 'TestProject', {
+      projectName: `chimera-test-${props.envName}`,
+      description: 'Run integration and E2E tests for Chimera',
+      buildSpec: codebuild.BuildSpec.fromObject({
+        version: '0.2',
+        phases: {
+          pre_build: {
+            commands: [
+              'echo "Installing test dependencies..."',
+              'bun install',
+              'echo "Pulling Docker image from build artifacts..."',
+              'IMAGE_URI=$(cat image-uri.txt)',
+              'echo "Testing image: $IMAGE_URI"',
+            ],
+          },
+          build: {
+            commands: [
+              'echo "Running integration tests..."',
+              'bun test:integration',
+              '',
+              'echo "Running E2E tests..."',
+              'bun test:e2e',
+            ],
+          },
+          post_build: {
+            commands: [
+              'echo "Tests completed on `date`"',
+            ],
+          },
+        },
+        reports: {
+          testReports: {
+            files: ['test-results/**/*.xml'],
+            'file-format': 'JUNITXML',
+          },
+        },
+      }),
+      environment: {
+        buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
+        privileged: true, // Required for Docker integration tests
+        computeType: codebuild.ComputeType.MEDIUM,
+        environmentVariables: {
+          ENV_NAME: {
+            value: props.envName,
+          },
+        },
+      },
+      logging: {
+        cloudWatch: {
+          logGroup: testLogGroup,
+        },
+      },
+      timeout: cdk.Duration.minutes(20),
+    });
+
+    // Grant test project ECR pull permissions
+    testProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'ecr:GetAuthorizationToken',
+          'ecr:BatchCheckLayerAvailability',
+          'ecr:GetDownloadUrlForLayer',
+          'ecr:BatchGetImage',
         ],
         resources: ['*'],
       })
@@ -539,14 +558,25 @@ def handler(event, context):
           stageName: 'Build',
           actions: [
             new codepipeline_actions.CodeBuildAction({
-              actionName: 'Build_Test_Package',
+              actionName: 'Build_Package',
               project: buildProject,
               input: sourceOutput,
               outputs: [buildOutput],
             }),
           ],
         },
-        // Stage 3: Deploy (invokes Step Functions for canary orchestration)
+        // Stage 3: Test
+        {
+          stageName: 'Test',
+          actions: [
+            new codepipeline_actions.CodeBuildAction({
+              actionName: 'Integration_E2E_Tests',
+              project: testProject,
+              input: buildOutput,
+            }),
+          ],
+        },
+        // Stage 4: Deploy (invokes Step Functions for canary orchestration)
         {
           stageName: 'Deploy',
           actions: [
