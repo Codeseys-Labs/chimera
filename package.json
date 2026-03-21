@@ -47,6 +47,7 @@
     "seed:reset": "cd seed-data && bun run seed.ts --delete-tables && bun run seed.ts"
   },
   "devDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1014.0",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
     "@typescript-eslint/parser": "^8.57.1",
