@@ -11,6 +11,7 @@ import { TenantTier } from '@chimera/shared';
 
 // Augment Express Request to include tenant context
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       tenantContext?: TenantContext;

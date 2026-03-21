@@ -82,13 +82,13 @@ describe('SSE Formatter', () => {
     beforeEach(() => {
       chunks = [];
       mockWriter = {
-        write: jest.fn((chunk: Buffer, callback?: Function) => {
+        write: jest.fn((chunk: Buffer, callback?: () => void) => {
           chunks.push(chunk);
           if (callback) callback();
           return true;
         }),
         once: jest.fn(),
-        end: jest.fn((callback?: Function) => {
+        end: jest.fn((callback?: () => void) => {
           if (callback) callback();
         }),
       };

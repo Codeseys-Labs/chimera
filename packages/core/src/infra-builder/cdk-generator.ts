@@ -214,6 +214,7 @@ const config = new ssm.StringParameter(stack, 'Config', {
 
     // Example: Data lake ingestion pipeline
     if (pattern === 'data-lake-ingestion') {
+      const sources = (request.parameters.sources as string[] | undefined) || [];
       const cdkCode = `
 // Data Lake Ingestion Pipeline (L3 Construct)
 import { DataLakeIngestionPipeline } from '@chimera/constructs';
@@ -222,7 +223,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 const sourceBucket = s3.Bucket.fromBucketName(
   stack,
   'SourceBucket',
-  '${request.parameters.sources?.[0] || 'source-bucket'}'
+  '${sources[0] || 'source-bucket'}'
 );
 
 const pipeline = new DataLakeIngestionPipeline(stack, 'DataPipeline', {

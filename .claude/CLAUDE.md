@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-local-infra
-- **Task ID:** chimera-846c
+- **Agent Name:** builder-fix-foundation
+- **Task ID:** chimera-6a22
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-local-infra/chimera-846c
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-local-infra
-- **Parent:** lead-local-dev
+- **Branch:** overstory/builder-fix-foundation/chimera-6a22
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-foundation
+- **Parent:** lead-fix-foundation
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,29 +181,22 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-local-infra`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-foundation`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-local-infra`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-foundation`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-local-infra`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-foundation`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `docker-compose.yml`
-- `.mise.toml`
-- `.env.example`
-- `Makefile`
-- `seed-data/seed.ts`
-- `seed-data/tenants.json`
-- `seed-data/skills.json`
-- `package.json`
+No file scope restrictions
 
 ## Expertise
 
@@ -215,26 +208,26 @@ No specific expertise domains configured
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-local-infra**.
+Use `ov mail` for all communication. Your address is **builder-fix-foundation**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-local-infra
+ov mail check --agent builder-fix-foundation
 
 # Send a status update to your parent
-ov mail send --to lead-local-dev --subject "status" \
-  --body "Progress update here" --type status --agent builder-local-infra
+ov mail send --to lead-fix-foundation --subject "status" \
+  --body "Progress update here" --type status --agent builder-fix-foundation
 
 # Ask a question
-ov mail send --to lead-local-dev --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-local-infra
+ov mail send --to lead-fix-foundation --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-fix-foundation
 
 # Report completion
-ov mail send --to lead-local-dev --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-local-infra
+ov mail send --to lead-fix-foundation --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-fix-foundation
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-local-infra
+ov mail reply <message-id> --body "Your reply" --agent builder-fix-foundation
 ```
 
 ## Spawning Sub-Workers
@@ -248,20 +241,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-local-infra/chimera-846c)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-local-infra` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-local-dev: `ov mail send --to lead-local-dev --subject "Worker done: chimera-846c" --body "Quality gates passed." --type worker_done --agent builder-local-infra`
-7. **Close issue:** `sd close chimera-846c --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-fix-foundation/chimera-6a22)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-fix-foundation` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-fix-foundation: `ov mail send --to lead-fix-foundation --subject "Worker done: chimera-6a22" --body "Quality gates passed." --type worker_done --agent builder-fix-foundation`
+7. **Close issue:** `sd close chimera-6a22 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-local-infra`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-foundation`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-local-infra/chimera-846c
+- Commit only to your branch: overstory/builder-fix-foundation/chimera-6a22
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
