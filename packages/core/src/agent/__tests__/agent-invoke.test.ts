@@ -21,6 +21,8 @@ describe('ChimeraAgent.invoke()', () => {
       expect(result.output).toContain('[Placeholder]');
       expect(result.output).toContain('Hello');
       expect(result.sessionId).toBeDefined();
+      expect(typeof result.sessionId).toBe('string');
+      expect(result.sessionId.length).toBeGreaterThan(0);
       expect(result.stopReason).toBe('end_turn');
       expect(result.context.tenantId).toBe('test-tenant');
     });
@@ -300,6 +302,8 @@ describe('ChimeraAgent.invoke()', () => {
       // Check that user message was stored
       const userEntry = result.entries.find(e => e.content === 'Test message');
       expect(userEntry).toBeDefined();
+      expect(userEntry!.content).toBe('Test message');
+      expect(typeof userEntry!.content).toBe('string');
     });
 
     it('should pass system prompt to model', async () => {
@@ -438,6 +442,8 @@ describe('ChimeraAgent.invoke()', () => {
       expect(result.context.tenantId).toBe('test-tenant');
       expect(result.context.userId).toBe('user-123');
       expect(result.context.sessionId).toBeDefined();
+      expect(typeof result.context.sessionId).toBe('string');
+      expect(result.context.sessionId.length).toBeGreaterThan(0);
       expect(result.context.memoryNamespace).toContain('test-tenant');
     });
   });

@@ -48,6 +48,8 @@ describe('Chat Routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.content).toBeDefined();
+      expect(typeof response.body.content).toBe('string');
+      expect(response.body.content.length).toBeGreaterThan(0);
     });
 
     it('should reject empty messages array', async () => {
@@ -86,6 +88,8 @@ describe('Chat Routes', () => {
       expect(response.status).toBe(400); // Invalid request format
       expect(response.body.error).toBeDefined();
       expect(response.body.error.code).toBe('INVALID_REQUEST');
+      expect(response.body.error.message).toBeDefined();
+      expect(typeof response.body.error.message).toBe('string');
     });
   });
 
@@ -181,6 +185,7 @@ describe('Chat Routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.content).toBeDefined();
+      expect(typeof response.body.content).toBe('string');
       // Placeholder responses contain "[Placeholder]" text
       if (process.env.BEDROCK_ENABLED === 'false') {
         expect(response.body.content).toContain('[Placeholder]');
@@ -198,6 +203,8 @@ describe('Chat Routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.content).toBeDefined();
+      expect(typeof response.body.content).toBe('string');
+      expect(response.body.content.length).toBeGreaterThan(0);
     });
   });
 });
