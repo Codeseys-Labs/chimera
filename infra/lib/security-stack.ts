@@ -91,6 +91,14 @@ export class SecurityStack extends cdk.Stack {
       precedence: 20,
     });
 
+    // --- Cognito Hosted UI Domain ---
+    // Custom domain for OAuth flows (login/callback)
+    const hostedUIDomain = this.userPool.addDomain('HostedUI', {
+      cognitoDomain: {
+        domainPrefix: `chimera-${props.envName}-${this.account}`,
+      },
+    });
+
     // --- App clients ---
     // Web client: authorization code grant for browser-based apps
     this.userPoolClient = this.userPool.addClient('WebClient', {
@@ -103,10 +111,20 @@ export class SecurityStack extends cdk.Stack {
           cognito.OAuthScope.EMAIL,
           cognito.OAuthScope.PROFILE,
         ],
+        callbackUrls: [
+          'http://localhost:8080/auth/callback',
+          `https://chat-${props.envName}.example.com/auth/callback`, // Replace with actual domain
+        ],
+        logoutUrls: [
+          'http://localhost:8080/',
+          `https://chat-${props.envName}.example.com/`,
+        ],
       },
       accessTokenValidity: cdk.Duration.hours(1),
       idTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
+      generateSecret: false, // PKCE doesn't use client secret
+      preventUserExistenceErrors: true,
     });
 
     // CLI client: SRP auth for the `chimera` CLI tool
@@ -197,6 +215,16 @@ export class SecurityStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'WebClientId', {
       value: this.userPoolClient.userPoolClientId,
       exportName: `${this.stackName}-WebClientId`,
+    });
+    new cdk.CfnOutput(this, 'HostedUIDomain', {
+      value: hostedUIDomain.domainName,
+      exportName: `${this.stackName}-HostedUIDomain`,
+      description: 'Cognito hosted UI domain (e.g., chimera-dev-123456789.auth.us-east-1.amazoncognito.com)',
+    });
+    new cdk.CfnOutput(this, 'CognitoOAuthURL', {
+      value: `https://${hostedUIDomain.domainName}.auth.${this.region}.amazoncognito.com`,
+      exportName: `${this.stackName}-CognitoOAuthURL`,
+      description: 'Cognito OAuth base URL for login/token endpoints',
     });
     new cdk.CfnOutput(this, 'WebAclArn', {
       value: this.webAcl.attrArn,
