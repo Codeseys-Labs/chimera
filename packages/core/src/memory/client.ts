@@ -118,7 +118,7 @@ export class MemoryClientFactory {
    * Create in-memory client (testing)
    */
   static createInMemoryClient(namespace: string): MemoryClient {
-    // Implementation will use in-memory Map
-    throw new Error('InMemoryClient not yet implemented');
+    const { InMemoryClient } = require('./in-memory-client');
+    return new InMemoryClient(namespace);
   }
 }
