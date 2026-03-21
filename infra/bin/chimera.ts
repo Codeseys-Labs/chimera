@@ -163,15 +163,15 @@ tenantOnboardingStack.addDependency(securityStack);
 tenantOnboardingStack.addDependency(observabilityStack);
 
 // --- Stack 11: CI/CD Pipeline ---
-// CodePipeline with multi-stage canary deployment: GitHub source -> Build/Test -> Canary -> Progressive Rollout.
+// CodePipeline with multi-stage canary deployment: CodeCommit source -> Build/Test -> Canary -> Progressive Rollout.
+// Uses CodeCommit (not GitHub) to enable self-editing infrastructure through AWS SDK.
 // Independent stack, can be deployed separately from application stacks.
 const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
   env: envConfig,
   description: 'Chimera CI/CD pipeline: CodePipeline with canary deployment and auto-rollback',
   envName,
-  repository: app.node.tryGetContext('repository') ?? 'your-org/chimera',
+  repositoryName: app.node.tryGetContext('repositoryName') ?? 'chimera',
   branch: app.node.tryGetContext('branch') ?? 'main',
-  githubTokenSecretName: app.node.tryGetContext('githubTokenSecret'),
 });
 
 // Apply tags to all stacks
