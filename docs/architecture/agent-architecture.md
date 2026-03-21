@@ -102,6 +102,93 @@ Post-turn: tool success analysis, response quality, cost efficiency, signal rout
 
 ---
 
+## Section 9: Multi-Modal Processing
+
+### Media Input Handling
+
+Chimera agents natively handle video, audio, images, and documents without requiring explicit user instructions. The MediaProcessor module auto-detects input media type and routes to the appropriate AWS service.
+
+**Auto-routing pipeline:** Input received -> Type detection (MIME type > file extension > default) -> Route to service (Transcribe | Rekognition | Textract) -> Return structured result.
+
+### AWS Service Integration
+
+Three AWS services provide multi-modal capabilities:
+
+1. **AWS Transcribe** (audio/video): Speech-to-text transcription with speaker identification, language detection, timestamps. Supports formats: MP3, MP4, WAV, FLAC, OGG, WebM. Input: S3 URI required. Output: JSON transcript with confidence scores.
+
+2. **AWS Rekognition** (images): Object/scene detection, facial analysis, text extraction (OCR), content moderation. Supports formats: JPEG, PNG, GIF, BMP, WebP. Input: S3 URI or direct bytes. Output: Labels with confidence, bounding boxes, detected text.
+
+3. **AWS Textract** (documents): Text extraction, table detection, form field recognition, signature detection. Supports formats: PDF, TIFF, JPEG, PNG. Input: S3 URI required for multi-page. Output: Hierarchical blocks (page, line, word, table, form).
+
+### Type Detection Strategy
+
+MediaProcessor uses three-tier detection (priority order):
+
+1. **Explicit type** (highest confidence): User provides `mediaType` field
+2. **MIME type** (high confidence): Content-Type header or file metadata
+3. **File extension** (medium confidence): Parse from URI path
+4. **Default to document** (low confidence): Textract is most permissive
+
+Example mappings: `.mp3/.wav` → audio (Transcribe), `.jpg/.png` → image (Rekognition), `.pdf/.docx` → document (Textract), `.mp4/.mov` → video (Transcribe).
+
+### Storage Requirements
+
+**S3 dependency:** Transcribe and Textract require S3 URIs (no direct upload). Rekognition supports both S3 and direct bytes.
+
+**Pre-processing:** For local files or HTTP URLs, agent must:
+1. Upload to tenant's S3 bucket (`chimera-media-{tenantId}/uploads/`)
+2. Generate presigned URL if needed
+3. Pass S3 URI to MediaProcessor
+
+**Output storage:** Results stored in `chimera-media-{tenantId}/results/` with 7-day TTL. Transcripts, extracted text, and analysis JSON persisted for session context.
+
+### Integration with Agent Loop
+
+Multi-modal processing integrated into Strands ReAct loop:
+
+**User message with media attachment** → [1] API Gateway receives file upload + message → [2] Tenant Router uploads to S3 → [3] AgentCore Runtime receives S3 URI in context → [4] Agent calls `process_media` tool → [5] MediaProcessor auto-detects and routes → [6] Result injected into conversation context → [7] FM reasons over structured result → [8] Agent responds with insights.
+
+**Tool definition:** `process_media(uri: str, options: dict) -> MediaProcessingResult`. Tier gating: Basic (Transcribe only), Advanced (Transcribe + Rekognition), Premium (all three).
+
+### Async Processing Pattern
+
+Long-running jobs (Transcribe, Textract) use async pattern:
+
+1. **Start job** → Returns job ID immediately
+2. **Poll for completion** → MediaProcessor polls every 5s (max 60 attempts)
+3. **Background option** → For >5min jobs, use `start_background_task` tool → EventBridge → Step Functions → WebSocket notification
+
+**Production optimization:** Replace polling with EventBridge + Step Functions state machine. Transcribe/Textract emit CloudWatch Events on completion → Lambda updates session state → WebSocket pushes result to frontend.
+
+### Cost Tracking
+
+Media processing costs tracked per service:
+
+- **Transcribe:** $0.024/minute (Basic), $0.040/minute (Advanced with speaker labels)
+- **Rekognition:** $0.001/image (labels), $0.001/image (text), $0.001/image (faces)
+- **Textract:** $0.0015/page (text), $0.015/page (tables+forms)
+
+Costs accumulated in `chimera-cost-tracking` table with `mediaService` dimension. Budget alerts at 80% monthly quota.
+
+### Security Considerations
+
+**S3 bucket isolation:** Each tenant gets isolated prefix (`chimera-media-{tenantId}/`) with IAM policy enforcement. Presigned URLs expire after 15 minutes.
+
+**Cedar policies:** Media tools require `mediaProcessing` permission. Example:
+```cedar
+permit(
+  principal in TenantRole::"premium",
+  action == Action::"processMedia",
+  resource in MediaBucket::"chimera-media-*"
+) when {
+  context.mediaType in ["audio", "video", "image", "document"]
+};
+```
+
+**Content moderation:** Rekognition moderation labels checked before storing results. Policy violation triggers audit event + blocks result from session context.
+
+---
+
 ## Appendix A: OpenClaw to Chimera Mapping
 
 Gateway->API GW+Router+Runtime, Pi->Strands, Lane Queue->session serialization, exec->AWS SDK tools, SKILL.md->v2, ClawHub->chimera-skills+7-stage, Docker->MicroVM, MEMORY.md->LTM, SQLite->SEMANTIC_MEMORY, exec-approvals->Cedar, Nodes->Organizations, subagents->Strands multi-agent, skill-creator->AutoSkillGenerator.
