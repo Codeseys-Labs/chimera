@@ -202,5 +202,16 @@
 		"status": "active",
 		"createdAt": "2026-03-21T07:05:09.593Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-5dd14a8c",
+		"name": "batch-p5-p7b",
+		"memberIssueIds": [
+			"chimera-b970",
+			"chimera-a52e"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T07:49:49.171Z",
+		"completedAt": null
 	}
 ]
