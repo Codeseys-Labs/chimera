@@ -213,5 +213,18 @@
 		"status": "active",
 		"createdAt": "2026-03-21T07:49:49.171Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-2afe159b",
+		"name": "full-review-batch",
+		"memberIssueIds": [
+			"chimera-0626",
+			"chimera-9995",
+			"chimera-f101",
+			"chimera-86a1"
+		],
+		"status": "active",
+		"createdAt": "2026-03-21T18:04:42.454Z",
+		"completedAt": null
 	}
 ]
