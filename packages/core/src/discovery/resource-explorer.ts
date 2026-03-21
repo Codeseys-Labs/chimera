@@ -1,26 +1,25 @@
 /**
- * AWS Resource Explorer 2 Cross-Region Search
+ * AWS Resource Explorer 2 Cross-Region Search - Strands Tools
  *
- * Provides instant, tag-based resource discovery across all AWS regions
- * without pre-configuration. Resource Explorer offers:
+ * Provides Strands @tool decorated functions for instant, tag-based resource
+ * discovery across all AWS regions without pre-configuration.
  *
+ * Resource Explorer offers:
  * - **Instant search**: No setup required for partial results (as of Oct 2025)
  * - **Tag-based queries**: Search by tags, resource types, regions
  * - **Cross-region**: Single query returns results from all regions
  * - **Fast**: Sub-second response times vs Config's 5-15 min latency
  * - **Unified search**: Same API powering AWS Console's search bar
  *
- * Complements AWS Config by providing instant discovery while Config provides
- * historical data, configuration details, and relationship tracking.
- *
  * @see https://docs.aws.amazon.com/resource-explorer/latest/userguide/getting-started.html
  * @see docs/research/aws-account-agent/02-Resource-Explorer-Cross-Region-Search.md
  */
 
+import { tool } from '@strands-agents/sdk';
+import { z } from 'zod';
 import type {
   ExplorerResource,
   ResourceFilter,
-  DiscoveryQueryOptions,
   ResourceQueryResult,
   ResourceInventoryEntry,
   AWSRegion,
@@ -53,26 +52,10 @@ export interface ResourceExplorerConfig {
  * - `resourcetype:service:type` — Filter by resource type
  * - `region:us-east-1` — Filter by region
  * - Wildcards: `tag:Project=chimera*`
- *
- * @example
- * ```typescript
- * const query = new ExplorerQueryBuilder()
- *   .withTag('Environment', 'production')
- *   .withResourceType('lambda', 'function')
- *   .withRegion('us-east-1')
- *   .build();
- * // Result: "tag:Environment=production resourcetype:lambda:function region:us-east-1"
- * ```
  */
 export class ExplorerQueryBuilder {
   private parts: string[] = [];
 
-  /**
-   * Add tag filter
-   *
-   * @param key - Tag key
-   * @param value - Tag value (optional, wildcards supported)
-   */
   withTag(key: string, value?: string): this {
     if (value) {
       this.parts.push(`tag:${key}=${value}`);
@@ -82,47 +65,25 @@ export class ExplorerQueryBuilder {
     return this;
   }
 
-  /**
-   * Add resource type filter
-   *
-   * @param service - AWS service (e.g., 'lambda', 'rds', 'dynamodb')
-   * @param type - Resource type (e.g., 'function', 'db', 'table')
-   */
   withResourceType(service: string, type: string): this {
     this.parts.push(`resourcetype:${service}:${type}`);
     return this;
   }
 
-  /**
-   * Add region filter
-   *
-   * @param region - AWS region
-   */
   withRegion(region: AWSRegion): this {
     this.parts.push(`region:${region}`);
     return this;
   }
 
-  /**
-   * Add free-text search term
-   *
-   * @param term - Search term (matches resource IDs, names, ARNs)
-   */
   withSearchTerm(term: string): this {
     this.parts.push(term);
     return this;
   }
 
-  /**
-   * Build query string
-   */
   build(): string {
     return this.parts.join(' ');
   }
 
-  /**
-   * Build query from ResourceFilter
-   */
   static fromFilter(filter: ResourceFilter): string {
     const builder = new ExplorerQueryBuilder();
 
@@ -134,7 +95,6 @@ export class ExplorerQueryBuilder {
       filter.regions.forEach((region) => builder.withRegion(region));
     }
 
-    // Convert AWSResourceType to Resource Explorer format
     if (filter.resourceTypes) {
       filter.resourceTypes.forEach((type) => {
         const [service, resourceType] = this.parseResourceType(type);
@@ -145,14 +105,10 @@ export class ExplorerQueryBuilder {
     }
 
     const query = builder.build();
-    return query || '*'; // Fallback to wildcard if no filters
+    return query || '*';
   }
 
-  /**
-   * Parse AWS::Service::Type format to service:type
-   */
   private static parseResourceType(awsType: string): [string | null, string | null] {
-    // AWS::Lambda::Function → lambda:function
     const match = awsType.match(/^AWS::([^:]+)::(.+)$/);
     if (!match) return [null, null];
 
@@ -167,302 +123,277 @@ export class ExplorerQueryBuilder {
 }
 
 /**
- * Resource Explorer Service
+ * Create Resource Explorer Strands tools
  *
- * Provides instant cross-region resource search with tag-based queries.
+ * Factory function that creates Strands tools for AWS Resource Explorer operations.
+ * Each public method from the ResourceExplorer class becomes a standalone tool.
+ *
+ * @param config - Resource Explorer configuration
+ * @returns Array of Strands tools for resource search operations
  */
-export class ResourceExplorer {
-  private readonly config: ResourceExplorerConfig;
+export function createResourceExplorerTools(config: ResourceExplorerConfig) {
+  const search = tool({
+    name: 'explorer_search',
+    description: 'Search AWS resources using query string DSL. Supports tag-based queries, resource type filters, and region filters with wildcards.',
+    inputSchema: z.object({
+      queryString: z.string().describe('Query string (e.g., "tag:Environment=production resourcetype:lambda:function region:us-east-1")'),
+      maxResults: z.number().min(1).max(1000).default(100).describe('Maximum results to return'),
+      nextToken: z.string().optional().describe('Pagination token'),
+    }),
+    callback: async (input) => {
+      try {
+        const resources = await executeSearch(config, input.queryString, input.maxResults, input.nextToken);
 
-  /**
-   * Initialize Resource Explorer
-   *
-   * @param config - Explorer configuration
-   */
-  constructor(config: ResourceExplorerConfig) {
-    this.config = config;
-  }
+        const result: ResourceQueryResult = {
+          items: resources.map((r) => explorerResourceToInventoryEntry(config, r)),
+          pagination: {
+            nextToken: undefined,
+            hasMore: false,
+            totalCount: resources.length,
+            pageSize: input.maxResults,
+          },
+        };
 
-  /**
-   * Search resources using query string DSL
-   *
-   * @example
-   * ```typescript
-   * // Find all production Lambda functions
-   * const results = await explorer.search({
-   *   queryString: 'tag:Environment=production resourcetype:lambda:function',
-   *   maxResults: 50
-   * });
-   * ```
-   *
-   * @param options - Search options
-   * @returns Paginated search results
-   * @throws {DiscoveryError} On query syntax error or service failure
-   */
-  async search(options: {
-    queryString: string;
-    maxResults?: number;
-    nextToken?: string;
-  }): Promise<ResourceQueryResult> {
-    const { queryString, maxResults = 100, nextToken } = options;
+        return JSON.stringify(result, null, 2);
+      } catch (error) {
+        throw handleExplorerError(error, 'search');
+      }
+    },
+  });
 
-    try {
-      // Implementation would use AWS SDK ResourceExplorer2Client.search
-      const resources = await this.executeSearch(queryString, maxResults, nextToken);
+  const searchWithFilter = tool({
+    name: 'explorer_search_with_filter',
+    description: 'Search resources using structured filters. Converts filters to query string automatically.',
+    inputSchema: z.object({
+      resourceTypes: z.array(z.string()).optional().describe('Filter by resource types (e.g., ["AWS::Lambda::Function"])'),
+      regions: z.array(z.string()).optional().describe('Filter by regions (e.g., ["us-east-1", "us-west-2"])'),
+      tags: z.array(z.object({
+        key: z.string(),
+        value: z.string().optional(),
+      })).optional().describe('Filter by tags'),
+      limit: z.number().min(1).max(1000).default(100).describe('Maximum results'),
+      nextToken: z.string().optional().describe('Pagination token'),
+    }),
+    callback: async (input) => {
+      const filter: ResourceFilter = {
+        resourceTypes: input.resourceTypes,
+        regions: input.regions as AWSRegion[] | undefined,
+        tags: input.tags,
+      };
 
-      return {
-        items: resources.map((r) => this.explorerResourceToInventoryEntry(r)),
+      const queryString = ExplorerQueryBuilder.fromFilter(filter);
+
+      const resources = await executeSearch(config, queryString, input.limit, input.nextToken);
+
+      const result: ResourceQueryResult = {
+        items: resources.map((r) => explorerResourceToInventoryEntry(config, r)),
         pagination: {
           nextToken: undefined,
           hasMore: false,
           totalCount: resources.length,
-          pageSize: maxResults,
+          pageSize: input.limit,
         },
       };
-    } catch (error) {
-      throw this.handleExplorerError(error, 'search');
-    }
-  }
 
-  /**
-   * Search resources using structured filter
-   *
-   * Convenience method that converts ResourceFilter to query string.
-   *
-   * @param options - Discovery query options
-   * @returns Paginated resource results
-   */
-  async searchWithFilter(options: DiscoveryQueryOptions): Promise<ResourceQueryResult> {
-    const queryString = options.filter
-      ? ExplorerQueryBuilder.fromFilter(options.filter)
-      : '*';
+      return JSON.stringify(result, null, 2);
+    },
+  });
 
-    return await this.search({
-      queryString,
-      maxResults: options.limit,
-      nextToken: options.nextToken,
-    });
-  }
+  const findByTag = tool({
+    name: 'explorer_find_by_tag',
+    description: 'Find resources by a single tag. Simplified interface for common tag-based searches.',
+    inputSchema: z.object({
+      tagKey: z.string().describe('Tag key to search for'),
+      tagValue: z.string().optional().describe('Tag value (optional, supports wildcards like "prod*")'),
+      maxResults: z.number().min(1).max(1000).default(100).describe('Maximum results'),
+    }),
+    callback: async (input) => {
+      const queryString = input.tagValue
+        ? `tag:${input.tagKey}=${input.tagValue}`
+        : `tag:${input.tagKey}`;
 
-  /**
-   * Find resources by tag
-   *
-   * Simplified interface for common use case of searching by single tag.
-   *
-   * @example
-   * ```typescript
-   * // Find all resources owned by platform team
-   * const resources = await explorer.findByTag('Team', 'platform');
-   * ```
-   *
-   * @param key - Tag key
-   * @param value - Tag value (optional, supports wildcards)
-   * @param maxResults - Maximum results
-   * @returns Array of resources
-   */
-  async findByTag(key: string, value?: string, maxResults = 100): Promise<ResourceInventoryEntry[]> {
-    const queryString = value ? `tag:${key}=${value}` : `tag:${key}`;
+      const resources = await executeSearch(config, queryString, input.maxResults);
+      const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
-    const result = await this.search({ queryString, maxResults });
-    return result.items;
-  }
+      return JSON.stringify({ resources: items }, null, 2);
+    },
+  });
 
-  /**
-   * Find resources by type
-   *
-   * @example
-   * ```typescript
-   * // Find all DynamoDB tables
-   * const tables = await explorer.findByType('dynamodb', 'table');
-   * ```
-   *
-   * @param service - AWS service
-   * @param type - Resource type
-   * @param maxResults - Maximum results
-   * @returns Array of resources
-   */
-  async findByType(service: string, type: string, maxResults = 100): Promise<ResourceInventoryEntry[]> {
-    const queryString = `resourcetype:${service}:${type}`;
+  const findByType = tool({
+    name: 'explorer_find_by_type',
+    description: 'Find resources by AWS service and type. Example: findByType("dynamodb", "table") finds all DynamoDB tables.',
+    inputSchema: z.object({
+      service: z.string().describe('AWS service (e.g., "lambda", "dynamodb", "ec2")'),
+      type: z.string().describe('Resource type (e.g., "function", "table", "instance")'),
+      maxResults: z.number().min(1).max(1000).default(100).describe('Maximum results'),
+    }),
+    callback: async (input) => {
+      const queryString = `resourcetype:${input.service}:${input.type}`;
 
-    const result = await this.search({ queryString, maxResults });
-    return result.items;
-  }
+      const resources = await executeSearch(config, queryString, input.maxResults);
+      const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
-  /**
-   * Autocomplete resource search
-   *
-   * Provides search-as-you-type functionality, returning up to 10 matching
-   * resources for display in autocomplete UI.
-   *
-   * @param searchTerm - Partial search term
-   * @returns Array of matching resources (max 10)
-   */
-  async autocomplete(searchTerm: string): Promise<ResourceInventoryEntry[]> {
-    const result = await this.search({
-      queryString: searchTerm,
-      maxResults: 10,
-    });
+      return JSON.stringify({ resources: items }, null, 2);
+    },
+  });
 
-    return result.items;
-  }
+  const autocomplete = tool({
+    name: 'explorer_autocomplete',
+    description: 'Autocomplete resource search. Returns up to 10 matching resources for search-as-you-type functionality.',
+    inputSchema: z.object({
+      searchTerm: z.string().describe('Partial search term to match'),
+    }),
+    callback: async (input) => {
+      const resources = await executeSearch(config, input.searchTerm, 10);
+      const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
-  /**
-   * Get Resource Explorer index status
-   *
-   * Checks if aggregator index is configured and returns index health.
-   *
-   * @returns Index status information
-   */
-  async getIndexStatus(): Promise<{
-    exists: boolean;
-    type: 'AGGREGATOR' | 'LOCAL' | null;
-    region: AWSRegion | null;
-    state: 'ACTIVE' | 'CREATING' | 'DELETING' | 'UPDATING' | null;
-  }> {
-    try {
-      // Implementation would use AWS SDK ResourceExplorer2Client.getIndex
-      return await this.fetchIndexStatus();
-    } catch (error) {
-      return {
-        exists: false,
-        type: null,
-        region: null,
-        state: null,
-      };
-    }
-  }
+      return JSON.stringify({ suggestions: items }, null, 2);
+    },
+  });
 
-  /**
-   * Create aggregator index for complete results
-   *
-   * Promotes a regional index to aggregator status, enabling complete
-   * historical results instead of instant partial results.
-   *
-   * @param region - Region to promote (default: config.primaryRegion)
-   * @throws {DiscoveryError} If index doesn't exist or promotion fails
-   */
-  async createAggregatorIndex(region?: AWSRegion): Promise<void> {
-    const targetRegion = region ?? this.config.primaryRegion;
+  const getIndexStatus = tool({
+    name: 'explorer_get_index_status',
+    description: 'Get Resource Explorer index status. Check if aggregator index is configured and its health.',
+    inputSchema: z.object({}),
+    callback: async () => {
+      try {
+        const status = await fetchIndexStatus(config);
+        return JSON.stringify(status, null, 2);
+      } catch (error) {
+        return JSON.stringify({
+          exists: false,
+          type: null,
+          region: null,
+          state: null,
+        });
+      }
+    },
+  });
 
-    try {
-      // Implementation would use AWS SDK ResourceExplorer2Client.updateIndexType
-      await this.promoteToAggregator(targetRegion);
-    } catch (error) {
-      throw this.handleExplorerError(error, 'createAggregatorIndex');
-    }
-  }
+  const createAggregatorIndex = tool({
+    name: 'explorer_create_aggregator_index',
+    description: 'Create or promote aggregator index for complete historical results. Promotes a regional index to aggregator status.',
+    inputSchema: z.object({
+      region: z.string().optional().describe('Region to promote (default: primary region)'),
+    }),
+    callback: async (input) => {
+      const targetRegion = (input.region as AWSRegion | undefined) ?? config.primaryRegion;
 
-  // ========================================================================
-  // Private helper methods (implementation stubs for type safety)
-  // ========================================================================
+      try {
+        await promoteToAggregator(config, targetRegion);
+        return JSON.stringify({
+          success: true,
+          message: `Aggregator index created in ${targetRegion}`,
+        });
+      } catch (error) {
+        throw handleExplorerError(error, 'createAggregatorIndex');
+      }
+    },
+  });
 
-  private async executeSearch(
-    queryString: string,
-    maxResults: number,
-    nextToken?: string
-  ): Promise<ExplorerResource[]> {
-    // Stub: Would call AWS SDK ResourceExplorer2Client.search
-    return [];
-  }
-
-  private async fetchIndexStatus(): Promise<{
-    exists: boolean;
-    type: 'AGGREGATOR' | 'LOCAL' | null;
-    region: AWSRegion | null;
-    state: 'ACTIVE' | 'CREATING' | 'DELETING' | 'UPDATING' | null;
-  }> {
-    // Stub: Would call AWS SDK ResourceExplorer2Client.getIndex
-    return {
-      exists: false,
-      type: null,
-      region: null,
-      state: null,
-    };
-  }
-
-  private async promoteToAggregator(region: AWSRegion): Promise<void> {
-    // Stub: Would call AWS SDK ResourceExplorer2Client.updateIndexType
-  }
-
-  private explorerResourceToInventoryEntry(resource: ExplorerResource): ResourceInventoryEntry {
-    // Parse tags from properties if available
-    const tags: ResourceTag[] = [];
-    if (resource.properties) {
-      resource.properties.forEach((prop) => {
-        if (prop.name === 'tags' && Array.isArray(prop.data)) {
-          (prop.data as Array<{ key: string; value: string }>).forEach((tag) => {
-            tags.push({ key: tag.key, value: tag.value });
-          });
-        }
-      });
-    }
-
-    return {
-      arn: resource.arn,
-      resourceType: resource.resourceType as any, // May not match AWSResourceType enum
-      resourceId: this.extractResourceIdFromArn(resource.arn),
-      region: resource.region,
-      accountId: resource.owningAccountId,
-      status: 'OK', // Resource Explorer doesn't provide status
-      tags,
-      lastUpdatedAt: resource.lastReportedAt,
-    };
-  }
-
-  private extractResourceIdFromArn(arn: string): string {
-    // ARN format: arn:aws:service:region:account:resource-type/resource-id
-    const parts = arn.split(':');
-    const resourcePart = parts[parts.length - 1];
-    return resourcePart.split('/').pop() ?? resourcePart;
-  }
-
-  private handleExplorerError(error: unknown, operation: string): DiscoveryError {
-    if (error instanceof DiscoveryError) {
-      return error;
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-
-    if (message.includes('AccessDenied') || message.includes('UnauthorizedOperation')) {
-      return new DiscoveryError('PERMISSION_DENIED', `Explorer ${operation} denied: ${message}`, error);
-    }
-
-    if (message.includes('IndexNotFoundException')) {
-      return new DiscoveryError('INDEX_NOT_FOUND', `Resource Explorer index not found: ${message}`, error);
-    }
-
-    if (message.includes('ValidationException')) {
-      return new DiscoveryError('INVALID_QUERY', `Explorer query syntax error: ${message}`, error);
-    }
-
-    if (message.includes('ThrottlingException') || message.includes('TooManyRequestsException')) {
-      return new DiscoveryError('RATE_LIMIT_EXCEEDED', `Explorer API rate limit: ${message}`, error);
-    }
-
-    if (message.includes('ServiceUnavailableException')) {
-      return new DiscoveryError('SERVICE_UNAVAILABLE', `Explorer service unavailable: ${message}`, error);
-    }
-
-    return new DiscoveryError('INTERNAL_ERROR', `Explorer ${operation} failed: ${message}`, error);
-  }
+  return [
+    search,
+    searchWithFilter,
+    findByTag,
+    findByType,
+    autocomplete,
+    getIndexStatus,
+    createAggregatorIndex,
+  ];
 }
 
-/**
- * Create ResourceExplorer instance with default configuration
- *
- * @param accountId - AWS account ID
- * @param primaryRegion - Primary region with aggregator index (default: 'us-east-1')
- * @param useAggregator - Enable aggregator for complete results (default: true)
- * @returns Configured ResourceExplorer instance
- */
-export function createResourceExplorer(
-  accountId: string,
-  primaryRegion: AWSRegion = 'us-east-1',
-  useAggregator = true
-): ResourceExplorer {
-  return new ResourceExplorer({
-    accountId,
-    primaryRegion,
-    useAggregator,
-  });
+// ============================================================================
+// Private helper functions
+// ============================================================================
+
+async function executeSearch(
+  config: ResourceExplorerConfig,
+  queryString: string,
+  maxResults: number,
+  nextToken?: string
+): Promise<ExplorerResource[]> {
+  // Stub: Would call AWS SDK ResourceExplorer2Client.search
+  return [];
+}
+
+async function fetchIndexStatus(config: ResourceExplorerConfig): Promise<{
+  exists: boolean;
+  type: 'AGGREGATOR' | 'LOCAL' | null;
+  region: AWSRegion | null;
+  state: 'ACTIVE' | 'CREATING' | 'DELETING' | 'UPDATING' | null;
+}> {
+  // Stub: Would call AWS SDK ResourceExplorer2Client.getIndex
+  return {
+    exists: false,
+    type: null,
+    region: null,
+    state: null,
+  };
+}
+
+async function promoteToAggregator(config: ResourceExplorerConfig, region: AWSRegion): Promise<void> {
+  // Stub: Would call AWS SDK ResourceExplorer2Client.updateIndexType
+}
+
+function explorerResourceToInventoryEntry(
+  config: ResourceExplorerConfig,
+  resource: ExplorerResource
+): ResourceInventoryEntry {
+  const tags: ResourceTag[] = [];
+  if (resource.properties) {
+    resource.properties.forEach((prop) => {
+      if (prop.name === 'tags' && Array.isArray(prop.data)) {
+        (prop.data as Array<{ key: string; value: string }>).forEach((tag) => {
+          tags.push({ key: tag.key, value: tag.value });
+        });
+      }
+    });
+  }
+
+  return {
+    arn: resource.arn,
+    resourceType: resource.resourceType as any,
+    resourceId: extractResourceIdFromArn(resource.arn),
+    region: resource.region,
+    accountId: resource.owningAccountId,
+    status: 'OK',
+    tags,
+    lastUpdatedAt: resource.lastReportedAt,
+  };
+}
+
+function extractResourceIdFromArn(arn: string): string {
+  const parts = arn.split(':');
+  const resourcePart = parts[parts.length - 1];
+  return resourcePart.split('/').pop() ?? resourcePart;
+}
+
+function handleExplorerError(error: unknown, operation: string): DiscoveryError {
+  if (error instanceof DiscoveryError) {
+    return error;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes('AccessDenied') || message.includes('UnauthorizedOperation')) {
+    return new DiscoveryError('PERMISSION_DENIED', `Explorer ${operation} denied: ${message}`, error);
+  }
+
+  if (message.includes('IndexNotFoundException')) {
+    return new DiscoveryError('INDEX_NOT_FOUND', `Resource Explorer index not found: ${message}`, error);
+  }
+
+  if (message.includes('ValidationException')) {
+    return new DiscoveryError('INVALID_QUERY', `Explorer query syntax error: ${message}`, error);
+  }
+
+  if (message.includes('ThrottlingException') || message.includes('TooManyRequestsException')) {
+    return new DiscoveryError('RATE_LIMIT_EXCEEDED', `Explorer API rate limit: ${message}`, error);
+  }
+
+  if (message.includes('ServiceUnavailableException')) {
+    return new DiscoveryError('SERVICE_UNAVAILABLE', `Explorer service unavailable: ${message}`, error);
+  }
+
+  return new DiscoveryError('INTERNAL_ERROR', `Explorer ${operation} failed: ${message}`, error);
 }

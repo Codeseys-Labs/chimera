@@ -1,11 +1,15 @@
 /**
- * Cost Analyzer - AWS Cost Explorer Integration
+ * Cost Analyzer - AWS Cost Explorer Integration - Strands Tools
  *
- * Provides real-time cost tracking, anomaly detection, and spending analysis
- * for Chimera agents to maintain cost awareness across AWS resources.
+ * Provides Strands @tool decorated functions for real-time cost tracking,
+ * anomaly detection, and spending analysis for Chimera agents to maintain
+ * cost awareness across AWS resources.
  *
  * Based on: docs/research/aws-account-agent/04-Cost-Explorer-Spending-Analysis.md
  */
+
+import { tool } from '@strands-agents/sdk';
+import { z } from 'zod';
 
 /**
  * Cost Explorer API client interface (AWS SDK v3)
@@ -128,393 +132,551 @@ export interface CostAnalyzerConfig {
 }
 
 /**
- * Cost Analyzer Service
+ * Create Cost Analyzer Strands tools
  *
- * Provides programmatic access to AWS Cost Explorer for:
- * - Real-time spending awareness
- * - Multi-dimensional cost analysis
- * - Anomaly detection
- * - Cost forecasting
- * - Tag-based attribution
+ * Factory function that creates Strands tools for AWS Cost Explorer operations.
+ * Each public method from the CostAnalyzer class becomes a standalone tool.
+ *
+ * @param config - Cost Explorer configuration
+ * @returns Array of Strands tools for cost analysis operations
+ *
+ * @example
+ * ```typescript
+ * const costTools = createCostAnalyzerTools({
+ *   costExplorerClient: new CostExplorerClient({ region: 'us-east-1' }),
+ *   enableResourceTracking: true,
+ *   cacheTTL: 3600
+ * });
+ *
+ * const agent = Agent({
+ *   tools: costTools,
+ *   // ...
+ * });
+ * ```
  */
-export class CostAnalyzer {
-  private config: CostAnalyzerConfig;
-  private cache: Map<string, { data: any; expires: number }>;
+export function createCostAnalyzerTools(config: CostAnalyzerConfig) {
+  const fullConfig = {
+    defaultPeriodDays: 30,
+    anomalyThreshold: 2.0,
+    enableResourceTracking: true,
+    cacheTTL: 3600,
+    ...config,
+  };
 
-  constructor(config: CostAnalyzerConfig) {
-    this.config = {
-      defaultPeriodDays: 30,
-      anomalyThreshold: 2.0,
-      enableResourceTracking: true,
-      cacheTTL: 3600, // 1 hour
-      ...config,
-    };
-    this.cache = new Map();
-  }
+  const cache = new Map<string, { data: any; expires: number }>();
 
   /**
    * Get cost and usage data for a time period
    */
-  async getCostAndUsage(params: {
+  const getCostAndUsage = tool({
+    name: 'cost_get_usage',
+    description: 'Get AWS cost and usage data for a specified time period with flexible grouping and filtering options.',
+    inputSchema: z.object({
+      startDate: z.string().describe('Start date in YYYY-MM-DD format'),
+      endDate: z.string().describe('End date in YYYY-MM-DD format'),
+      granularity: z.enum(['DAILY', 'HOURLY', 'MONTHLY']).default('DAILY').describe('Time granularity for results'),
+      metrics: z.array(z.enum(['UnblendedCost', 'BlendedCost', 'UsageQuantity', 'AmortizedCost'])).default(['UnblendedCost']).describe('Cost metrics to include'),
+      groupBy: z.array(z.object({
+        type: z.enum(['DIMENSION', 'TAG']),
+        key: z.string(),
+      })).optional().describe('Grouping dimensions (e.g., [{"type": "DIMENSION", "key": "SERVICE"}])'),
+      filterDimension: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Filter by dimension (e.g., {"key": "SERVICE", "values": ["Amazon EC2"]})'),
+      filterTag: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Filter by tag (e.g., {"key": "Environment", "values": ["production"]})'),
+    }),
+    callback: async (input) => {
+      const timePeriod = { start: input.startDate, end: input.endDate };
+      const filter: CostFilter = {
+        dimensions: input.filterDimension as any,
+        tags: input.filterTag,
+      };
+
+      const result = await getCostAndUsageImpl(fullConfig, cache, {
+        timePeriod,
+        granularity: input.granularity,
+        metrics: input.metrics as CostMetric[],
+        groupBy: input.groupBy as CostGroupBy[] | undefined,
+        filter,
+      });
+
+      return JSON.stringify(result, null, 2);
+    },
+  });
+
+  /**
+   * Get costs for a specific tenant
+   */
+  const getTenantCosts = tool({
+    name: 'cost_get_tenant',
+    description: 'Get AWS costs for a specific tenant, filtered by TenantId tag.',
+    inputSchema: z.object({
+      tenantId: z.string().describe('Tenant identifier'),
+      startDate: z.string().describe('Start date in YYYY-MM-DD format'),
+      endDate: z.string().describe('End date in YYYY-MM-DD format'),
+      granularity: z.enum(['DAILY', 'HOURLY', 'MONTHLY']).default('DAILY').describe('Time granularity'),
+    }),
+    callback: async (input) => {
+      const result = await getCostAndUsageImpl(fullConfig, cache, {
+        timePeriod: { start: input.startDate, end: input.endDate },
+        granularity: input.granularity,
+        metrics: ['UnblendedCost'],
+        groupBy: [{ type: 'DIMENSION', key: 'SERVICE' }],
+        filter: {
+          tags: {
+            key: 'TenantId',
+            values: [input.tenantId],
+          },
+        },
+      });
+
+      return JSON.stringify(result, null, 2);
+    },
+  });
+
+  /**
+   * Get top N most expensive resources
+   */
+  const getTopResources = tool({
+    name: 'cost_get_top_resources',
+    description: 'Get the top N most expensive AWS resources for a time period.',
+    inputSchema: z.object({
+      startDate: z.string().describe('Start date in YYYY-MM-DD format'),
+      endDate: z.string().describe('End date in YYYY-MM-DD format'),
+      limit: z.number().min(1).max(100).default(10).describe('Number of top resources to return'),
+      filterDimension: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional dimension filter'),
+      filterTag: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional tag filter'),
+    }),
+    callback: async (input) => {
+      if (!fullConfig.enableResourceTracking) {
+        return JSON.stringify({ error: 'Resource-level cost tracking is disabled' });
+      }
+
+      const timePeriod = { start: input.startDate, end: input.endDate };
+      const filter: CostFilter = {
+        dimensions: input.filterDimension as any,
+        tags: input.filterTag,
+      };
+
+      const result = await getCostAndUsageImpl(fullConfig, cache, {
+        timePeriod,
+        granularity: 'DAILY',
+        metrics: ['UnblendedCost', 'UsageQuantity'],
+        groupBy: [
+          { type: 'DIMENSION', key: 'RESOURCE_ID' },
+          { type: 'DIMENSION', key: 'SERVICE' },
+        ],
+        filter,
+      });
+
+      // Aggregate costs by resource
+      const costs = result.byResource || {};
+      const resources = Object.entries(costs)
+        .map(([resourceId, cost]) => ({
+          resourceId,
+          resourceType: 'Unknown',
+          service: 'Unknown',
+          region: 'Unknown',
+          cost: typeof cost === 'number' ? cost : 0,
+        }))
+        .sort((a, b) => b.cost - a.cost)
+        .slice(0, input.limit);
+
+      return JSON.stringify({ resources }, null, 2);
+    },
+  });
+
+  /**
+   * Detect cost anomalies
+   */
+  const detectAnomalies = tool({
+    name: 'cost_detect_anomalies',
+    description: 'Detect cost anomalies using statistical analysis of historical spending patterns.',
+    inputSchema: z.object({
+      lookbackDays: z.number().min(7).max(90).default(30).describe('Number of days to analyze for anomalies'),
+      filterDimension: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional dimension filter'),
+      filterTag: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional tag filter'),
+    }),
+    callback: async (input) => {
+      const now = new Date();
+      const startDate = new Date(now.getTime() - input.lookbackDays * 24 * 60 * 60 * 1000);
+
+      const timePeriod = {
+        start: startDate.toISOString().split('T')[0],
+        end: now.toISOString().split('T')[0],
+      };
+
+      const filter: CostFilter = {
+        dimensions: input.filterDimension as any,
+        tags: input.filterTag,
+      };
+
+      const result = await getCostAndUsageImpl(fullConfig, cache, {
+        timePeriod,
+        granularity: 'DAILY',
+        metrics: ['UnblendedCost'],
+        filter,
+      });
+
+      const anomalies = analyzeAnomalies(result);
+      return JSON.stringify({ anomalies }, null, 2);
+    },
+  });
+
+  /**
+   * Get cost forecast
+   */
+  const getForecast = tool({
+    name: 'cost_get_forecast',
+    description: 'Get cost forecast for a future time period using AWS machine learning models.',
+    inputSchema: z.object({
+      startDate: z.string().describe('Forecast start date in YYYY-MM-DD format'),
+      endDate: z.string().describe('Forecast end date in YYYY-MM-DD format'),
+      metric: z.enum(['UnblendedCost', 'BlendedCost', 'UsageQuantity', 'AmortizedCost']).default('UnblendedCost').describe('Cost metric to forecast'),
+      granularity: z.enum(['DAILY', 'MONTHLY']).default('DAILY').describe('Forecast granularity'),
+      filterDimension: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional dimension filter'),
+      filterTag: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional tag filter'),
+    }),
+    callback: async (input) => {
+      const timePeriod = { start: input.startDate, end: input.endDate };
+      const filter: CostFilter = {
+        dimensions: input.filterDimension as any,
+        tags: input.filterTag,
+      };
+
+      const forecast = await getForecastImpl(fullConfig, cache, {
+        timePeriod,
+        metric: input.metric as CostMetric,
+        granularity: input.granularity,
+        filter,
+      });
+
+      return JSON.stringify(forecast, null, 2);
+    },
+  });
+
+  /**
+   * Compare costs between two periods
+   */
+  const comparePeriods = tool({
+    name: 'cost_compare_periods',
+    description: 'Compare AWS costs between two time periods to identify spending changes and trends.',
+    inputSchema: z.object({
+      currentStart: z.string().describe('Current period start date (YYYY-MM-DD)'),
+      currentEnd: z.string().describe('Current period end date (YYYY-MM-DD)'),
+      previousStart: z.string().describe('Previous period start date (YYYY-MM-DD)'),
+      previousEnd: z.string().describe('Previous period end date (YYYY-MM-DD)'),
+      groupBy: z.array(z.object({
+        type: z.enum(['DIMENSION', 'TAG']),
+        key: z.string(),
+      })).optional().describe('Grouping dimensions'),
+      filterDimension: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional dimension filter'),
+      filterTag: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional tag filter'),
+    }),
+    callback: async (input) => {
+      const filter: CostFilter = {
+        dimensions: input.filterDimension as any,
+        tags: input.filterTag,
+      };
+
+      const [current, previous] = await Promise.all([
+        getCostAndUsageImpl(fullConfig, cache, {
+          timePeriod: { start: input.currentStart, end: input.currentEnd },
+          groupBy: input.groupBy as CostGroupBy[] | undefined,
+          filter,
+        }),
+        getCostAndUsageImpl(fullConfig, cache, {
+          timePeriod: { start: input.previousStart, end: input.previousEnd },
+          groupBy: input.groupBy as CostGroupBy[] | undefined,
+          filter,
+        }),
+      ]);
+
+      const delta = current.totalCost - previous.totalCost;
+      const deltaPercent = previous.totalCost > 0 ? (delta / previous.totalCost) * 100 : 0;
+
+      // Calculate service-level changes
+      const changes: Array<{ key: string; delta: number; deltaPercent: number }> = [];
+
+      for (const [service, currentCost] of Object.entries(current.byService)) {
+        const previousCost = previous.byService[service] || 0;
+        const serviceDelta = currentCost - previousCost;
+        const servicePercent = previousCost > 0 ? (serviceDelta / previousCost) * 100 : 0;
+
+        changes.push({
+          key: service,
+          delta: serviceDelta,
+          deltaPercent: servicePercent,
+        });
+      }
+
+      changes.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+      const result = {
+        current,
+        previous,
+        delta,
+        deltaPercent,
+        topIncreases: changes.filter(c => c.delta > 0).slice(0, 5),
+        topDecreases: changes.filter(c => c.delta < 0).slice(0, 5),
+      };
+
+      return JSON.stringify(result, null, 2);
+    },
+  });
+
+  /**
+   * Get current month-to-date costs
+   */
+  const getCurrentMonthCosts = tool({
+    name: 'cost_get_current_month',
+    description: 'Get month-to-date AWS costs for the current month.',
+    inputSchema: z.object({
+      filterDimension: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional dimension filter'),
+      filterTag: z.object({
+        key: z.string(),
+        values: z.array(z.string()),
+      }).optional().describe('Optional tag filter'),
+    }),
+    callback: async (input) => {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const filter: CostFilter = {
+        dimensions: input.filterDimension as any,
+        tags: input.filterTag,
+      };
+
+      const result = await getCostAndUsageImpl(fullConfig, cache, {
+        timePeriod: {
+          start: monthStart.toISOString().split('T')[0],
+          end: now.toISOString().split('T')[0],
+        },
+        granularity: 'MONTHLY',
+        metrics: ['UnblendedCost'],
+        groupBy: [{ type: 'DIMENSION', key: 'SERVICE' }],
+        filter,
+      });
+
+      return JSON.stringify(result, null, 2);
+    },
+  });
+
+  return [
+    getCostAndUsage,
+    getTenantCosts,
+    getTopResources,
+    detectAnomalies,
+    getForecast,
+    comparePeriods,
+    getCurrentMonthCosts,
+  ];
+}
+
+// ============================================================================
+// Private helper functions
+// ============================================================================
+
+async function getCostAndUsageImpl(
+  config: Required<CostAnalyzerConfig>,
+  cache: Map<string, { data: any; expires: number }>,
+  params: {
     timePeriod: TimePeriod;
     granularity?: CostGranularity;
     metrics?: CostMetric[];
     groupBy?: CostGroupBy[];
     filter?: CostFilter;
-  }): Promise<CostAnalysisResult> {
-    const cacheKey = this.getCacheKey('cost', params);
-    const cached = this.getFromCache(cacheKey);
-    if (cached) return cached;
-
-    const { GetCostAndUsageCommand } = await import('@aws-sdk/client-cost-explorer');
-
-    const command = new GetCostAndUsageCommand({
-      TimePeriod: {
-        Start: params.timePeriod.start,
-        End: params.timePeriod.end,
-      },
-      Granularity: params.granularity || 'DAILY',
-      Metrics: params.metrics || ['UnblendedCost'],
-      GroupBy: params.groupBy?.map(g => ({ Type: g.type, Key: g.key })),
-      Filter: this.buildFilter(params.filter),
-    });
-
-    const response = await this.config.costExplorerClient.send(command);
-
-    const result = this.parseCostResponse(response, params);
-    this.setCache(cacheKey, result);
-    return result;
   }
+): Promise<CostAnalysisResult> {
+  const cacheKey = getCacheKey('cost', params);
+  const cached = getFromCache(cache, cacheKey);
+  if (cached) return cached;
 
-  /**
-   * Get costs for a specific tenant
-   */
-  async getTenantCosts(params: {
-    tenantId: string;
-    timePeriod: TimePeriod;
-    granularity?: CostGranularity;
-  }): Promise<CostAnalysisResult> {
-    return this.getCostAndUsage({
-      timePeriod: params.timePeriod,
-      granularity: params.granularity,
-      metrics: ['UnblendedCost'],
-      groupBy: [{ type: 'DIMENSION', key: 'SERVICE' }],
-      filter: {
-        tags: {
-          key: 'TenantId',
-          values: [params.tenantId],
-        },
-      },
-    });
-  }
+  const { GetCostAndUsageCommand } = await import('@aws-sdk/client-cost-explorer');
 
-  /**
-   * Get top N most expensive resources
-   */
-  async getTopResources(params: {
-    timePeriod: TimePeriod;
-    limit?: number;
-    filter?: CostFilter;
-  }): Promise<ResourceCost[]> {
-    if (!this.config.enableResourceTracking) {
-      throw new Error('Resource-level cost tracking is disabled');
-    }
+  const command = new GetCostAndUsageCommand({
+    TimePeriod: {
+      Start: params.timePeriod.start,
+      End: params.timePeriod.end,
+    },
+    Granularity: params.granularity || 'DAILY',
+    Metrics: params.metrics || ['UnblendedCost'],
+    GroupBy: params.groupBy?.map(g => ({ Type: g.type, Key: g.key })),
+    Filter: buildFilter(params.filter),
+  });
 
-    const result = await this.getCostAndUsage({
-      timePeriod: params.timePeriod,
-      granularity: 'DAILY',
-      metrics: ['UnblendedCost', 'UsageQuantity'],
-      groupBy: [
-        { type: 'DIMENSION', key: 'RESOURCE_ID' },
-        { type: 'DIMENSION', key: 'SERVICE' },
-      ],
-      filter: params.filter,
-    });
+  const response = await config.costExplorerClient.send(command);
 
-    // Aggregate costs by resource
-    const resourceCosts: Record<string, ResourceCost> = {};
+  const result = parseCostResponse(response, params);
+  setCache(cache, config.cacheTTL!, cacheKey, result);
+  return result;
+}
 
-    // Parse response and aggregate (implementation depends on actual response structure)
-    // This is a simplified version
-    const costs = result.byResource || {};
-    const resources = Object.entries(costs)
-      .map(([resourceId, cost]) => ({
-        resourceId,
-        resourceType: 'Unknown', // Would extract from resourceId
-        service: 'Unknown',
-        region: 'Unknown',
-        cost: typeof cost === 'number' ? cost : 0,
-      }))
-      .sort((a, b) => b.cost - a.cost)
-      .slice(0, params.limit || 10);
-
-    return resources;
-  }
-
-  /**
-   * Detect cost anomalies using statistical analysis
-   */
-  async detectAnomalies(params: {
-    timePeriod?: TimePeriod;
-    lookbackDays?: number;
-    filter?: CostFilter;
-  }): Promise<CostAnomaly[]> {
-    const lookbackDays = params.lookbackDays || 30;
-    const now = new Date();
-    const startDate = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
-
-    const timePeriod = params.timePeriod || {
-      start: startDate.toISOString().split('T')[0],
-      end: now.toISOString().split('T')[0],
-    };
-
-    const result = await this.getCostAndUsage({
-      timePeriod,
-      granularity: 'DAILY',
-      metrics: ['UnblendedCost'],
-      filter: params.filter,
-    });
-
-    return this.analyzeAnomalies(result);
-  }
-
-  /**
-   * Get cost forecast for future period
-   */
-  async getForecast(params: {
+async function getForecastImpl(
+  config: Required<CostAnalyzerConfig>,
+  cache: Map<string, { data: any; expires: number }>,
+  params: {
     timePeriod: TimePeriod;
     metric?: CostMetric;
     granularity?: CostGranularity;
     filter?: CostFilter;
-  }): Promise<CostForecast> {
-    const cacheKey = this.getCacheKey('forecast', params);
-    const cached = this.getFromCache(cacheKey);
-    if (cached) return cached;
-
-    const { GetCostForecastCommand } = await import('@aws-sdk/client-cost-explorer');
-
-    // Convert CostMetric to AWS SDK Metric format
-    const metricMap: Record<CostMetric, string> = {
-      'UnblendedCost': 'UNBLENDED_COST',
-      'BlendedCost': 'BLENDED_COST',
-      'UsageQuantity': 'USAGE_QUANTITY',
-      'AmortizedCost': 'AMORTIZED_COST',
-    };
-    const metric = params.metric ? metricMap[params.metric] : 'UNBLENDED_COST';
-
-    const command = new GetCostForecastCommand({
-      TimePeriod: {
-        Start: params.timePeriod.start,
-        End: params.timePeriod.end,
-      },
-      Metric: metric as any,
-      Granularity: params.granularity || 'DAILY',
-      Filter: this.buildFilter(params.filter),
-    });
-
-    const response = await this.config.costExplorerClient.send(command);
-
-    const forecast: CostForecast = {
-      timePeriod: params.timePeriod,
-      predictedCost: parseFloat(response.Total?.Amount || '0'),
-      confidence: response.ForecastResultsByTime?.[0]?.MeanValue ? 'MEDIUM' : 'LOW',
-      method: 'AWS Machine Learning',
-    };
-
-    this.setCache(cacheKey, forecast);
-    return forecast;
   }
+): Promise<CostForecast> {
+  const cacheKey = getCacheKey('forecast', params);
+  const cached = getFromCache(cache, cacheKey);
+  if (cached) return cached;
 
-  /**
-   * Compare costs between two time periods
-   */
-  async comparePeriods(params: {
-    currentPeriod: TimePeriod;
-    previousPeriod: TimePeriod;
-    groupBy?: CostGroupBy[];
-    filter?: CostFilter;
-  }): Promise<{
-    current: CostAnalysisResult;
-    previous: CostAnalysisResult;
-    delta: number;
-    deltaPercent: number;
-    topIncreases: Array<{ key: string; delta: number; deltaPercent: number }>;
-    topDecreases: Array<{ key: string; delta: number; deltaPercent: number }>;
-  }> {
-    const [current, previous] = await Promise.all([
-      this.getCostAndUsage({
-        timePeriod: params.currentPeriod,
-        groupBy: params.groupBy,
-        filter: params.filter,
-      }),
-      this.getCostAndUsage({
-        timePeriod: params.previousPeriod,
-        groupBy: params.groupBy,
-        filter: params.filter,
-      }),
-    ]);
+  const { GetCostForecastCommand } = await import('@aws-sdk/client-cost-explorer');
 
-    const delta = current.totalCost - previous.totalCost;
-    const deltaPercent = previous.totalCost > 0
-      ? (delta / previous.totalCost) * 100
-      : 0;
+  const metricMap: Record<CostMetric, string> = {
+    'UnblendedCost': 'UNBLENDED_COST',
+    'BlendedCost': 'BLENDED_COST',
+    'UsageQuantity': 'USAGE_QUANTITY',
+    'AmortizedCost': 'AMORTIZED_COST',
+  };
+  const metric = params.metric ? metricMap[params.metric] : 'UNBLENDED_COST';
 
-    // Calculate service-level changes
-    const changes: Array<{ key: string; delta: number; deltaPercent: number }> = [];
+  const command = new GetCostForecastCommand({
+    TimePeriod: {
+      Start: params.timePeriod.start,
+      End: params.timePeriod.end,
+    },
+    Metric: metric as any,
+    Granularity: params.granularity || 'DAILY',
+    Filter: buildFilter(params.filter),
+  });
 
-    for (const [service, currentCost] of Object.entries(current.byService)) {
-      const previousCost = previous.byService[service] || 0;
-      const serviceDelta = currentCost - previousCost;
-      const servicePercent = previousCost > 0 ? (serviceDelta / previousCost) * 100 : 0;
+  const response = await config.costExplorerClient.send(command);
 
-      changes.push({
-        key: service,
-        delta: serviceDelta,
-        deltaPercent: servicePercent,
-      });
-    }
+  const forecast: CostForecast = {
+    timePeriod: params.timePeriod,
+    predictedCost: parseFloat(response.Total?.Amount || '0'),
+    confidence: response.ForecastResultsByTime?.[0]?.MeanValue ? 'MEDIUM' : 'LOW',
+    method: 'AWS Machine Learning',
+  };
 
-    changes.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  setCache(cache, config.cacheTTL!, cacheKey, forecast);
+  return forecast;
+}
 
-    return {
-      current,
-      previous,
-      delta,
-      deltaPercent,
-      topIncreases: changes.filter(c => c.delta > 0).slice(0, 5),
-      topDecreases: changes.filter(c => c.delta < 0).slice(0, 5),
-    };
-  }
+function buildFilter(filter?: CostFilter): any {
+  if (!filter) return undefined;
 
-  /**
-   * Get current month-to-date costs
-   */
-  async getCurrentMonthCosts(filter?: CostFilter): Promise<CostAnalysisResult> {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const conditions: any[] = [];
 
-    return this.getCostAndUsage({
-      timePeriod: {
-        start: monthStart.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+  if (filter.dimensions) {
+    conditions.push({
+      Dimensions: {
+        Key: filter.dimensions.key,
+        Values: filter.dimensions.values,
       },
-      granularity: 'MONTHLY',
-      metrics: ['UnblendedCost'],
-      groupBy: [{ type: 'DIMENSION', key: 'SERVICE' }],
-      filter,
     });
   }
 
-  /**
-   * Private: Build Cost Explorer filter from our filter format
-   */
-  private buildFilter(filter?: CostFilter): any {
-    if (!filter) return undefined;
-
-    const conditions: any[] = [];
-
-    if (filter.dimensions) {
-      conditions.push({
-        Dimensions: {
-          Key: filter.dimensions.key,
-          Values: filter.dimensions.values,
-        },
-      });
-    }
-
-    if (filter.tags) {
-      conditions.push({
-        Tags: {
-          Key: filter.tags.key,
-          Values: filter.tags.values,
-        },
-      });
-    }
-
-    if (conditions.length === 0) return undefined;
-    if (conditions.length === 1) return conditions[0];
-
-    return { And: conditions };
+  if (filter.tags) {
+    conditions.push({
+      Tags: {
+        Key: filter.tags.key,
+        Values: filter.tags.values,
+      },
+    });
   }
 
-  /**
-   * Private: Parse Cost Explorer response into our format
-   */
-  private parseCostResponse(response: any, params: any): CostAnalysisResult {
-    let totalCost = 0;
-    const byService: Record<string, number> = {};
-    const byResource: Record<string, number> = {};
-    const byTag: Record<string, number> = {};
+  if (conditions.length === 0) return undefined;
+  if (conditions.length === 1) return conditions[0];
 
-    for (const result of response.ResultsByTime || []) {
-      // Add to total
-      const amount = parseFloat(result.Total?.UnblendedCost?.Amount || '0');
-      totalCost += amount;
+  return { And: conditions };
+}
 
-      // Group by dimensions
-      for (const group of result.Groups || []) {
-        const cost = parseFloat(group.Metrics?.UnblendedCost?.Amount || '0');
-        const keys = group.Keys || [];
+function parseCostResponse(response: any, params: any): CostAnalysisResult {
+  let totalCost = 0;
+  const byService: Record<string, number> = {};
+  const byResource: Record<string, number> = {};
+  const byTag: Record<string, number> = {};
 
-        if (keys.length > 0) {
-          // Determine grouping type
-          const groupBy = params.groupBy?.[0];
-          if (groupBy?.key === 'SERVICE') {
-            byService[keys[0]] = (byService[keys[0]] || 0) + cost;
-          } else if (groupBy?.key === 'RESOURCE_ID') {
-            byResource[keys[0]] = (byResource[keys[0]] || 0) + cost;
-          } else if (groupBy?.type === 'TAG') {
-            byTag[keys[0]] = (byTag[keys[0]] || 0) + cost;
-          }
+  for (const result of response.ResultsByTime || []) {
+    const amount = parseFloat(result.Total?.UnblendedCost?.Amount || '0');
+    totalCost += amount;
+
+    for (const group of result.Groups || []) {
+      const cost = parseFloat(group.Metrics?.UnblendedCost?.Amount || '0');
+      const keys = group.Keys || [];
+
+      if (keys.length > 0) {
+        const groupBy = params.groupBy?.[0];
+        if (groupBy?.key === 'SERVICE') {
+          byService[keys[0]] = (byService[keys[0]] || 0) + cost;
+        } else if (groupBy?.key === 'RESOURCE_ID') {
+          byResource[keys[0]] = (byResource[keys[0]] || 0) + cost;
+        } else if (groupBy?.type === 'TAG') {
+          byTag[keys[0]] = (byTag[keys[0]] || 0) + cost;
         }
       }
     }
-
-    return {
-      timePeriod: params.timePeriod,
-      totalCost,
-      byService,
-      ...(Object.keys(byResource).length > 0 && { byResource }),
-      ...(Object.keys(byTag).length > 0 && { byTag }),
-    };
   }
 
-  /**
-   * Private: Analyze cost data for anomalies
-   */
-  private analyzeAnomalies(result: CostAnalysisResult): CostAnomaly[] {
-    // This is a simplified statistical analysis
-    // In production, would use more sophisticated time-series analysis
-    const anomalies: CostAnomaly[] = [];
+  return {
+    timePeriod: params.timePeriod,
+    totalCost,
+    byService,
+    ...(Object.keys(byResource).length > 0 && { byResource }),
+    ...(Object.keys(byTag).length > 0 && { byTag }),
+  };
+}
 
-    // Would implement actual anomaly detection here using historical data
-    // For now, return empty array as placeholder
+function analyzeAnomalies(result: CostAnalysisResult): CostAnomaly[] {
+  // Simplified placeholder - would implement actual anomaly detection
+  return [];
+}
 
-    return anomalies;
+function getCacheKey(prefix: string, params: any): string {
+  return `${prefix}:${JSON.stringify(params)}`;
+}
+
+function getFromCache(cache: Map<string, { data: any; expires: number }>, key: string): any | null {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (Date.now() > cached.expires) {
+    cache.delete(key);
+    return null;
   }
+  return cached.data;
+}
 
-  /**
-   * Private: Cache management
-   */
-  private getCacheKey(prefix: string, params: any): string {
-    return `${prefix}:${JSON.stringify(params)}`;
-  }
-
-  private getFromCache(key: string): any | null {
-    const cached = this.cache.get(key);
-    if (!cached) return null;
-    if (Date.now() > cached.expires) {
-      this.cache.delete(key);
-      return null;
-    }
-    return cached.data;
-  }
-
-  private setCache(key: string, data: any): void {
-    const ttl = this.config.cacheTTL || 3600;
-    this.cache.set(key, {
-      data,
-      expires: Date.now() + ttl * 1000,
-    });
-  }
+function setCache(cache: Map<string, { data: any; expires: number }>, ttl: number, key: string, data: any): void {
+  cache.set(key, {
+    data,
+    expires: Date.now() + ttl * 1000,
+  });
 }
