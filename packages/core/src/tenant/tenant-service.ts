@@ -18,16 +18,31 @@ import {
   TenantStatus,
 } from '@chimera/shared';
 
+import type {
+  GetCommandInput,
+  GetCommandOutput,
+  PutCommandInput,
+  PutCommandOutput,
+  UpdateCommandInput,
+  UpdateCommandOutput,
+  DeleteCommandInput,
+  DeleteCommandOutput,
+  QueryCommandInput,
+  QueryCommandOutput,
+  BatchGetCommandInput,
+  BatchGetCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
+
 /**
- * DynamoDB client interface (placeholder for AWS SDK)
+ * DynamoDB client interface
  */
 export interface DynamoDBClient {
-  query(params: any): Promise<any>;
-  put(params: any): Promise<any>;
-  delete(params: any): Promise<any>;
-  get(params: any): Promise<any>;
-  batchGet(params: any): Promise<any>;
-  update(params: any): Promise<any>;
+  query(params: QueryCommandInput): Promise<QueryCommandOutput>;
+  put(params: PutCommandInput): Promise<PutCommandOutput>;
+  delete(params: DeleteCommandInput): Promise<DeleteCommandOutput>;
+  get(params: GetCommandInput): Promise<GetCommandOutput>;
+  batchGet(params: BatchGetCommandInput): Promise<BatchGetCommandOutput>;
+  update(params: UpdateCommandInput): Promise<UpdateCommandOutput>;
 }
 
 /**
