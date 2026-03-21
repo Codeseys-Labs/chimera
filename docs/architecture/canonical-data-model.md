@@ -4,10 +4,10 @@ version: 1.0.0
 status: canonical
 last_updated: 2026-03-19
 supersedes:
-  - docs/research/architecture-reviews/ClawCore-Architecture-Review-Platform-IaC.md (single-table design)
-  - docs/research/architecture-reviews/ClawCore-Final-Architecture-Plan.md (6-table overview)
-  - docs/research/architecture-reviews/ClawCore-AWS-Component-Blueprint.md (6-table with details)
-  - docs/research/architecture-reviews/ClawCore-Architecture-Review-Multi-Tenant.md (enhanced tenant config)
+  - docs/research/architecture-reviews/Chimera-Architecture-Review-Platform-IaC.md (single-table design)
+  - docs/research/architecture-reviews/Chimera-Final-Architecture-Plan.md (6-table overview)
+  - docs/research/architecture-reviews/Chimera-AWS-Component-Blueprint.md (6-table with details)
+  - docs/research/architecture-reviews/Chimera-Architecture-Review-Multi-Tenant.md (enhanced tenant config)
 authority: |
   This document is the SINGLE SOURCE OF TRUTH for all DynamoDB table schemas in the AWS Chimera platform.
   All implementation code, CDK stacks, API handlers, and documentation MUST reference this specification.
@@ -39,16 +39,16 @@ AWS Chimera uses a **6-table DynamoDB design** optimized for multi-tenant SaaS w
 
 | Table | Purpose | Records | TTL | Encryption |
 |-------|---------|---------|-----|------------|
-| `clawcore-tenants` | Tenant config, tier, quotas | ~5-10 items/tenant | None | AWS-managed |
-| `clawcore-sessions` | Active agent sessions | ~1-50 items/tenant | 24 hours | AWS-managed |
-| `clawcore-skills` | Installed skills, MCP endpoints | ~10-100 items/tenant | None | AWS-managed |
-| `clawcore-rate-limits` | Token bucket state, request counts | ~5-20 items/tenant | 5 minutes | AWS-managed |
-| `clawcore-cost-tracking` | Monthly cost accumulation | 1 item/tenant/month | 2 years | AWS-managed |
-| `clawcore-audit` | Security events, compliance audit | ~100-10K items/tenant | 90d-7yr (tier-based) | CMK (required) |
+| `chimera-tenants` | Tenant config, tier, quotas | ~5-10 items/tenant | None | AWS-managed |
+| `chimera-sessions` | Active agent sessions | ~1-50 items/tenant | 24 hours | AWS-managed |
+| `chimera-skills` | Installed skills, MCP endpoints | ~10-100 items/tenant | None | AWS-managed |
+| `chimera-rate-limits` | Token bucket state, request counts | ~5-20 items/tenant | 5 minutes | AWS-managed |
+| `chimera-cost-tracking` | Monthly cost accumulation | 1 item/tenant/month | 2 years | AWS-managed |
+| `chimera-audit` | Security events, compliance audit | ~100-10K items/tenant | 90d-7yr (tier-based) | CMK (required) |
 
 ### Why Multi-Table Design?
 
-**Rejected Alternative:** Single-table design (all data in `clawcore-platform` with SK overloading)
+**Rejected Alternative:** Single-table design (all data in `chimera-platform` with SK overloading)
 
 **Multi-table advantages:**
 - ✅ **Clear isolation boundaries** — table-level IAM policies
@@ -88,7 +88,7 @@ AWS Chimera uses a **6-table DynamoDB design** optimized for multi-tenant SaaS w
 
 ## Schema Specification
 
-### Table 1: `clawcore-tenants`
+### Table 1: `chimera-tenants`
 
 **Purpose:** Tenant configuration, feature flags, tier settings, quotas
 
@@ -179,11 +179,11 @@ SK: PROFILE | CONFIG#features | CONFIG#models | CONFIG#tools | CONFIG#channels |
   enabledChannels: ["web", "slack", "discord"],
   slack: {
     workspaceId: "T01234567",
-    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:clawcore/tenant/org-acme-corp/slack-bot-token"
+    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:chimera/tenant/org-acme-corp/slack-bot-token"
   },
   discord: {
     guildId: "987654321",
-    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:clawcore/tenant/org-acme-corp/discord-bot-token"
+    botTokenArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:chimera/tenant/org-acme-corp/discord-bot-token"
   }
 }
 ```
@@ -258,7 +258,7 @@ Projection: KEYS_ONLY
 
 ---
 
-### Table 2: `clawcore-sessions`
+### Table 2: `chimera-sessions`
 
 **Purpose:** Active agent sessions, state tracking, last activity timestamps
 
@@ -312,7 +312,7 @@ Projection: ALL
 
 ---
 
-### Table 3: `clawcore-skills`
+### Table 3: `chimera-skills`
 
 **Purpose:** Installed skills, versions, MCP server endpoints
 
@@ -364,7 +364,7 @@ Projection: ALL
 
 ---
 
-### Table 4: `clawcore-rate-limits`
+### Table 4: `chimera-rate-limits`
 
 **Purpose:** Token bucket state, request counts, rate limiting windows
 
@@ -410,7 +410,7 @@ SK: WINDOW#{timestamp} | RATELIMIT#{resource}
 
 ---
 
-### Table 5: `clawcore-cost-tracking`
+### Table 5: `chimera-cost-tracking`
 
 **Purpose:** Monthly cost accumulation per tenant for billing and budget alerts
 
@@ -462,7 +462,7 @@ SK: PERIOD#{yyyy-mm}
 
 ---
 
-### Table 6: `clawcore-audit`
+### Table 6: `chimera-audit`
 
 **Purpose:** Security events, compliance audit trail, forensics
 
@@ -528,7 +528,7 @@ Projection: ALL
 // Method 1: BatchGetItem (efficient for specific SKs)
 const params = {
   RequestItems: {
-    'clawcore-tenants': {
+    'chimera-tenants': {
       Keys: [
         { PK: 'TENANT#org-acme-corp', SK: 'PROFILE' },
         { PK: 'TENANT#org-acme-corp', SK: 'CONFIG#features' },
@@ -540,7 +540,7 @@ const params = {
 
 // Method 2: Query (get all items for tenant)
 const params = {
-  TableName: 'clawcore-tenants',
+  TableName: 'chimera-tenants',
   KeyConditionExpression: 'PK = :tenantId',
   ExpressionAttributeValues: {
     ':tenantId': 'TENANT#org-acme-corp'
@@ -552,7 +552,7 @@ const params = {
 **Update:** Atomic update of model config without touching other configs
 ```typescript
 const params = {
-  TableName: 'clawcore-tenants',
+  TableName: 'chimera-tenants',
   Key: {
     PK: 'TENANT#org-acme-corp',
     SK: 'CONFIG#models'
@@ -569,7 +569,7 @@ const params = {
 **Query:** Get all active sessions, sorted by last activity
 ```typescript
 const params = {
-  TableName: 'clawcore-sessions',
+  TableName: 'chimera-sessions',
   KeyConditionExpression: 'PK = :tenantId',
   FilterExpression: 'status = :status',
   ExpressionAttributeValues: {
@@ -583,7 +583,7 @@ const params = {
 **Query GSI1:** Platform admin finding all sessions for a specific agent
 ```typescript
 const params = {
-  TableName: 'clawcore-sessions',
+  TableName: 'chimera-sessions',
   IndexName: 'agent-activity-index',
   KeyConditionExpression: 'agentId = :agentId',
   ExpressionAttributeValues: {
@@ -597,7 +597,7 @@ const params = {
 **GetItem:** Check if tenant has tokens available
 ```typescript
 const params = {
-  TableName: 'clawcore-rate-limits',
+  TableName: 'chimera-rate-limits',
   Key: {
     PK: 'TENANT#org-acme-corp',
     SK: 'RATELIMIT#api-requests'
@@ -606,7 +606,7 @@ const params = {
 
 // Then update atomically with ConditionExpression
 const updateParams = {
-  TableName: 'clawcore-rate-limits',
+  TableName: 'chimera-rate-limits',
   Key: {
     PK: 'TENANT#org-acme-corp',
     SK: 'RATELIMIT#api-requests'
@@ -624,7 +624,7 @@ const updateParams = {
 **Query GSI1:** Get all enterprise tenants
 ```typescript
 const params = {
-  TableName: 'clawcore-tenants',
+  TableName: 'chimera-tenants',
   IndexName: 'tier-index',
   KeyConditionExpression: 'tier = :tier',
   FilterExpression: 'status = :status',  // CRITICAL: Prevent cross-tenant leakage
@@ -639,7 +639,7 @@ const params = {
 **Query GSI1:** Find all failed login attempts across platform (admin only)
 ```typescript
 const params = {
-  TableName: 'clawcore-audit',
+  TableName: 'chimera-audit',
   IndexName: 'event-type-index',
   KeyConditionExpression: 'eventType = :eventType AND #ts BETWEEN :start AND :end',
   ExpressionAttributeNames: {
@@ -675,7 +675,7 @@ All tables use `TENANT#{id}` as partition key. IAM policies MUST use DynamoDB Le
         "dynamodb:DeleteItem",
         "dynamodb:Query"
       ],
-      "Resource": "arn:aws:dynamodb:*:*:table/clawcore-*",
+      "Resource": "arn:aws:dynamodb:*:*:table/chimera-*",
       "Condition": {
         "ForAllValues:StringLike": {
           "dynamodb:LeadingKeys": ["TENANT#${aws:PrincipalTag/tenantId}"]
@@ -692,7 +692,7 @@ All tables use `TENANT#{id}` as partition key. IAM policies MUST use DynamoDB Le
 ```typescript
 // ❌ WRONG: GSI query without tenant filter (returns data from ALL tenants)
 const badQuery = {
-  TableName: 'clawcore-sessions',
+  TableName: 'chimera-sessions',
   IndexName: 'agent-activity-index',
   KeyConditionExpression: 'agentId = :agentId',
   ExpressionAttributeValues: {
@@ -702,7 +702,7 @@ const badQuery = {
 
 // ✅ CORRECT: GSI query with tenant filter
 const goodQuery = {
-  TableName: 'clawcore-sessions',
+  TableName: 'chimera-sessions',
   IndexName: 'agent-activity-index',
   KeyConditionExpression: 'agentId = :agentId',
   FilterExpression: 'PK = :tenantId',  // REQUIRED
@@ -717,12 +717,12 @@ const goodQuery = {
 
 | Table | Encryption | Key Rotation | Reason |
 |-------|-----------|--------------|--------|
-| `clawcore-tenants` | AWS-managed | Automatic | Config data, not regulated |
-| `clawcore-sessions` | AWS-managed | Automatic | Ephemeral, 24h TTL |
-| `clawcore-skills` | AWS-managed | Automatic | Public skill metadata |
-| `clawcore-rate-limits` | AWS-managed | Automatic | Ephemeral, 5min TTL |
-| `clawcore-cost-tracking` | AWS-managed | Automatic | Financial data, but internal billing |
-| `clawcore-audit` | **CMK (required)** | Annual (manual) | Compliance requirement: GDPR, SOC2, HIPAA |
+| `chimera-tenants` | AWS-managed | Automatic | Config data, not regulated |
+| `chimera-sessions` | AWS-managed | Automatic | Ephemeral, 24h TTL |
+| `chimera-skills` | AWS-managed | Automatic | Public skill metadata |
+| `chimera-rate-limits` | AWS-managed | Automatic | Ephemeral, 5min TTL |
+| `chimera-cost-tracking` | AWS-managed | Automatic | Financial data, but internal billing |
+| `chimera-audit` | **CMK (required)** | Annual (manual) | Compliance requirement: GDPR, SOC2, HIPAA |
 
 #### Audit Table CMK Policy
 ```json
@@ -846,22 +846,22 @@ for tenant in allTenants:
 **Problem:** Gap analysis (docs/research/enhancement/00-Gap-Analysis-Report.md) identified 4 incompatible DynamoDB schemas across the research corpus.
 
 #### Design 1: Single-Table Pattern
-- **Source:** `ClawCore-Architecture-Review-Platform-IaC.md`
-- **Schema:** 1 table (`clawcore-platform`) with SK overloading
+- **Source:** `Chimera-Architecture-Review-Platform-IaC.md`
+- **Schema:** 1 table (`chimera-platform`) with SK overloading
 - **Verdict:** ❌ Rejected — TTL conflicts, encryption conflicts, harder to manage isolation
 
 #### Design 2: 6-Table Overview
-- **Source:** `ClawCore-Final-Architecture-Plan.md`
+- **Source:** `Chimera-Final-Architecture-Plan.md`
 - **Schema:** 6 tables with simple `SK=META` for tenant config
 - **Verdict:** ✅ **Adopted as base** — clear separation of concerns, implemented in code
 
 #### Design 3: 6-Table with Details
-- **Source:** `ClawCore-AWS-Component-Blueprint.md`
+- **Source:** `Chimera-AWS-Component-Blueprint.md`
 - **Schema:** Same 6 tables with detailed GSI specs, TTL, encryption
 - **Verdict:** ✅ Merged into canonical spec (added operational details)
 
 #### Design 4: Enhanced Tenant Config
-- **Source:** `ClawCore-Architecture-Review-Multi-Tenant.md`
+- **Source:** `Chimera-Architecture-Review-Multi-Tenant.md`
 - **Schema:** 6 tables with multi-item tenant config pattern (CONFIG#*, BILLING#*, QUOTA#*)
 - **Verdict:** ✅ Merged into canonical spec (enhanced pattern for atomicity and IAM granularity)
 
@@ -880,10 +880,10 @@ for tenant in allTenants:
 ### Cross-References
 
 This canonical specification supersedes and resolves contradictions in:
-- ✅ `docs/research/architecture-reviews/ClawCore-Final-Architecture-Plan.md` (Section 3, lines 100-115)
-- ✅ `docs/research/architecture-reviews/ClawCore-AWS-Component-Blueprint.md` (lines 135-226)
-- ✅ `docs/research/architecture-reviews/ClawCore-Architecture-Review-Multi-Tenant.md` (lines 911-980)
-- ✅ `docs/research/architecture-reviews/ClawCore-Architecture-Review-Platform-IaC.md` (lines 150-161)
+- ✅ `docs/research/architecture-reviews/Chimera-Final-Architecture-Plan.md` (Section 3, lines 100-115)
+- ✅ `docs/research/architecture-reviews/Chimera-AWS-Component-Blueprint.md` (lines 135-226)
+- ✅ `docs/research/architecture-reviews/Chimera-Architecture-Review-Multi-Tenant.md` (lines 911-980)
+- ✅ `docs/research/architecture-reviews/Chimera-Architecture-Review-Platform-IaC.md` (lines 150-161)
 - ✅ `docs/research/validation/02-multi-tenant-isolation-ddb.md` (Part B, lines 263-453)
 
 **Authority:** All future architecture documents, CDK code, API handlers, and SDKs MUST reference this document as the single source of truth for DynamoDB schemas.
@@ -898,9 +898,9 @@ This canonical specification supersedes and resolves contradictions in:
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as kms from 'aws-cdk-lib/aws-kms';
 
-// Example: clawcore-tenants table
+// Example: chimera-tenants table
 const tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
-  tableName: 'clawcore-tenants',
+  tableName: 'chimera-tenants',
   partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
   sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
   billingMode: dynamodb.BillingMode.PROVISIONED,
@@ -926,14 +926,14 @@ tenantsTable.addGlobalSecondaryIndex({
   projectionType: dynamodb.ProjectionType.KEYS_ONLY
 });
 
-// Example: clawcore-audit table with CMK
+// Example: chimera-audit table with CMK
 const auditKey = new kms.Key(this, 'AuditKey', {
   enableKeyRotation: true,
-  description: 'CMK for clawcore-audit table encryption'
+  description: 'CMK for chimera-audit table encryption'
 });
 
 const auditTable = new dynamodb.Table(this, 'AuditTable', {
-  tableName: 'clawcore-audit',
+  tableName: 'chimera-audit',
   partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
   sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
   billingMode: dynamodb.BillingMode.ON_DEMAND,
@@ -956,12 +956,12 @@ auditTable.addGlobalSecondaryIndex({
 
 | Table | Expected QPS | RCU (eventual) | WCU | Cost/month |
 |-------|--------------|----------------|-----|------------|
-| `clawcore-tenants` | 50 | 5 | 2 | $3.50 |
-| `clawcore-sessions` | 500 (on-demand) | N/A | N/A | ~$25 |
-| `clawcore-skills` | 20 | 5 | 2 | $3.50 |
-| `clawcore-rate-limits` | 1000 (on-demand) | N/A | N/A | ~$75 |
-| `clawcore-cost-tracking` | 10 | 5 | 5 | $5 |
-| `clawcore-audit` | 100 (on-demand) | N/A | N/A | ~$15 |
+| `chimera-tenants` | 50 | 5 | 2 | $3.50 |
+| `chimera-sessions` | 500 (on-demand) | N/A | N/A | ~$25 |
+| `chimera-skills` | 20 | 5 | 2 | $3.50 |
+| `chimera-rate-limits` | 1000 (on-demand) | N/A | N/A | ~$75 |
+| `chimera-cost-tracking` | 10 | 5 | 5 | $5 |
+| `chimera-audit` | 100 (on-demand) | N/A | N/A | ~$15 |
 | **Total** | | | | **~$127/month** |
 
 *Assumes 1000 tenants, moderate usage. Scales with tenant count and session activity.*

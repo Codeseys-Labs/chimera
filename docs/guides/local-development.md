@@ -91,10 +91,11 @@ chimera/
 │   └── cdk.out/                # Synthesized CloudFormation (gitignored)
 ├── packages/                   # Application code (future phases)
 │   ├── core/                   # Agent core logic
+│   ├── agents/                 # Python agent runtime
+│   ├── sse-bridge/             # Strands to Vercel DSP bridge
 │   ├── chat-gateway/           # Chat interface
 │   ├── cli/                    # CLI tool
 │   └── shared/                 # Shared types and utilities
-├── skills/                     # Built-in platform skills
 ├── docs/                       # Documentation
 │   ├── architecture/           # ADRs and design docs
 │   ├── research/               # Research documents

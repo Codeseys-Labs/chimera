@@ -181,7 +181,7 @@ An alternative GitHub Actions workflow is provided at `.github/workflows/deploy.
 ### Workflow Stages
 
 1. **Build Images**: Build and push Docker images to ECR
-2. **Deploy Infrastructure**: Deploy 8 CDK stacks in dependency order
+2. **Deploy Infrastructure**: Deploy 11 CDK stacks in dependency order
 3. **Deploy Canary**: Update canary endpoint (5% traffic)
 4. **Validate Canary**: Monitor for 30 minutes
 5. **Progressive Rollout**: 25% → 50% → 100%

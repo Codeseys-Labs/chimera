@@ -107,24 +107,17 @@ Users (Slack/Teams/Discord/Telegram/WhatsApp/Web)
 ## Quick Start
 
 ```bash
-# Install CLI
-npm install -g @chimera/cli
+# Clone and install
+git clone <repo-url>
+cd chimera
+bun install
 
-# Initialize a new agent
-chimera auth login
-chimera agent init my-agent --template=chatbot
-chimera agent run                    # Local dev with hot reload
+# Run tests
+bun test
 
-# Add a chat channel
-chimera channel add slack --token=$SLACK_TOKEN
-
-# Deploy to AgentCore
-chimera agent deploy --env=staging
-
-# Create a skill
-chimera skill create my-skill
-chimera skill test
-chimera skill publish
+# Synthesize CDK infrastructure
+cd infra
+npx cdk synth --quiet
 ```
 
 ## Project Structure
@@ -133,16 +126,15 @@ chimera skill publish
 chimera/
 ├── packages/
 │   ├── core/                 # Strands agent definitions + runtime
+│   ├── agents/               # Python agent runtime
+│   ├── sse-bridge/           # Strands to Vercel DSP bridge
 │   ├── chat-gateway/         # Vercel Chat SDK + SSE bridge
 │   ├── cli/                  # chimera CLI
-│   ├── sdk-python/           # Skill authoring SDK (Python)
-│   ├── sdk-typescript/       # Skill authoring SDK (TypeScript)
 │   └── shared/               # Types, utils, schemas
 ├── infra/                    # CDK infrastructure
 │   ├── bin/                  # App entry point
 │   ├── lib/                  # Stack definitions
 │   └── constructs/           # L3 constructs
-├── skills/                   # Built-in platform skills
 ├── docs/                     # Documentation
 │   ├── architecture/         # Architecture decision records
 │   ├── research/             # Research documents
@@ -184,11 +176,11 @@ chimera/
 |--------|-------|
 | **Packages** | 6 (core, agents, shared, sse-bridge, chat-gateway, cli) |
 | **CDK Infrastructure Stacks** | 11 stacks (4,400+ LOC) |
-| **TypeScript LOC** | 58,733 lines (packages/core/src/) |
-| **Python Agent Runtime** | 8,442 lines (chimera_agent.py + tools) |
+| **TypeScript LOC** | ~46,500 lines (packages/core/src/) |
+| **Python Agent Runtime** | 273 lines (chimera_agent.py + tools) |
 | **AWS Tool Implementations** | 25 tools (19 TypeScript + 5 Python + media processors) |
 | **Core Modules** | 20 (agent, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity) |
-| **Test Coverage** | 841 tests (760 pass, 81 fail, 19 errors) across 60 test files |
+| **Test Coverage** | 841 tests (760 pass, 81 fail, 19 errors) across 41+ test files |
 | **Architecture Decision Records** | 18 ADRs |
 | **Research Documentation** | 118 docs, 112,000+ lines |
 
