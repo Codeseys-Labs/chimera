@@ -7,14 +7,25 @@
 
 import { TokenBucket, RateLimitWindow, RateLimitCheckResult, RateLimitConfig } from '@chimera/shared';
 
+import type {
+  GetCommandInput,
+  GetCommandOutput,
+  PutCommandInput,
+  PutCommandOutput,
+  UpdateCommandInput,
+  UpdateCommandOutput,
+  QueryCommandInput,
+  QueryCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
+
 /**
  * DynamoDB client interface
  */
 export interface DynamoDBClient {
-  get(params: any): Promise<any>;
-  put(params: any): Promise<any>;
-  update(params: any): Promise<any>;
-  query(params: any): Promise<any>;
+  get(params: GetCommandInput): Promise<GetCommandOutput>;
+  put(params: PutCommandInput): Promise<PutCommandOutput>;
+  update(params: UpdateCommandInput): Promise<UpdateCommandOutput>;
+  query(params: QueryCommandInput): Promise<QueryCommandOutput>;
 }
 
 /**
@@ -108,83 +119,101 @@ export class RateLimiter {
    * 2. Calculate refilled tokens based on elapsed time
    * 3. Attempt to consume tokens with ConditionExpression
    *
+   * SECURITY: Fails closed on errors - any exception results in denied request
+   *
    * @param params - Rate limit check parameters
    * @returns Check result with allowed status and retry info
    */
   async checkRateLimit(params: CheckRateLimitParams): Promise<RateLimitCheckResult> {
-    const { tenantId, resource, cost = 1 } = params;
+    try {
+      const { tenantId, resource, cost = 1 } = params;
 
-    // Fetch current bucket
-    let bucket = await this.getTokenBucket(tenantId, resource);
+      // Fetch current bucket
+      let bucket = await this.getTokenBucket(tenantId, resource);
 
-    // If bucket doesn't exist, create with default config (100 req/sec, 10k capacity)
-    if (!bucket) {
-      await this.setRateLimit(tenantId, {
-        resource,
-        capacity: 10000,
-        refillRate: 100, // 100 tokens per second
-      });
-      bucket = await this.getTokenBucket(tenantId, resource);
+      // If bucket doesn't exist, create with default config (100 req/sec, 10k capacity)
       if (!bucket) {
-        throw new Error('Failed to initialize rate limit bucket');
+        await this.setRateLimit(tenantId, {
+          resource,
+          capacity: 10000,
+          refillRate: 100, // 100 tokens per second
+        });
+        bucket = await this.getTokenBucket(tenantId, resource);
+        if (!bucket) {
+          // Fail closed: deny request if bucket initialization fails
+          return {
+            allowed: false,
+            remainingTokens: 0,
+          };
+        }
       }
-    }
 
-    // Calculate tokens to add based on elapsed time
-    const now = new Date();
-    const lastRefill = new Date(bucket.lastRefill);
-    const elapsedSeconds = (now.getTime() - lastRefill.getTime()) / 1000;
-    const tokensToAdd = Math.floor(elapsedSeconds * bucket.refillRate);
+      // Calculate tokens to add based on elapsed time
+      const now = new Date();
+      const lastRefill = new Date(bucket.lastRefill);
+      const elapsedSeconds = (now.getTime() - lastRefill.getTime()) / 1000;
+      const tokensToAdd = Math.floor(elapsedSeconds * bucket.refillRate);
 
-    // Calculate new token count (capped at capacity)
-    const refilledTokens = Math.min(bucket.tokens + tokensToAdd, bucket.capacity);
+      // Calculate new token count (capped at capacity)
+      const refilledTokens = Math.min(bucket.tokens + tokensToAdd, bucket.capacity);
 
-    // Check if we have enough tokens
-    if (refilledTokens < cost) {
-      // Not enough tokens - calculate retry after
-      const tokensNeeded = cost - refilledTokens;
-      const retryAfterSeconds = Math.ceil(tokensNeeded / bucket.refillRate);
+      // Check if we have enough tokens
+      if (refilledTokens < cost) {
+        // Not enough tokens - calculate retry after
+        const tokensNeeded = cost - refilledTokens;
+        const retryAfterSeconds = Math.ceil(tokensNeeded / bucket.refillRate);
 
+        return {
+          allowed: false,
+          remainingTokens: refilledTokens,
+          resetAt: new Date(now.getTime() + retryAfterSeconds * 1000).toISOString(),
+          retryAfter: retryAfterSeconds,
+        };
+      }
+
+      // Attempt to consume tokens atomically
+      try {
+        const updateParams = {
+          TableName: this.config.rateLimitsTableName,
+          Key: {
+            PK: `TENANT#${tenantId}`,
+            SK: `RATELIMIT#${resource}`,
+          },
+          UpdateExpression: 'SET tokens = :newTokens, lastRefill = :now',
+          ConditionExpression: 'lastRefill = :expectedLastRefill', // Optimistic locking
+          ExpressionAttributeValues: {
+            ':newTokens': refilledTokens - cost,
+            ':now': now.toISOString(),
+            ':expectedLastRefill': bucket.lastRefill,
+          },
+          ReturnValues: 'ALL_NEW',
+        };
+
+        const result = await this.config.dynamodb.update(updateParams);
+        const updatedBucket = result.Attributes as TokenBucket;
+
+        return {
+          allowed: true,
+          remainingTokens: updatedBucket.tokens,
+        };
+      } catch (error: any) {
+        // Retry on concurrent modification
+        if (error.name === 'ConditionalCheckFailedException') {
+          // Another request modified the bucket concurrently, retry
+          return this.checkRateLimit(params);
+        }
+        // Fail closed: any other DynamoDB error denies the request
+        return {
+          allowed: false,
+          remainingTokens: 0,
+        };
+      }
+    } catch (error: any) {
+      // Fail closed: any unexpected error denies the request
       return {
         allowed: false,
-        remainingTokens: refilledTokens,
-        resetAt: new Date(now.getTime() + retryAfterSeconds * 1000).toISOString(),
-        retryAfter: retryAfterSeconds,
+        remainingTokens: 0,
       };
-    }
-
-    // Attempt to consume tokens atomically
-    try {
-      const updateParams = {
-        TableName: this.config.rateLimitsTableName,
-        Key: {
-          PK: `TENANT#${tenantId}`,
-          SK: `RATELIMIT#${resource}`,
-        },
-        UpdateExpression: 'SET tokens = :newTokens, lastRefill = :now',
-        ConditionExpression: 'lastRefill = :expectedLastRefill', // Optimistic locking
-        ExpressionAttributeValues: {
-          ':newTokens': refilledTokens - cost,
-          ':now': now.toISOString(),
-          ':expectedLastRefill': bucket.lastRefill,
-        },
-        ReturnValues: 'ALL_NEW',
-      };
-
-      const result = await this.config.dynamodb.update(updateParams);
-      const updatedBucket = result.Attributes as TokenBucket;
-
-      return {
-        allowed: true,
-        remainingTokens: updatedBucket.tokens,
-      };
-    } catch (error: any) {
-      // Retry on concurrent modification
-      if (error.name === 'ConditionalCheckFailedException') {
-        // Another request modified the bucket concurrently, retry
-        return this.checkRateLimit(params);
-      }
-      throw error;
     }
   }
 

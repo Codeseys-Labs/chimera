@@ -275,8 +275,10 @@ export class BlockerResolver {
         TableName: this.config.blockersTable,
         IndexName: 'GSI1',
         KeyConditionExpression: 'GSI1PK = :pk',
+        FilterExpression: 'tenantId = :tenantId',
         ExpressionAttributeValues: {
           ':pk': `AGENT#${params.agentId}`,
+          ':tenantId': params.tenantId,
         },
         ScanIndexForward: false, // Most recent first
         Limit: params.limit || 50,

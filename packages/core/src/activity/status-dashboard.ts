@@ -16,13 +16,22 @@ import type {
   SessionTokenUsage,
 } from '@chimera/shared';
 
+import type {
+  GetCommandInput,
+  GetCommandOutput,
+  QueryCommandInput,
+  QueryCommandOutput,
+  ScanCommandInput,
+  ScanCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
+
 /**
  * DynamoDB client interface
  */
 export interface DynamoDBClient {
-  get(params: any): Promise<any>;
-  query(params: any): Promise<any>;
-  scan(params: any): Promise<any>;
+  get(params: GetCommandInput): Promise<GetCommandOutput>;
+  query(params: QueryCommandInput): Promise<QueryCommandOutput>;
+  scan(params: ScanCommandInput): Promise<ScanCommandOutput>;
 }
 
 /**
