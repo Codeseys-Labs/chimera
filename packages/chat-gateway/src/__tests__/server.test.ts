@@ -137,4 +137,142 @@ describe('Chat Gateway Server', () => {
       expect(response.status).toBe(200);
     });
   });
+
+  describe('POST /slack/events', () => {
+    it('should handle URL verification challenge', async () => {
+      const response = await request(app)
+        .post('/slack/events')
+        .send({
+          type: 'url_verification',
+          challenge: 'test-challenge-token',
+          token: 'verification-token',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        challenge: 'test-challenge-token',
+      });
+    });
+
+    it('should return 401 without tenant context for event callbacks', async () => {
+      const response = await request(app)
+        .post('/slack/events')
+        .send({
+          type: 'event_callback',
+          team_id: 'T123456',
+          event: {
+            type: 'message',
+            text: 'Hello bot',
+            user: 'U123456',
+          },
+        });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('should acknowledge bot messages without processing', async () => {
+      const response = await request(app)
+        .post('/slack/events')
+        .set('X-Tenant-Id', 'tenant-123')
+        .send({
+          type: 'event_callback',
+          team_id: 'T123456',
+          event: {
+            type: 'message',
+            text: 'Bot message',
+            bot_id: 'B123456',
+            user: 'U123456',
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: true });
+    });
+
+    it('should acknowledge non-message events', async () => {
+      const response = await request(app)
+        .post('/slack/events')
+        .set('X-Tenant-Id', 'tenant-123')
+        .send({
+          type: 'event_callback',
+          team_id: 'T123456',
+          event: {
+            type: 'app_mention',
+            text: 'Mention text',
+            user: 'U123456',
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: true });
+    });
+  });
+
+  describe('POST /slack/slash', () => {
+    it('should return 401 without tenant context', async () => {
+      const response = await request(app)
+        .post('/slack/slash')
+        .send({
+          command: '/ai',
+          text: 'test query',
+          user_id: 'U123456',
+        });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('should handle empty slash command text', async () => {
+      const response = await request(app)
+        .post('/slack/slash')
+        .set('X-Tenant-Id', 'tenant-123')
+        .send({
+          command: '/ai',
+          text: '',
+          user_id: 'U123456',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.response_type).toBe('ephemeral');
+      expect(response.body.text).toContain('provide a message');
+    });
+
+    it('should process valid slash command', async () => {
+      const response = await request(app)
+        .post('/slack/slash')
+        .set('X-Tenant-Id', 'tenant-123')
+        .send({
+          command: '/ai',
+          text: 'What is the weather?',
+          user_id: 'U123456',
+          channel_id: 'C123456',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('blocks');
+      expect(Array.isArray(response.body.blocks)).toBe(true);
+    });
+  });
+
+  describe('Static File Serving', () => {
+    it('should serve index.html at root', async () => {
+      const response = await request(app).get('/');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('text/html');
+    });
+
+    it('should serve static JS files', async () => {
+      const response = await request(app).get('/chat.js');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('javascript');
+    });
+
+    it('should serve static CSS files', async () => {
+      const response = await request(app).get('/styles.css');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('css');
+    });
+  });
 });
