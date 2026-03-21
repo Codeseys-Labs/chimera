@@ -61,7 +61,8 @@ export function parseNamespace(namespace: string): {
   userId: string;
 } | null {
   // Pattern: tenant-{tenantId}-user-{userId}
-  const pattern = /^tenant-(.+)-user-(.+)$/;
+  // Use non-greedy match to handle IDs with hyphens correctly
+  const pattern = /^tenant-(.+?)-user-(.+)$/;
   const match = namespace.match(pattern);
 
   if (!match) {
