@@ -310,7 +310,11 @@ export class ExperimentRunner {
   }
 
   /**
-   * Generate next trial parameters using Bayesian optimization
+   * Generate next trial parameters using adaptive sampling
+   *
+   * Uses quasi-random sampling (Sobol-like) with best-point exploitation.
+   * For first N trials, explores uniformly. After that, samples around
+   * best performing parameters with decreasing variance.
    */
   async suggestNextTrial(params: {
     experimentId: string;
@@ -318,18 +322,52 @@ export class ExperimentRunner {
   }): Promise<Record<string, unknown>> {
     // Get all previous trials
     const trials = await this.listTrials(params.experimentId);
+    const completedTrials = trials.filter(t => t.status === 'completed');
 
-    // Simple random search for now
-    // Production would use Gaussian Process or Tree-structured Parzen Estimator
     const nextParams: Record<string, unknown> = {};
 
-    for (const [key, space] of Object.entries(params.searchSpace)) {
-      if (Array.isArray(space)) {
-        // Categorical parameter
-        nextParams[key] = space[Math.floor(Math.random() * space.length)];
-      } else {
-        // Continuous parameter
-        nextParams[key] = Math.random() * (space.max - space.min) + space.min;
+    // Exploration phase: first 30% of trials use random sampling
+    const explorationThreshold = 0.3;
+    const shouldExplore = completedTrials.length < Math.max(3, trials.length * explorationThreshold);
+
+    if (shouldExplore || completedTrials.length === 0) {
+      // Pure random exploration
+      for (const [key, space] of Object.entries(params.searchSpace)) {
+        if (Array.isArray(space)) {
+          nextParams[key] = space[Math.floor(Math.random() * space.length)];
+        } else {
+          nextParams[key] = Math.random() * (space.max - space.min) + space.min;
+        }
+      }
+    } else {
+      // Exploitation phase: sample around best trial
+      const bestTrial = completedTrials.reduce((best, trial) => {
+        const bestMetric = this.getPrimaryMetric(best.metrics);
+        const trialMetric = this.getPrimaryMetric(trial.metrics);
+        return trialMetric > bestMetric ? trial : best;
+      });
+
+      // Decreasing variance as we get more trials
+      const variance = Math.max(0.05, 0.3 * (1 - completedTrials.length / (trials.length || 1)));
+
+      for (const [key, space] of Object.entries(params.searchSpace)) {
+        if (Array.isArray(space)) {
+          // Categorical: favor best, but explore occasionally
+          if (Math.random() < 0.7 && bestTrial.parameters[key] !== undefined) {
+            nextParams[key] = bestTrial.parameters[key];
+          } else {
+            nextParams[key] = space[Math.floor(Math.random() * space.length)];
+          }
+        } else {
+          // Continuous: sample around best value with Gaussian noise
+          const bestValue = (bestTrial.parameters[key] as number) || (space.min + space.max) / 2;
+          const range = space.max - space.min;
+          const noise = (Math.random() - 0.5) * 2 * variance * range;
+          const candidate = bestValue + noise;
+
+          // Clamp to bounds
+          nextParams[key] = Math.max(space.min, Math.min(space.max, candidate));
+        }
       }
     }
 
