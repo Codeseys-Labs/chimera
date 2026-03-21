@@ -31,3 +31,6 @@ export {
   DEFAULT_SYSTEM_PROMPT,
   type PromptContext
 } from './prompt';
+
+// Re-export evolution types needed by agent users
+export type { FeedbackType, TaskCategory } from '../evolution/types';
