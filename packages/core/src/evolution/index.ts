@@ -53,3 +53,16 @@ export {
   type ExperimentTrial,
   type ExperimentStatus,
 } from './experiment-runner';
+
+// Self-reflection and health monitoring
+export {
+  calculateHealthScore,
+  analyzeEvolutionTrends,
+  generateReflectionInsights,
+  shouldThrottleEvolution,
+  recommendEvolutionActions,
+  type TrendAnalysis,
+  type ReflectionInsights,
+  type ThrottleDecision,
+  type EvolutionRecommendation,
+} from './self-reflection';
