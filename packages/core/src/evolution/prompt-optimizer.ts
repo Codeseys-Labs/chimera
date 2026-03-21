@@ -433,10 +433,27 @@ export class PromptOptimizer {
   }
 
   private async runTestCase(prompt: string, testCase: PromptTestCase): Promise<number> {
-    // Placeholder: In production, invoke Bedrock agent with prompt + test input
-    // and compute similarity between response and expected output
-    // Using Bedrock embeddings or LLM-as-judge
-    return Math.random() * 0.4 + 0.6; // Simulate score 0.6-1.0
+    // Placeholder for production Bedrock agent invocation
+    // Production implementation would:
+    // 1. Invoke Bedrock agent with variant prompt + test input
+    // 2. Get agent response
+    // 3. Compute similarity score using:
+    //    - Bedrock embeddings (cosine similarity) OR
+    //    - LLM-as-judge (Claude evaluating response quality)
+    //
+    // Simulation logic: score based on prompt length and test case category
+    // as a proxy for prompt quality (longer, more specific prompts score higher)
+
+    const baseScore = 0.6;
+    const promptLengthBonus = Math.min(0.2, prompt.length / 5000); // Up to 0.2 for long prompts
+    const categoryBonus = testCase.category ? 0.1 : 0; // 0.1 if categorized
+    const randomVariance = (Math.random() - 0.5) * 0.2; // ±0.1 variance
+
+    const score = Math.max(0, Math.min(1,
+      baseScore + promptLengthBonus + categoryBonus + randomVariance
+    ));
+
+    return score;
   }
 }
 

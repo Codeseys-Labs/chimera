@@ -165,21 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-<<<<<<< HEAD
-- **Agent Name:** builder-prod-docs
-- **Task ID:** chimera-a52e
+- **Agent Name:** builder-evo-optimize
+- **Task ID:** chimera-3395
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-prod-docs/chimera-a52e
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-prod-docs
-- **Parent:** lead-p7-prod
-=======
-- **Agent Name:** builder-orch-core
-- **Task ID:** chimera-b970
-- **Spec:** No spec file provided
-- **Branch:** overstory/builder-orch-core/chimera-b970
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core
-- **Parent:** lead-p5-orch
->>>>>>> overstory/builder-orch-core/chimera-b970
+- **Branch:** overstory/builder-evo-optimize/chimera-3395
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize
+- **Parent:** lead-p6-evolution
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -190,105 +181,60 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-<<<<<<< HEAD
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-prod-docs`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-prod-docs`
-=======
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
-
-**CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
->>>>>>> overstory/builder-orch-core/chimera-b970
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-<<<<<<< HEAD
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-prod-docs`
-=======
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
->>>>>>> overstory/builder-orch-core/chimera-b970
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-<<<<<<< HEAD
-- `docs/runbooks/alarm-runbooks.md`
-- `docs/guides/disaster-recovery.md`
-- `tests/load/load-test.ts`
-=======
-- `packages/core/src/orchestration/orchestrator.ts`
-- `packages/core/src/orchestration/cron-scheduler.ts`
-- `packages/core/src/orchestration/workflow.ts`
-- `packages/core/src/orchestration/swarm.ts`
-- `packages/core/src/orchestration/types.ts`
-- `packages/core/src/orchestration/index.ts`
-- `packages/core/src/orchestration/background-task.ts`
-- `packages/core/src/orchestration/a2a-protocol.ts`
-- `tests/unit/orchestration/orchestrator.test.ts`
-- `tests/unit/orchestration/background-task.test.ts`
-- `tests/unit/orchestration/a2a-protocol.test.ts`
-- `tests/unit/orchestration/cron-scheduler.test.ts`
-- `tests/unit/orchestration/workflow.test.ts`
->>>>>>> overstory/builder-orch-core/chimera-b970
+- `packages/core/src/evolution/prompt-optimizer.ts`
+- `packages/core/src/evolution/model-router.ts`
+- `packages/core/src/evolution/experiment-runner.ts`
+- `tests/unit/evolution/prompt-optimizer.test.ts`
+- `tests/unit/evolution/model-router.test.ts`
+- `tests/unit/evolution/experiment-runner.test.ts`
 
 ## Expertise
 
 Prime relevant domain knowledge before starting work:
 
-No specific expertise domains configured
+```bash
+ml prime typescript
+```
 
 
 
 ## Communication
 
-<<<<<<< HEAD
-Use `ov mail` for all communication. Your address is **builder-prod-docs**.
+Use `ov mail` for all communication. Your address is **builder-evo-optimize**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-prod-docs
+ov mail check --agent builder-evo-optimize
 
 # Send a status update to your parent
-ov mail send --to lead-p7-prod --subject "status" \
-  --body "Progress update here" --type status --agent builder-prod-docs
+ov mail send --to lead-p6-evolution --subject "status" \
+  --body "Progress update here" --type status --agent builder-evo-optimize
 
 # Ask a question
-ov mail send --to lead-p7-prod --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-prod-docs
+ov mail send --to lead-p6-evolution --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-evo-optimize
 
 # Report completion
-ov mail send --to lead-p7-prod --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-prod-docs
+ov mail send --to lead-p6-evolution --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-evo-optimize
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-prod-docs
-=======
-Use `ov mail` for all communication. Your address is **builder-orch-core**.
-
-```bash
-# Check your inbox (do this regularly)
-ov mail check --agent builder-orch-core
-
-# Send a status update to your parent
-ov mail send --to lead-p5-orch --subject "status" \
-  --body "Progress update here" --type status --agent builder-orch-core
-
-# Ask a question
-ov mail send --to lead-p5-orch --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-orch-core
-
-# Report completion
-ov mail send --to lead-p5-orch --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-orch-core
-
-# Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-orch-core
->>>>>>> overstory/builder-orch-core/chimera-b970
+ov mail reply <message-id> --body "Your reply" --agent builder-evo-optimize
 ```
 
 ## Spawning Sub-Workers
@@ -302,34 +248,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-<<<<<<< HEAD
-4. **Commit:** all changes committed to your branch (overstory/builder-prod-docs/chimera-a52e)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-prod-docs` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-p7-prod: `ov mail send --to lead-p7-prod --subject "Worker done: chimera-a52e" --body "Quality gates passed." --type worker_done --agent builder-prod-docs`
-7. **Close issue:** `sd close chimera-a52e --reason "summary of changes"`
-=======
-4. **Commit:** all changes committed to your branch (overstory/builder-orch-core/chimera-b970)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-orch-core` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-p5-orch: `ov mail send --to lead-p5-orch --subject "Worker done: chimera-b970" --body "Quality gates passed." --type worker_done --agent builder-orch-core`
-7. **Close issue:** `sd close chimera-b970 --reason "summary of changes"`
->>>>>>> overstory/builder-orch-core/chimera-b970
+4. **Commit:** all changes committed to your branch (overstory/builder-evo-optimize/chimera-3395)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-evo-optimize` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-p6-evolution: `ov mail send --to lead-p6-evolution --subject "Worker done: chimera-3395" --body "Quality gates passed." --type worker_done --agent builder-evo-optimize`
+7. **Close issue:** `sd close chimera-3395 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-<<<<<<< HEAD
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-prod-docs`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-evo-optimize`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-prod-docs/chimera-a52e
-=======
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
-- NEVER write to the canonical repo root — all writes go to your worktree copy
-- Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-orch-core/chimera-b970
->>>>>>> overstory/builder-orch-core/chimera-b970
+- Commit only to your branch: overstory/builder-evo-optimize/chimera-3395
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
