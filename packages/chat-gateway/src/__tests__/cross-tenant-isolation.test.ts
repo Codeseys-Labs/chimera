@@ -38,6 +38,8 @@ describe('Cross-Tenant Isolation', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.sessionId).toBeDefined();
+      expect(typeof response.body.sessionId).toBe('string');
+      expect(response.body.sessionId.length).toBeGreaterThan(0);
     });
 
     it('should isolate sessions between different tenants', async () => {
@@ -127,9 +129,39 @@ describe('Cross-Tenant Isolation', () => {
     });
 
     it('should apply rate limits only to the specific tenant', async () => {
-      // This test would require mocking DynamoDB to simulate rate limit exhaustion
-      // In a real scenario, tenant A exhausting their rate limit should not affect tenant B
-      expect(true).toBe(true); // Placeholder for integration test
+      // Make multiple requests from tenant A to consume rate limit budget
+      const requestsA = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          request(app)
+            .post('/chat/message')
+            .set('X-Tenant-Id', tenantA)
+            .set('X-User-Id', userA1)
+            .send({
+              messages: [{ role: 'user', content: 'Test' }],
+            })
+        )
+      );
+
+      // All tenant A requests should succeed (or handle rate limit gracefully)
+      requestsA.forEach((res) => {
+        expect([200, 429]).toContain(res.status);
+        if (res.status === 200) {
+          expect(res.headers['x-ratelimit-resource']).toBe('api-requests');
+        }
+      });
+
+      // Tenant B should have independent rate limit budget
+      const responseB = await request(app)
+        .post('/chat/message')
+        .set('X-Tenant-Id', tenantB)
+        .set('X-User-Id', userB1)
+        .send({
+          messages: [{ role: 'user', content: 'Test' }],
+        });
+
+      // Tenant B should succeed even if tenant A hit rate limit
+      expect(responseB.status).toBe(200);
+      expect(responseB.headers['x-ratelimit-resource']).toBe('api-requests');
     });
   });
 
@@ -193,6 +225,9 @@ describe('Cross-Tenant Isolation', () => {
       if (response.status === 201) {
         expect(response.body.tenant).toBeDefined();
         expect(response.body.tenant.tenantId).toBe(newTenant.tenantId);
+        expect(response.body.tenant.name).toBe(newTenant.name);
+        expect(response.body.tenant.tier).toBe(newTenant.tier);
+        expect(response.body.tenant.status).toBe('ACTIVE');
       } else {
         // Mock DynamoDB client returns empty data
         expect([500, 409]).toContain(response.status);
