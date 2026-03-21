@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-gateway-integration
-- **Task ID:** chimera-4cd0
+- **Agent Name:** builder-orch-core
+- **Task ID:** chimera-b970
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-gateway-integration/chimera-4cd0
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-integration
-- **Parent:** lead-p4-tenant
+- **Branch:** overstory/builder-orch-core/chimera-b970
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core
+- **Parent:** lead-p5-orch
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,30 +181,34 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-integration`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-integration`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-integration`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `packages/chat-gateway/src/middleware/tenant.ts`
-- `packages/chat-gateway/src/middleware/rate-limit.ts`
-- `packages/chat-gateway/src/routes/tenant.ts`
-- `packages/chat-gateway/src/routes/chat.ts`
-- `packages/chat-gateway/src/types.ts`
-- `packages/chat-gateway/src/server.ts`
-- `packages/chat-gateway/src/__tests__/cross-tenant-isolation.test.ts`
-- `packages/chat-gateway/src/__tests__/server.test.ts`
-- `packages/chat-gateway/src/__tests__/chat.test.ts`
+- `packages/core/src/orchestration/orchestrator.ts`
+- `packages/core/src/orchestration/cron-scheduler.ts`
+- `packages/core/src/orchestration/workflow.ts`
+- `packages/core/src/orchestration/swarm.ts`
+- `packages/core/src/orchestration/types.ts`
+- `packages/core/src/orchestration/index.ts`
+- `packages/core/src/orchestration/background-task.ts`
+- `packages/core/src/orchestration/a2a-protocol.ts`
+- `tests/unit/orchestration/orchestrator.test.ts`
+- `tests/unit/orchestration/background-task.test.ts`
+- `tests/unit/orchestration/a2a-protocol.test.ts`
+- `tests/unit/orchestration/cron-scheduler.test.ts`
+- `tests/unit/orchestration/workflow.test.ts`
 
 ## Expertise
 
@@ -218,26 +222,26 @@ ml prime typescript
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-gateway-integration**.
+Use `ov mail` for all communication. Your address is **builder-orch-core**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-gateway-integration
+ov mail check --agent builder-orch-core
 
 # Send a status update to your parent
-ov mail send --to lead-p4-tenant --subject "status" \
-  --body "Progress update here" --type status --agent builder-gateway-integration
+ov mail send --to lead-p5-orch --subject "status" \
+  --body "Progress update here" --type status --agent builder-orch-core
 
 # Ask a question
-ov mail send --to lead-p4-tenant --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-gateway-integration
+ov mail send --to lead-p5-orch --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-orch-core
 
 # Report completion
-ov mail send --to lead-p4-tenant --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-gateway-integration
+ov mail send --to lead-p5-orch --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-orch-core
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-gateway-integration
+ov mail reply <message-id> --body "Your reply" --agent builder-orch-core
 ```
 
 ## Spawning Sub-Workers
@@ -251,20 +255,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-gateway-integration/chimera-4cd0)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-gateway-integration` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-p4-tenant: `ov mail send --to lead-p4-tenant --subject "Worker done: chimera-4cd0" --body "Quality gates passed." --type worker_done --agent builder-gateway-integration`
-7. **Close issue:** `sd close chimera-4cd0 --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-orch-core/chimera-b970)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-orch-core` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-p5-orch: `ov mail send --to lead-p5-orch --subject "Worker done: chimera-b970" --body "Quality gates passed." --type worker_done --agent builder-orch-core`
+7. **Close issue:** `sd close chimera-b970 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-gateway-integration`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-orch-core`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-gateway-integration/chimera-4cd0
+- Commit only to your branch: overstory/builder-orch-core/chimera-b970
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
