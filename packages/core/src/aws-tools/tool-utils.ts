@@ -49,6 +49,61 @@ export const CLOUDWATCH_RETRYABLE_ERRORS = [
 ];
 
 /**
+ * Retryable error codes for RDS operations
+ */
+export const RDS_RETRYABLE_ERRORS = [
+  'RequestLimitExceeded',
+  'ServiceUnavailable',
+  'InternalError',
+  'ThrottlingException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Redshift operations
+ */
+export const REDSHIFT_RETRYABLE_ERRORS = [
+  'RequestLimitExceeded',
+  'ServiceUnavailable',
+  'InternalFailure',
+  'ThrottlingException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Glue operations
+ */
+export const GLUE_RETRYABLE_ERRORS = [
+  'ConcurrentRunsExceededException',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'InternalServiceException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Athena operations
+ */
+export const ATHENA_RETRYABLE_ERRORS = [
+  'TooManyRequestsException',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'InternalServerException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for OpenSearch operations
+ */
+export const OPENSEARCH_RETRYABLE_ERRORS = [
+  'LimitExceededException',
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'InternalException',
+  'TimeoutError',
+];
+
+/**
  * Retry an operation with exponential backoff and jitter
  *
  * @param operation - Async operation to retry
@@ -111,6 +166,11 @@ export function formatToolError(
     ...S3_RETRYABLE_ERRORS,
     ...LAMBDA_RETRYABLE_ERRORS,
     ...CLOUDWATCH_RETRYABLE_ERRORS,
+    ...RDS_RETRYABLE_ERRORS,
+    ...REDSHIFT_RETRYABLE_ERRORS,
+    ...GLUE_RETRYABLE_ERRORS,
+    ...ATHENA_RETRYABLE_ERRORS,
+    ...OPENSEARCH_RETRYABLE_ERRORS,
   ];
 
   return JSON.stringify({
