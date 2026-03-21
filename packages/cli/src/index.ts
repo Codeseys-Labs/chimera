@@ -8,5 +8,7 @@ export * from './commands/tenant';
 export * from './commands/session';
 export * from './commands/skill';
 export * from './commands/deploy';
+export * from './commands/connect';
+export * from './commands/status';
 export * from './utils/config';
 export * from './utils/output';
