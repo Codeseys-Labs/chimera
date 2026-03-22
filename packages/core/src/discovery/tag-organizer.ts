@@ -7,7 +7,7 @@
  * Based on: docs/research/aws-account-agent/05-Tag-Organization-Strategy.md
  */
 
-import { tool } from '@strands-agents/sdk';
+import { tool } from '../aws-tools/strands-agents';
 import { z } from 'zod';
 
 /**

@@ -25,7 +25,7 @@ import { EFSClient } from '@aws-sdk/client-efs';
 import { IAMClient } from '@aws-sdk/client-iam';
 import { CloudFrontClient } from '@aws-sdk/client-cloudfront';
 import { Route53Client } from '@aws-sdk/client-route-53';
-import { WAFv2Client } from '@aws-sdk/client-wafv2';
+import { WAFV2Client } from '@aws-sdk/client-wafv2';
 import { RDSClient } from '@aws-sdk/client-rds';
 import { RedshiftClient } from '@aws-sdk/client-redshift';
 import { GlueClient } from '@aws-sdk/client-glue';
@@ -61,7 +61,7 @@ type AWSClient =
   | IAMClient
   | CloudFrontClient
   | Route53Client
-  | WAFv2Client
+  | WAFV2Client
   | RDSClient
   | RedshiftClient
   | GlueClient
@@ -388,12 +388,12 @@ export class AWSClientFactory {
   /**
    * Get or create WAFv2 client for tenant
    */
-  async getWAFv2Client(context: AWSToolContext): Promise<WAFv2Client> {
+  async getWAFV2Client(context: AWSToolContext): Promise<WAFV2Client> {
     return this.getOrCreateClient(
       'wafv2',
       context,
       (credentials, region) =>
-        new WAFv2Client({
+        new WAFV2Client({
           region,
           credentials,
           maxAttempts: this.config.retryConfig.maxAttempts,
