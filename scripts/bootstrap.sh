@@ -271,16 +271,28 @@ echo
 
 if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
     prompt_continue "Ready to deploy all 11 stacks?"
-    DEPLOY_ARGS="--all"
+    log_info "Deploying all stacks (--require-approval never)..."
+    bunx cdk deploy --all --require-approval never \
+        --context environment="$ENVIRONMENT" \
+        --context region="$AWS_REGION"
 else
     prompt_continue "Ready to deploy 10 stacks (excluding ChatStack)?"
-    DEPLOY_ARGS="--all --exclusively NetworkStack,DataStack,SecurityStack,ObservabilityStack,ApiStack,SkillPipelineStack,OrchestrationStack,EvolutionStack,TenantOnboardingStack,PipelineStack"
+    log_info "Deploying stacks (--require-approval never)..."
+    bunx cdk deploy \
+        Chimera-${ENVIRONMENT}-Network \
+        Chimera-${ENVIRONMENT}-Data \
+        Chimera-${ENVIRONMENT}-Security \
+        Chimera-${ENVIRONMENT}-Observability \
+        Chimera-${ENVIRONMENT}-Api \
+        Chimera-${ENVIRONMENT}-SkillPipeline \
+        Chimera-${ENVIRONMENT}-Orchestration \
+        Chimera-${ENVIRONMENT}-Evolution \
+        Chimera-${ENVIRONMENT}-TenantOnboarding \
+        Chimera-${ENVIRONMENT}-Pipeline \
+        --require-approval never \
+        --context environment="$ENVIRONMENT" \
+        --context region="$AWS_REGION"
 fi
-
-log_info "Deploying stacks (--require-approval never)..."
-bunx cdk deploy $DEPLOY_ARGS --require-approval never \
-    --context environment="$ENVIRONMENT" \
-    --context region="$AWS_REGION"
 
 if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
     log_success "All 11 stacks deployed successfully"
@@ -323,13 +335,17 @@ else
     log_warn "VPC not found"
 fi
 
-# Check ECS cluster
-log_info "Checking ECS cluster..."
-ECS_CLUSTER=$(aws ecs describe-clusters --region "$AWS_REGION" --clusters "chimera-${ENVIRONMENT}-chat" --query 'clusters[0].status' --output text 2>/dev/null || echo "NOT_FOUND")
-if [[ "$ECS_CLUSTER" == "ACTIVE" ]]; then
-    log_success "ECS cluster is ACTIVE"
+# Check ECS cluster (only if Docker was available)
+if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
+    log_info "Checking ECS cluster..."
+    ECS_CLUSTER=$(aws ecs describe-clusters --region "$AWS_REGION" --clusters "chimera-${ENVIRONMENT}-chat" --query 'clusters[0].status' --output text 2>/dev/null || echo "NOT_FOUND")
+    if [[ "$ECS_CLUSTER" == "ACTIVE" ]]; then
+        log_success "ECS cluster is ACTIVE"
+    else
+        log_warn "ECS cluster not active: $ECS_CLUSTER"
+    fi
 else
-    log_warn "ECS cluster not active: $ECS_CLUSTER"
+    log_info "Skipping ECS cluster check (ChatStack was not deployed)"
 fi
 
 echo
