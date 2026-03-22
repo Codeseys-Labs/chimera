@@ -75,7 +75,7 @@ async function pushToCodeCommit(
     throw new Error('Invalid repository name or region format');
   }
 
-  const execOptions = { cwd: repoRoot, encoding: 'utf8' as const, stdio: 'pipe' as const };
+  const execOptions = { cwd: repoRoot, encoding: 'utf8' as const, stdio: 'pipe' as const, env: { ...process.env } };
   const remoteName = 'codecommit-deploy';
   const cloneUrl = `https://git-codecommit.${safeRegion}.amazonaws.com/v1/repos/${safeRepoName}`;
 
