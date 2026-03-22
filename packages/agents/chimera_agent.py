@@ -258,16 +258,53 @@ def build_system_prompt(tenant_id: str, tier: str, config: Dict[str, Any]) -> st
     """
     Build system prompt with tenant context.
 
-    Includes tier, features, budget constraints, and tenant-specific guidelines.
+    Loads SOUL.md (agent identity) and AGENTS.md (capability reference) from project root,
+    then appends tenant-specific context (tier, features, budget).
     """
+    # Load agent identity and capability documents
+    soul_content = load_identity_file("SOUL.md")
+    agents_content = load_identity_file("AGENTS.md")
+
     features_str = ', '.join(config['features']) if config['features'] else 'standard features'
 
-    return f"""You are Chimera, an AI assistant for {tenant_id}.
+    # Combine identity docs + tenant context
+    return f"""{soul_content}
 
-Tier: {tier}
-Available features: {features_str}
-Monthly budget: ${config['monthlyBudget']:.2f}
-Current spend: ${config['currentSpend']:.2f}
+---
+
+{agents_content}
+
+---
+
+# Tenant Context
+
+You are now operating for tenant: {tenant_id}
+
+**Tier:** {tier}
+**Available features:** {features_str}
+**Monthly budget:** ${config['monthlyBudget']:.2f}
+**Current spend:** ${config['currentSpend']:.2f}
 
 Follow tenant-specific guidelines and respect budget constraints.
 Always provide helpful, accurate, and safe responses."""
+
+
+def load_identity_file(filename: str) -> str:
+    """
+    Load agent identity file (SOUL.md or AGENTS.md) from project root.
+
+    Falls back to a minimal message if file is missing.
+    """
+    import pathlib
+
+    # Navigate from packages/agents/ to project root
+    project_root = pathlib.Path(__file__).parent.parent.parent
+    file_path = project_root / filename
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return f"# {filename} not found\n\nAgent identity document missing from project root."
+    except Exception as e:
+        return f"# Error loading {filename}\n\nFailed to load agent identity: {e}"
