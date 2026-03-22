@@ -25,8 +25,8 @@ set -euo pipefail
 #   - AWS CLI v2.15+
 #   - Node.js 20.x
 #   - Bun 1.0.30+
-#   - AWS CDK CLI 2.120+
-#   - Docker 24+
+#   - aws-cdk in devDependencies (used via bunx, not globally installed)
+#   - Docker 24+ (optional - only needed for ChatStack deployment)
 #
 # ============================================================================
 
@@ -111,8 +111,16 @@ PREREQ_FAILED=0
 check_command "aws" "v2.15+" || PREREQ_FAILED=1
 check_command "node" "20.x" || PREREQ_FAILED=1
 check_command "bun" "1.0.30+" || PREREQ_FAILED=1
-check_command "cdk" "2.120+" || PREREQ_FAILED=1
-check_command "docker" "24+" || PREREQ_FAILED=1
+
+# Docker is optional - only required for container stacks (ChatStack)
+DOCKER_AVAILABLE=0
+if check_command "docker" "24+"; then
+    DOCKER_AVAILABLE=1
+    log_info "Docker available - will deploy all stacks including ChatStack"
+else
+    log_warn "Docker not available - will skip ChatStack (ECS Fargate)"
+    log_info "You can deploy infra-only now and add ChatStack later after installing Docker"
+fi
 
 if [[ $PREREQ_FAILED -eq 1 ]]; then
     log_error "Prerequisites check failed. Install missing tools and try again."
@@ -121,8 +129,7 @@ if [[ $PREREQ_FAILED -eq 1 ]]; then
     echo "  AWS CLI:  https://aws.amazon.com/cli/"
     echo "  Node.js:  https://nodejs.org/ or use mise (https://mise.jdx.dev/)"
     echo "  Bun:      https://bun.sh/docs/installation"
-    echo "  CDK CLI:  npm install -g aws-cdk"
-    echo "  Docker:   https://docs.docker.com/get-docker/"
+    echo "  Docker:   https://docs.docker.com/get-docker/ (optional, only needed for ChatStack)"
     exit 1
 fi
 
@@ -201,7 +208,7 @@ if aws cloudformation describe-stacks --stack-name CDKToolkit --region "$AWS_REG
     log_warn "CDK already bootstrapped in this account/region"
 else
     log_info "Bootstrapping CDK in $AWS_ACCOUNT_ID / $AWS_REGION..."
-    cdk bootstrap "aws://${AWS_ACCOUNT_ID}/${AWS_REGION}"
+    bunx cdk bootstrap "aws://${AWS_ACCOUNT_ID}/${AWS_REGION}"
     log_success "CDK bootstrap complete"
 fi
 
@@ -232,9 +239,9 @@ echo
 log_info "Step 7: Synthesizing CDK stacks..."
 echo
 
-cdk synth --quiet
+bunx cdk synth --quiet
 
-log_success "CDK synthesis complete - all 11 stacks validated"
+log_success "CDK synthesis complete - all stacks validated"
 echo
 
 # ============================================================================
@@ -251,21 +258,47 @@ echo "  3. SecurityStack          - Cognito, KMS, WAF"
 echo "  4. ObservabilityStack     - CloudWatch, alarms"
 echo "  5. ApiStack               - API Gateway REST + WebSocket"
 echo "  6. SkillPipelineStack     - Skill security scanning"
-echo "  7. ChatStack              - ECS Fargate chat service"
+if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
+    echo "  7. ChatStack              - ECS Fargate chat service"
+else
+    echo "  7. ChatStack              - SKIPPED (Docker not available)"
+fi
 echo "  8. OrchestrationStack     - EventBridge, SQS queues"
 echo "  9. EvolutionStack         - Self-evolution engine"
 echo "  10. TenantOnboardingStack - Tenant provisioning"
 echo "  11. PipelineStack         - CI/CD pipeline"
 echo
 
-prompt_continue "Ready to deploy all 11 stacks?"
+if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
+    prompt_continue "Ready to deploy all 11 stacks?"
+    log_info "Deploying all stacks (--require-approval never)..."
+    bunx cdk deploy --all --require-approval never \
+        --context environment="$ENVIRONMENT" \
+        --context region="$AWS_REGION"
+else
+    prompt_continue "Ready to deploy 10 stacks (excluding ChatStack)?"
+    log_info "Deploying stacks (--require-approval never)..."
+    bunx cdk deploy \
+        Chimera-${ENVIRONMENT}-Network \
+        Chimera-${ENVIRONMENT}-Data \
+        Chimera-${ENVIRONMENT}-Security \
+        Chimera-${ENVIRONMENT}-Observability \
+        Chimera-${ENVIRONMENT}-Api \
+        Chimera-${ENVIRONMENT}-SkillPipeline \
+        Chimera-${ENVIRONMENT}-Orchestration \
+        Chimera-${ENVIRONMENT}-Evolution \
+        Chimera-${ENVIRONMENT}-TenantOnboarding \
+        Chimera-${ENVIRONMENT}-Pipeline \
+        --require-approval never \
+        --context environment="$ENVIRONMENT" \
+        --context region="$AWS_REGION"
+fi
 
-log_info "Deploying all stacks (--require-approval never)..."
-cdk deploy --all --require-approval never \
-    --context environment="$ENVIRONMENT" \
-    --context region="$AWS_REGION"
-
-log_success "All stacks deployed successfully"
+if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
+    log_success "All 11 stacks deployed successfully"
+else
+    log_success "10 stacks deployed successfully (ChatStack skipped - install Docker and run 'bunx cdk deploy ChatStack' to add it later)"
+fi
 echo
 
 # ============================================================================
@@ -302,13 +335,17 @@ else
     log_warn "VPC not found"
 fi
 
-# Check ECS cluster
-log_info "Checking ECS cluster..."
-ECS_CLUSTER=$(aws ecs describe-clusters --region "$AWS_REGION" --clusters "chimera-${ENVIRONMENT}-chat" --query 'clusters[0].status' --output text 2>/dev/null || echo "NOT_FOUND")
-if [[ "$ECS_CLUSTER" == "ACTIVE" ]]; then
-    log_success "ECS cluster is ACTIVE"
+# Check ECS cluster (only if Docker was available)
+if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
+    log_info "Checking ECS cluster..."
+    ECS_CLUSTER=$(aws ecs describe-clusters --region "$AWS_REGION" --clusters "chimera-${ENVIRONMENT}-chat" --query 'clusters[0].status' --output text 2>/dev/null || echo "NOT_FOUND")
+    if [[ "$ECS_CLUSTER" == "ACTIVE" ]]; then
+        log_success "ECS cluster is ACTIVE"
+    else
+        log_warn "ECS cluster not active: $ECS_CLUSTER"
+    fi
 else
-    log_warn "ECS cluster not active: $ECS_CLUSTER"
+    log_info "Skipping ECS cluster check (ChatStack was not deployed)"
 fi
 
 echo

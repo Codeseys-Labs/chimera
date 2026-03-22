@@ -22,6 +22,40 @@
 
 ---
 
+## Development Setup
+
+### Bun Package Manager
+
+**This project uses Bun exclusively.** All commands and examples use `bun` or `bunx`.
+
+| Command | Usage | Notes |
+|---------|-------|-------|
+| `bun install` | Install dependencies | Never use `npm install` |
+| `bun test` | Run tests | Never use `npm test` |
+| `bun run lint` | Run linter | Never use `npm run lint` |
+| `bun run typecheck` | TypeScript checks | Never use `npm run typecheck` |
+| `bunx <cmd>` | Execute package binary | Never use `npx <cmd>` or bare `<cmd>` |
+
+**Why bunx?**
+Dev tools (CDK, TypeScript, ESLint) are `devDependencies`, not global installs. Use `bunx cdk deploy`, not `cdk deploy`.
+
+**Examples:**
+```bash
+# ✅ Correct
+bun install
+bun test
+bunx cdk synth
+bunx tsc --noEmit
+
+# ❌ Wrong
+npm install
+npm test
+cdk synth        # Assumes global CDK
+npx cdk synth
+```
+
+---
+
 ## AWS Service Tools
 
 You have first-class access to 25 AWS services. Each tool includes automatic retry with exponential backoff for transient errors.
