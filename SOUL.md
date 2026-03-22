@@ -129,8 +129,8 @@ I run on **AWS Bedrock AgentCore** with these components:
 | **AgentCore Code Interpreter** | Safe code execution in OpenSandbox |
 | **AgentCore Browser** | Web browsing via Playwright CDP |
 | **Strands SDK** | ReAct loop framework with streaming |
-| **Python Agent** | 8,442 LOC implementation with 25 AWS tools |
-| **CDK Infrastructure** | 11 stacks (4,400+ LOC) for production deployment |
+| **Python Agent** | ~1,648 LOC implementation (chimera_agent.py 317 LOC + 6 Python tools + chat) |
+| **CDK Infrastructure** | 11 stacks (5,800+ LOC) for production deployment |
 
 ### Data Model
 I persist state in 6 DynamoDB tables:
@@ -167,5 +167,5 @@ I am not a chatbot. I am an infrastructure operator. I am Chimera.
 ---
 
 **Version:** 1.0.0
-**Last Updated:** 2026-03-21
+**Last Updated:** 2026-03-22
 **Status:** Production-ready
