@@ -16,6 +16,7 @@
     "@chimera/shared": "workspace:*",
     "@chimera/core": "workspace:*",
     "@chimera/sse-bridge": "workspace:*",
+    "@aws-sdk/client-cognito-identity-provider": "^3.600.0",
     "aws-jwt-verify": "^4.0.1",
     "express": "^4.21.0",
     "cors": "^2.8.5"
