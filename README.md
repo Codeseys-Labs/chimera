@@ -136,7 +136,10 @@ chimera/
 │   ├── lib/                  # Stack definitions
 │   └── constructs/           # L3 constructs
 ├── docs/                     # Documentation
-│   ├── architecture/         # Architecture decision records
+│   ├── architecture/         # ADRs and architecture docs
+│   │   └── decisions/        # 18 Architecture Decision Records
+│   ├── guide/                # Core guides
+│   ├── guides/               # Operational guides
 │   ├── research/             # Research documents
 │   └── runbooks/             # Operational runbooks
 └── tests/                    # Integration + E2E tests
@@ -148,8 +151,8 @@ chimera/
 
 | Phase | Status | Key Deliverables |
 |-------|--------|------------------|
-| **0. Foundation** | ✅ **COMPLETE** | 11 CDK stacks (4,400+ LOC), 6-table DynamoDB design, VPC + networking, 18 ADRs |
-| **1. Agent Runtime** | ✅ **COMPLETE** | Python agent with Strands SDK + AgentCore • 25 AWS tools • Multi-modal processing • Discovery modules • 760+ passing tests |
+| **0. Foundation** | ✅ **COMPLETE** | 11 CDK stacks (5,800+ LOC), 6-table DynamoDB design, VPC + networking, 18 ADRs |
+| **1. Agent Runtime** | ✅ **COMPLETE** | Python agent with Strands SDK + AgentCore • 25 AWS tools • Multi-modal processing • Discovery modules • 860+ passing tests |
 | **2. Chat Gateway** | 🚧 **FRAMEWORK READY** | SSE bridge ship-ready • Vercel Chat SDK integrated • Adapter stubs (Slack, Discord, Teams) • Needs production deployment |
 | **3. Skill Ecosystem** | ✅ **COMPLETE** | Registry, discovery, installer, validator, MCP gateway • Trust engine • 7-stage security pipeline • SKILL.md v2 parser |
 | **4. Multi-Tenant** | ✅ **COMPLETE** | Tenant router • Cedar authorization • Rate limiting • Quota management • Cost tracking • Per-tenant KMS |
@@ -157,7 +160,7 @@ chimera/
 | **6. Self-Evolution** | ✅ **COMPLETE** | 7 evolution modules • Prompt A/B testing • Auto-skill generation • Model routing • Self-modifying IaC with safety harness |
 | **7. Production** | 🚧 **IN PROGRESS** | CI/CD pipeline stack exists • Observability stack complete • Needs load testing + DR validation |
 
-**Test Coverage:** 760 passing / 81 failing / 19 errors = 841 total tests across 60 test files
+**Test Coverage:** 860 passing / 82 failing / 20 errors = 962 total tests across 64 test files
 
 ## Documentation
 
@@ -175,17 +178,17 @@ chimera/
 | Metric | Count |
 |--------|-------|
 | **Packages** | 6 (core, agents, shared, sse-bridge, chat-gateway, cli) |
-| **CDK Infrastructure Stacks** | 11 stacks (4,400+ LOC) |
-| **TypeScript LOC** | ~46,500 lines (packages/core/src/) |
-| **Python Agent Runtime** | 273 lines (chimera_agent.py + tools) |
-| **AWS Tool Implementations** | 25 tools (19 TypeScript + 5 Python + media processors) |
-| **Core Modules** | 20 (agent, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity) |
-| **Test Coverage** | 841 tests (760 pass, 81 fail, 19 errors) across 41+ test files |
+| **CDK Infrastructure Stacks** | 11 stacks (5,800+ LOC) |
+| **TypeScript LOC** | ~48,300 lines (packages/core/src/) |
+| **Python Agent Runtime** | 317 lines (chimera_agent.py) + ~1,648 total Python LOC |
+| **AWS Tool Implementations** | 25 tools (19 TypeScript + 6 Python) |
+| **Core Modules** | 21 (activity, agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected) |
+| **Test Coverage** | 962 tests (860 pass, 82 fail, 20 errors) across 64 test files |
 | **Architecture Decision Records** | 18 ADRs |
-| **Research Documentation** | 118 docs, 112,000+ lines |
+| **Research Documentation** | 123 docs, 118,000+ lines |
 
 **Key Components Built:**
-- ✅ Agent runtime (Strands + AgentCore in Python)
+- ✅ Agent runtime (Strands + AgentCore in Python, 317 LOC + ~1,648 total)
 - ✅ 25 AWS service tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock, etc.)
 - ✅ Discovery triad (AWS Config, Resource Explorer, Cost Explorer)
 - ✅ Multi-modal media processing (auto-detection, routing)
@@ -196,7 +199,7 @@ chimera/
 - ✅ Well-Architected Framework integration (6-pillar review tool)
 - ✅ Infrastructure-as-code builder (CDK generation from requirements)
 - ✅ Activity logging with ADR/runbook auto-generation
-- ✅ 11 production CDK stacks (Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration)
+- ✅ 11 production CDK stacks (5,800+ LOC) (Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration)
 
 ## License
 
