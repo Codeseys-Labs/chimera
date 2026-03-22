@@ -77,6 +77,7 @@ export {
   BackgroundTaskManager,
   createBackgroundTaskManager,
   startBackgroundTaskTool,
+  checkBackgroundTaskTool,
   type BackgroundTaskStatus,
   type BackgroundTask,
   type TaskSubmissionResult

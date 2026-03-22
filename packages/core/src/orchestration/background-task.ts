@@ -273,3 +273,23 @@ export const startBackgroundTaskTool = {
     required: ['targetAgentId', 'instruction']
   }
 };
+
+/**
+ * Agent tool schema for check_background_task
+ *
+ * Allows agents to poll for background task status and results.
+ */
+export const checkBackgroundTaskTool = {
+  name: 'check_background_task',
+  description: 'Check the status of a background task. Returns current status, progress, and result (if completed). Use this to poll for task completion without blocking.',
+  parameters: {
+    type: 'object',
+    properties: {
+      taskId: {
+        type: 'string',
+        description: 'The background task ID returned by start_background_task'
+      }
+    },
+    required: ['taskId']
+  }
+};

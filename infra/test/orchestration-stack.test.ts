@@ -68,8 +68,8 @@ describe('OrchestrationStack', () => {
   });
 
   describe('EventBridge Rules', () => {
-    it('should create 6 event rules', () => {
-      template.resourceCountIs('AWS::Events::Rule', 6);
+    it('should create 7 event rules', () => {
+      template.resourceCountIs('AWS::Events::Rule', 7);
     });
 
     it('should create TaskStarted rule routing to CloudWatch', () => {
@@ -134,6 +134,17 @@ describe('OrchestrationStack', () => {
         EventPattern: {
           source: ['chimera.agents'],
           'detail-type': ['Agent Message'],
+        },
+      });
+    });
+
+    it('should create BackgroundTaskStarted rule routing to Step Functions', () => {
+      template.hasResourceProperties('AWS::Events::Rule', {
+        Name: 'chimera-background-task-started-dev',
+        Description: 'Route background task started events to Step Functions',
+        EventPattern: {
+          source: ['chimera.agents'],
+          'detail-type': ['Background Task Started'],
         },
       });
     });
@@ -241,8 +252,8 @@ describe('OrchestrationStack', () => {
   });
 
   describe('Step Functions State Machines', () => {
-    it('should create 2 state machines', () => {
-      template.resourceCountIs('AWS::StepFunctions::StateMachine', 2);
+    it('should create 3 state machines', () => {
+      template.resourceCountIs('AWS::StepFunctions::StateMachine', 3);
     });
 
     it('should create Pipeline Build state machine', () => {
@@ -254,6 +265,12 @@ describe('OrchestrationStack', () => {
     it('should create Data Analysis state machine', () => {
       template.hasResourceProperties('AWS::StepFunctions::StateMachine', {
         StateMachineName: 'chimera-data-analysis-dev',
+      });
+    });
+
+    it('should create Background Task state machine', () => {
+      template.hasResourceProperties('AWS::StepFunctions::StateMachine', {
+        StateMachineName: 'chimera-background-task-dev',
       });
     });
 
@@ -275,13 +292,18 @@ describe('OrchestrationStack', () => {
         LogGroupName: '/aws/vendedlogs/states/chimera-data-analysis-dev',
         RetentionInDays: 7,
       });
+
+      template.hasResourceProperties('AWS::Logs::LogGroup', {
+        LogGroupName: '/aws/vendedlogs/states/chimera-background-task-dev',
+        RetentionInDays: 7,
+      });
     });
   });
 
   describe('Lambda Functions', () => {
     it('should create workflow Lambda functions', () => {
-      // 4 workflow functions + 1 LogRetention function for CloudWatch Logs
-      template.resourceCountIs('AWS::Lambda::Function', 5);
+      // 6 workflow functions + 1 LogRetention function for CloudWatch Logs
+      template.resourceCountIs('AWS::Lambda::Function', 7);
     });
 
     it('should create StartBuildFunction', () => {
@@ -314,6 +336,24 @@ describe('OrchestrationStack', () => {
     it('should create CheckQueryStatusFunction', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         FunctionName: 'chimera-workflow-check-query-dev',
+        Runtime: 'python3.12',
+        Timeout: 30,
+        MemorySize: 256,
+      });
+    });
+
+    it('should create ExecuteBackgroundTaskFunction', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'chimera-workflow-execute-bg-task-dev',
+        Runtime: 'python3.12',
+        Timeout: 300,
+        MemorySize: 512,
+      });
+    });
+
+    it('should create CheckBackgroundTaskStatusFunction', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'chimera-workflow-check-bg-task-dev',
         Runtime: 'python3.12',
         Timeout: 30,
         MemorySize: 256,
@@ -416,6 +456,22 @@ describe('OrchestrationStack', () => {
       });
       expect(publisherPolicy).toBeDefined();
     });
+
+    it('should create StepFunctionsInvoke role for EventBridge', () => {
+      template.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'chimera-sfn-invoke-dev',
+        Description: 'Allows EventBridge to invoke Step Functions state machines',
+        AssumeRolePolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Principal: {
+                Service: 'events.amazonaws.com',
+              },
+            }),
+          ]),
+        }),
+      });
+    });
   });
 
   describe('Stack Outputs', () => {
@@ -481,6 +537,12 @@ describe('OrchestrationStack', () => {
       template.hasOutput('DataAnalysisStateMachineArn', {
         Export: {
           Name: 'TestOrchestrationStack-DataAnalysisStateMachineArn',
+        },
+      });
+
+      template.hasOutput('BackgroundTaskStateMachineArn', {
+        Export: {
+          Name: 'TestOrchestrationStack-BackgroundTaskStateMachineArn',
         },
       });
     });
@@ -561,6 +623,7 @@ describe('OrchestrationStack', () => {
       expect(Object.keys(outputs)).toContain('SchedulerGroupName');
       expect(Object.keys(outputs)).toContain('PipelineBuildStateMachineArn');
       expect(Object.keys(outputs)).toContain('DataAnalysisStateMachineArn');
+      expect(Object.keys(outputs)).toContain('BackgroundTaskStateMachineArn');
     });
 
     it('should expose public properties for same-app references', () => {
@@ -570,6 +633,7 @@ describe('OrchestrationStack', () => {
       expect(stack.schedulerGroup).toBeDefined();
       expect(stack.pipelineBuildStateMachine).toBeDefined();
       expect(stack.dataAnalysisStateMachine).toBeDefined();
+      expect(stack.backgroundTaskStateMachine).toBeDefined();
     });
   });
 });

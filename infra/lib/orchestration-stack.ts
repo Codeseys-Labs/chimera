@@ -40,6 +40,7 @@ export class OrchestrationStack extends cdk.Stack {
   public readonly schedulerGroup: scheduler.CfnScheduleGroup;
   public readonly pipelineBuildStateMachine: stepfunctions.StateMachine;
   public readonly dataAnalysisStateMachine: stepfunctions.StateMachine;
+  public readonly backgroundTaskStateMachine: stepfunctions.StateMachine;
 
   constructor(scope: Construct, id: string, props: OrchestrationStackProps) {
     super(scope, id, props);
@@ -212,6 +213,9 @@ export class OrchestrationStack extends cdk.Stack {
       // Message group ID extracted from event detail for session-based routing
       messageGroupId: events.EventField.fromPath('$.detail.sessionId'),
     }));
+
+    // Rule 7: Background Task Started → Step Functions (defined after state machine creation)
+    // This rule is created later after the state machine is defined
 
     // ======================================================================
     // IAM Role: EventBridge Event Publisher
@@ -395,6 +399,58 @@ def handler(event, context):
       memorySize: 256,
     });
 
+    // Background Task: Execute generic background task
+    const executeBackgroundTaskFunction = new lambda.Function(this, 'ExecuteBackgroundTaskFunction', {
+      functionName: `chimera-workflow-execute-bg-task-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+def handler(event, context):
+    """
+    Execute a generic background task.
+
+    Input: { task_id, tenant_id, instruction, context, target_agent_id }
+    Output: { task_id, status, result }
+    """
+    # TODO: Implement actual background task execution
+    # This would typically invoke the target agent via Bedrock Agent Runtime
+    return {
+        'task_id': event['task_id'],
+        'status': 'COMPLETED',
+        'result': {
+            'success': True,
+            'message': 'Background task completed'
+        }
+    }
+`),
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+    });
+
+    // Background Task: Check task status
+    const checkBackgroundTaskStatusFunction = new lambda.Function(this, 'CheckBackgroundTaskStatusFunction', {
+      functionName: `chimera-workflow-check-bg-task-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+def handler(event, context):
+    """
+    Check status of a background task.
+
+    Input: { task_id }
+    Output: { task_id, status, result }
+    """
+    # TODO: Implement actual status check from DynamoDB
+    return {
+        'task_id': event['task_id'],
+        'status': 'COMPLETED',
+        'result': event.get('result', {})
+    }
+`),
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+    });
+
     // ======================================================================
     // Step Functions: Pipeline Build Workflow
     // Orchestrates multi-stage build process with status checks and retries.
@@ -493,9 +549,89 @@ def handler(event, context):
       },
     });
 
+    // ======================================================================
+    // Step Functions: Background Task Workflow
+    // Orchestrates generic background task execution with retry logic.
+    // ======================================================================
+
+    const executeTaskStep = new tasks.LambdaInvoke(this, 'ExecuteBackgroundTaskStep', {
+      lambdaFunction: executeBackgroundTaskFunction,
+      outputPath: '$.Payload',
+    });
+
+    const checkTaskStep = new tasks.LambdaInvoke(this, 'CheckBackgroundTaskStep', {
+      lambdaFunction: checkBackgroundTaskStatusFunction,
+      outputPath: '$.Payload',
+    });
+
+    const taskWait = new stepfunctions.Wait(this, 'BackgroundTaskWait', {
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(30)),
+    });
+
+    const taskSucceeded = new stepfunctions.Succeed(this, 'BackgroundTaskSucceeded');
+    const taskFailed = new stepfunctions.Fail(this, 'BackgroundTaskFailed', {
+      cause: 'Background task execution failed',
+      error: 'BackgroundTaskError',
+    });
+
+    const checkTaskChoice = new stepfunctions.Choice(this, 'BackgroundTaskComplete?')
+      .when(stepfunctions.Condition.stringEquals('$.status', 'COMPLETED'), taskSucceeded)
+      .when(stepfunctions.Condition.stringEquals('$.status', 'FAILED'), taskFailed)
+      .otherwise(taskWait);
+
+    taskWait.next(checkTaskStep);
+    checkTaskStep.next(checkTaskChoice);
+
+    const backgroundTaskDefinition = executeTaskStep.next(taskWait);
+
+    this.backgroundTaskStateMachine = new stepfunctions.StateMachine(this, 'BackgroundTaskStateMachine', {
+      stateMachineName: `chimera-background-task-${props.envName}`,
+      definitionBody: stepfunctions.DefinitionBody.fromChainable(backgroundTaskDefinition),
+      timeout: cdk.Duration.minutes(10),
+      logs: {
+        destination: new logs.LogGroup(this, 'BackgroundTaskLogGroup', {
+          logGroupName: `/aws/vendedlogs/states/chimera-background-task-${props.envName}`,
+          retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+          removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+        }),
+        level: stepfunctions.LogLevel.ALL,
+      },
+    });
+
     // Grant Lambda functions access to invoke Step Functions
     this.pipelineBuildStateMachine.grantStartExecution(eventPublisherRole);
     this.dataAnalysisStateMachine.grantStartExecution(eventPublisherRole);
+    this.backgroundTaskStateMachine.grantStartExecution(eventPublisherRole);
+
+    // ======================================================================
+    // EventBridge Rule: Background Task Started → Step Functions
+    // Triggers background task state machine when agents start tasks.
+    // ======================================================================
+
+    const backgroundTaskRule = new events.Rule(this, 'BackgroundTaskStartedRule', {
+      ruleName: `chimera-background-task-started-${props.envName}`,
+      eventBus: this.eventBus,
+      description: 'Route background task started events to Step Functions',
+      eventPattern: {
+        source: ['chimera.agents'],
+        detailType: ['Background Task Started'],
+      },
+    });
+
+    // Create IAM role for EventBridge to invoke Step Functions
+    const stepFunctionsInvokeRole = new iam.Role(this, 'StepFunctionsInvokeRole', {
+      roleName: `chimera-sfn-invoke-${props.envName}`,
+      assumedBy: new iam.ServicePrincipal('events.amazonaws.com'),
+      description: 'Allows EventBridge to invoke Step Functions state machines',
+    });
+
+    this.backgroundTaskStateMachine.grantStartExecution(stepFunctionsInvokeRole);
+
+    backgroundTaskRule.addTarget(new targets.SfnStateMachine(this.backgroundTaskStateMachine, {
+      role: stepFunctionsInvokeRole,
+      // Pass the event detail as input to the state machine
+      input: events.RuleTargetInput.fromEventPath('$.detail'),
+    }));
 
     // ======================================================================
     // Stack Outputs
@@ -559,6 +695,12 @@ def handler(event, context):
       value: this.dataAnalysisStateMachine.stateMachineArn,
       exportName: `${this.stackName}-DataAnalysisStateMachineArn`,
       description: 'Step Functions state machine ARN for data analysis workflow',
+    });
+
+    new cdk.CfnOutput(this, 'BackgroundTaskStateMachineArn', {
+      value: this.backgroundTaskStateMachine.stateMachineArn,
+      exportName: `${this.stackName}-BackgroundTaskStateMachineArn`,
+      description: 'Step Functions state machine ARN for background task execution',
     });
 
     new cdk.CfnOutput(this, 'QueueProvisionerRoleArn', {
