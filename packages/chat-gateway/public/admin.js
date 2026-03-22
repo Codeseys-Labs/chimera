@@ -27,12 +27,17 @@
   // Utility: Show error message
   function showError(message) {
     const errorDiv = document.getElementById('error-message');
+    const successDiv = document.getElementById('success-message');
     const errorBox = document.createElement('div');
     errorBox.className = 'error';
     errorBox.textContent = message;
     // Clear using safe DOM methods
     while (errorDiv.firstChild) {
       errorDiv.removeChild(errorDiv.firstChild);
+    }
+    // Hide success message when showing error
+    while (successDiv.firstChild) {
+      successDiv.removeChild(successDiv.firstChild);
     }
     errorDiv.appendChild(errorBox);
     setTimeout(() => {
@@ -44,6 +49,7 @@
 
   // Utility: Show success message
   function showSuccess(message) {
+    const errorDiv = document.getElementById('error-message');
     const successDiv = document.getElementById('success-message');
     const successBox = document.createElement('div');
     successBox.className = 'success';
@@ -51,6 +57,10 @@
     // Clear using safe DOM methods
     while (successDiv.firstChild) {
       successDiv.removeChild(successDiv.firstChild);
+    }
+    // Hide error message when showing success
+    while (errorDiv.firstChild) {
+      errorDiv.removeChild(errorDiv.firstChild);
     }
     successDiv.appendChild(successBox);
     setTimeout(() => {
@@ -118,8 +128,8 @@
     } catch (error) {
       console.error('Failed to load integrations:', error);
       showError('Failed to load integrations: ' + error.message);
-      document.getElementById('integrations-loading').style.display = 'none';
-      document.getElementById('integrations-empty').style.display = 'block';
+      integrationsLoading.style.display = 'none';
+      integrationsEmpty.style.display = 'block';
     }
   }
 
@@ -237,8 +247,8 @@
     } catch (error) {
       console.error('Failed to load user pairings:', error);
       showError('Failed to load user pairings: ' + error.message);
-      document.getElementById('pairings-loading').style.display = 'none';
-      document.getElementById('pairings-empty').style.display = 'block';
+      pairingsLoading.style.display = 'none';
+      pairingsEmpty.style.display = 'block';
     }
   }
 
@@ -410,8 +420,8 @@
     } catch (error) {
       console.error('Failed to load users:', error);
       showError('Failed to load users: ' + error.message);
-      document.getElementById('users-loading').style.display = 'none';
-      document.getElementById('users-empty').style.display = 'block';
+      usersLoading.style.display = 'none';
+      usersEmpty.style.display = 'block';
     }
   }
 
