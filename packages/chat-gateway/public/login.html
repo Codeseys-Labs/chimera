@@ -333,6 +333,8 @@
               registerView.style.display = 'none';
               loginView.style.display = 'block';
               registerForm.reset();
+              registerButton.disabled = false;
+              registerButton.textContent = 'Create Account';
             }, 3000);
           } else {
             showSuccess('Account created successfully! Redirecting to login...');
@@ -340,12 +342,13 @@
               registerView.style.display = 'none';
               loginView.style.display = 'block';
               registerForm.reset();
+              registerButton.disabled = false;
+              registerButton.textContent = 'Create Account';
             }, 2000);
           }
         } catch (error) {
           console.error('Registration failed:', error);
           showError('Registration failed: ' + error.message);
-        } finally {
           registerButton.disabled = false;
           registerButton.textContent = 'Create Account';
         }
