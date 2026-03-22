@@ -12,9 +12,6 @@ import {
   CodeCommitClient,
   CreateRepositoryCommand,
   GetRepositoryCommand,
-  GetBranchCommand,
-  CreateCommitCommand,
-  type PutFileEntry,
 } from '@aws-sdk/client-codecommit';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
 
@@ -60,11 +57,27 @@ async function ensureCodeCommitRepo(
 }
 
 /**
- * Get list of files to commit (git tracked files)
- * Note: Uses git ls-files command with validated repo path from git rev-parse
+ * Push local repository to CodeCommit using git with credential helper
+ * Handles large repos (>6MB) by using standard git push with temporary credential config
+ * Note: Configures credential helper, pushes, then cleans up config
  */
-function getTrackedFiles(repoRoot: string): string[] {
+async function pushToCodeCommit(
+  client: CodeCommitClient,
+  repoName: string,
+  repoRoot: string,
+  region: string,
+): Promise<void> {
+  // Validate inputs to prevent injection (defense in depth)
+  const safeRepoName = repoName.replace(/[^a-zA-Z0-9._-]/g, '');
+  const safeRegion = region.replace(/[^a-z0-9-]/g, '');
+
+  if (safeRepoName !== repoName || safeRegion !== region) {
+    throw new Error('Invalid repository name or region format');
+  }
+
   const execOptions = { cwd: repoRoot, encoding: 'utf8' as const, stdio: 'pipe' as const };
+  const remoteName = 'codecommit-deploy';
+  const cloneUrl = `https://git-codecommit.${safeRegion}.amazonaws.com/v1/repos/${safeRepoName}`;
 
   // Initialize git repo if needed
   if (!fs.existsSync(path.join(repoRoot, '.git'))) {
@@ -73,74 +86,47 @@ function getTrackedFiles(repoRoot: string): string[] {
     execSync('git commit -m "Initial Chimera deployment"', execOptions);
   }
 
-  // Get list of tracked files relative to repo root
-  const output = execSync('git ls-files', execOptions);
-  return output
-    .toString()
-    .trim()
-    .split('\n')
-    .filter((line) => line.length > 0);
-}
-
-/**
- * Push local repository to CodeCommit using CreateCommit API
- * Bypasses git credential helper requirements by using AWS SDK directly
- * Note: Repository name validated by AWS SDK, file paths from git ls-files
- */
-async function pushToCodeCommit(
-  client: CodeCommitClient,
-  repoName: string,
-  repoRoot: string,
-): Promise<void> {
-  const branchName = 'main';
-
-  // Get list of files to commit
-  const files = getTrackedFiles(repoRoot);
-
-  if (files.length === 0) {
-    throw new Error('No files to commit');
-  }
-
-  // Read file contents and prepare PutFileEntry array
-  const putFiles: PutFileEntry[] = files.map((filePath) => {
-    const absolutePath = path.join(repoRoot, filePath);
-    const content = fs.readFileSync(absolutePath);
-
-    return {
-      filePath,
-      fileMode: fs.statSync(absolutePath).mode & 0o100 ? 'EXECUTABLE' : 'NORMAL',
-      fileContent: content,
-    };
-  });
-
-  // Get parent commit ID if branch exists
-  let parentCommitId: string | undefined;
   try {
-    const getBranchCommand = new GetBranchCommand({
-      repositoryName: repoName,
-      branchName,
+    // Configure git credential helper for CodeCommit (temporary)
+    execSync(
+      `git config --local credential.helper '!aws codecommit credential-helper $@'`,
+      execOptions
+    );
+    execSync(`git config --local credential.UseHttpPath true`, execOptions);
+
+    // Add remote (remove first if exists)
+    try {
+      execSync(`git remote remove ${remoteName}`, execOptions);
+    } catch {
+      // Remote doesn't exist, that's fine
+    }
+    execSync(`git remote add ${remoteName} ${cloneUrl}`, execOptions);
+
+    // Push to CodeCommit
+    execSync(`git push ${remoteName} HEAD:main --force`, {
+      ...execOptions,
+      stdio: 'inherit', // Show progress
     });
-    const branchData = await client.send(getBranchCommand);
-    parentCommitId = branchData.branch?.commitId;
-  } catch (error: any) {
-    // Branch doesn't exist yet - this will be the first commit
-    if (error.name !== 'BranchDoesNotExistException') {
-      throw error;
+
+    console.log(); // Add newline after git output
+  } finally {
+    // Clean up: remove credential helper config and remote
+    try {
+      execSync(`git config --local --unset credential.helper`, execOptions);
+    } catch {
+      // Config might not exist
+    }
+    try {
+      execSync(`git config --local --unset credential.UseHttpPath`, execOptions);
+    } catch {
+      // Config might not exist
+    }
+    try {
+      execSync(`git remote remove ${remoteName}`, execOptions);
+    } catch {
+      // Remote might not exist
     }
   }
-
-  // Create commit via API
-  const createCommitCommand = new CreateCommitCommand({
-    repositoryName: repoName,
-    branchName,
-    parentCommitId,
-    authorName: 'Chimera CLI',
-    email: 'chimera@example.com',
-    commitMessage: 'Deploy Chimera infrastructure and source code',
-    putFiles,
-  });
-
-  await client.send(createCommitCommand);
 }
 
 /**
@@ -191,9 +177,9 @@ export function registerDeployCommands(program: Command): void {
         const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
         spinner.succeed(chalk.green(`Repository root: ${repoRoot}`));
 
-        // Step 4: Push source to CodeCommit (using CreateCommit API - no git auth needed)
+        // Step 4: Push source to CodeCommit (using git credential helper)
         spinner.start('Pushing source code to CodeCommit...');
-        await pushToCodeCommit(codecommitClient, options.repoName, repoRoot);
+        await pushToCodeCommit(codecommitClient, options.repoName, repoRoot, options.region);
         spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
 
         // Step 5: Deploy CDK stacks
