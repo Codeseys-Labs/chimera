@@ -15,7 +15,7 @@
  * @see docs/research/aws-account-agent/01-AWS-Config-Resource-Inventory.md
  */
 
-import { tool } from '@strands-agents/sdk';
+import { tool } from '../aws-tools/strands-agents';
 import { z } from 'zod';
 import type {
   ConfigurationItem,

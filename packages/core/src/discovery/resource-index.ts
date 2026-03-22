@@ -8,7 +8,7 @@
  * Based on: docs/research/aws-account-agent/06-Account-Discovery-Architecture.md
  */
 
-import { tool } from '@strands-agents/sdk';
+import { tool } from '../aws-tools/strands-agents';
 import { z } from 'zod';
 
 /**
