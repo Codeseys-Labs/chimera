@@ -1,82 +1,89 @@
 /**
- * Chimera OAuth PKCE Authentication Module
+ * Chimera Authentication Library
  *
- * Implements OAuth 2.0 PKCE flow for Cognito:
- * - PKCE code verifier/challenge generation
- * - Authorization code exchange
- * - Token storage and refresh
- * - Automatic token refresh on expiry
+ * Client-side authentication using Cognito OAuth2 PKCE flow and user registration.
+ * Provides window.ChimeraAuth API for login, registration, and token management.
  */
 
 (function () {
   'use strict';
 
-  // Configuration
-  const config = {
-    cognitoRegion: window.CHIMERA_CONFIG?.cognitoRegion || 'us-east-1',
-    cognitoDomain: window.CHIMERA_CONFIG?.cognitoDomain || 'chimera-dev.auth.us-east-1.amazoncognito.com',
-    clientId: window.CHIMERA_CONFIG?.clientId || 'YOUR_CLIENT_ID',
-    redirectUri: window.location.origin,
-    scope: 'openid email profile aws.cognito.signin.user.admin',
-  };
+  // Configuration loaded from /auth/config endpoint
+  let config = null;
 
   // Token storage keys
   const STORAGE_KEYS = {
     ID_TOKEN: 'chimera_id_token',
     ACCESS_TOKEN: 'chimera_access_token',
     REFRESH_TOKEN: 'chimera_refresh_token',
-    TOKEN_EXPIRY: 'chimera_token_expiry',
+    TENANT_ID: 'chimera_tenant_id',
     CODE_VERIFIER: 'chimera_code_verifier',
-    STATE: 'chimera_oauth_state',
+    STATE: 'chimera_state',
   };
 
-  // PKCE helper functions
-  function base64URLEncode(buffer) {
-    return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+  /**
+   * Generate random string for PKCE
+   */
+  function generateRandomString(length) {
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    const values = new Uint8Array(length);
+    crypto.getRandomValues(values);
+    return Array.from(values)
+      .map((v) => charset[v % charset.length])
+      .join('');
+  }
+
+  /**
+   * Generate PKCE code challenge from verifier
+   */
+  async function generateCodeChallenge(verifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=/g, '');
   }
 
-  function generateCodeVerifier() {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return base64URLEncode(array);
-  }
+  /**
+   * Load OAuth configuration from backend
+   */
+  async function loadConfig() {
+    if (config) return config;
 
-  async function generateCodeChallenge(verifier) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return base64URLEncode(hash);
-  }
+    const response = await fetch('/auth/config');
+    if (!response.ok) {
+      throw new Error('Failed to load auth configuration');
+    }
 
-  function generateState() {
-    const array = new Uint8Array(16);
-    crypto.getRandomValues(array);
-    return base64URLEncode(array);
+    config = await response.json();
+    return config;
   }
 
   /**
-   * Start OAuth PKCE flow
+   * Initialize OAuth PKCE login flow
+   * Redirects to Cognito hosted UI
    */
-  async function login() {
+  async function initLogin() {
     try {
-      // Generate PKCE parameters
-      const codeVerifier = generateCodeVerifier();
-      const codeChallenge = await generateCodeChallenge(codeVerifier);
-      const state = generateState();
+      await loadConfig();
 
-      // Store for callback
+      // Generate PKCE parameters
+      const codeVerifier = generateRandomString(128);
+      const codeChallenge = await generateCodeChallenge(codeVerifier);
+      const state = generateRandomString(32);
+
+      // Store PKCE parameters in sessionStorage (cleared on tab close)
       sessionStorage.setItem(STORAGE_KEYS.CODE_VERIFIER, codeVerifier);
       sessionStorage.setItem(STORAGE_KEYS.STATE, state);
 
       // Build authorization URL
-      const authUrl = new URL(`https://${config.cognitoDomain}/oauth2/authorize`);
-      authUrl.searchParams.set('client_id', config.clientId);
+      const authUrl = new URL(config.authorizationEndpoint);
       authUrl.searchParams.set('response_type', 'code');
-      authUrl.searchParams.set('scope', config.scope);
+      authUrl.searchParams.set('client_id', config.clientId);
       authUrl.searchParams.set('redirect_uri', config.redirectUri);
+      authUrl.searchParams.set('scope', 'openid email profile');
       authUrl.searchParams.set('code_challenge', codeChallenge);
       authUrl.searchParams.set('code_challenge_method', 'S256');
       authUrl.searchParams.set('state', state);
@@ -84,13 +91,14 @@
       // Redirect to Cognito
       window.location.href = authUrl.toString();
     } catch (error) {
-      console.error('Failed to start OAuth flow:', error);
-      throw new Error('Failed to start authentication');
+      console.error('Failed to initialize login:', error);
+      throw error;
     }
   }
 
   /**
-   * Handle OAuth callback
+   * Handle OAuth callback after redirect from Cognito
+   * Exchanges authorization code for tokens via backend
    */
   async function handleCallback() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -98,164 +106,132 @@
     const state = urlParams.get('state');
     const error = urlParams.get('error');
 
-    // Check for OAuth errors
+    // Check for OAuth error
     if (error) {
-      throw new Error(`OAuth error: ${error} - ${urlParams.get('error_description')}`);
+      const errorDescription = urlParams.get('error_description');
+      throw new Error(errorDescription || error);
     }
 
-    // No callback params - not in OAuth flow
-    if (!code || !state) {
+    // No code? Not a callback
+    if (!code) {
       return false;
     }
 
     // Verify state parameter
     const storedState = sessionStorage.getItem(STORAGE_KEYS.STATE);
     if (state !== storedState) {
-      throw new Error('State mismatch - possible CSRF attack');
+      throw new Error('Invalid state parameter - possible CSRF attack');
     }
 
-    // Retrieve code verifier
+    // Get code verifier
     const codeVerifier = sessionStorage.getItem(STORAGE_KEYS.CODE_VERIFIER);
     if (!codeVerifier) {
-      throw new Error('Code verifier not found');
+      throw new Error('Missing code verifier - PKCE flow incomplete');
     }
 
-    // Exchange code for tokens
-    await exchangeCodeForTokens(code, codeVerifier);
+    try {
+      // Exchange code for tokens via backend
+      const response = await fetch('/auth/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, codeVerifier }),
+      });
 
-    // Clean up session storage
-    sessionStorage.removeItem(STORAGE_KEYS.CODE_VERIFIER);
-    sessionStorage.removeItem(STORAGE_KEYS.STATE);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Token exchange failed');
+      }
 
-    // Remove OAuth params from URL
-    window.history.replaceState({}, document.title, window.location.pathname);
+      const tokens = await response.json();
 
-    return true;
-  }
-
-  /**
-   * Exchange authorization code for tokens
-   */
-  async function exchangeCodeForTokens(code, codeVerifier) {
-    const tokenUrl = `https://${config.cognitoDomain}/oauth2/token`;
-
-    const body = new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: config.clientId,
-      code: code,
-      code_verifier: codeVerifier,
-      redirect_uri: config.redirectUri,
-    });
-
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error_description || 'Token exchange failed');
-    }
-
-    const tokens = await response.json();
-    storeTokens(tokens);
-  }
-
-  /**
-   * Store tokens in localStorage
-   */
-  function storeTokens(tokens) {
-    localStorage.setItem(STORAGE_KEYS.ID_TOKEN, tokens.id_token);
-    localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, tokens.access_token);
-    if (tokens.refresh_token) {
+      // Store tokens in localStorage
+      localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, tokens.access_token);
+      localStorage.setItem(STORAGE_KEYS.ID_TOKEN, tokens.id_token);
       localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, tokens.refresh_token);
-    }
 
-    // Calculate expiry time (seconds from now)
-    const expiryTime = Date.now() + tokens.expires_in * 1000;
-    localStorage.setItem(STORAGE_KEYS.TOKEN_EXPIRY, expiryTime.toString());
+      // Extract tenant ID from ID token claims
+      const idTokenPayload = JSON.parse(atob(tokens.id_token.split('.')[1]));
+      const tenantId = idTokenPayload['custom:tenant_id'];
+      if (tenantId) {
+        localStorage.setItem(STORAGE_KEYS.TENANT_ID, tenantId);
+      }
+
+      // Clear PKCE parameters
+      sessionStorage.removeItem(STORAGE_KEYS.CODE_VERIFIER);
+      sessionStorage.removeItem(STORAGE_KEYS.STATE);
+
+      // Remove OAuth params from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+
+      return true;
+    } catch (error) {
+      console.error('Failed to handle OAuth callback:', error);
+      throw error;
+    }
   }
 
   /**
-   * Refresh access token using refresh token
+   * Register new user via Cognito SignUp API
+   *
+   * @param {string} name - User's full name
+   * @param {string} email - User's email address
+   * @param {string} password - User's password (must meet policy requirements)
+   * @returns {Promise<{ userSub: string, confirmationRequired: boolean }>}
    */
-  async function refreshTokens() {
-    const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
-    if (!refreshToken) {
-      throw new Error('No refresh token available');
+  async function register(name, email, password) {
+    try {
+      const response = await fetch('/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Registration failed');
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Registration failed:', error);
+      throw error;
     }
-
-    const tokenUrl = `https://${config.cognitoDomain}/oauth2/token`;
-
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: config.clientId,
-      refresh_token: refreshToken,
-    });
-
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
-
-    if (!response.ok) {
-      // Refresh token invalid or expired - force re-login
-      logout();
-      throw new Error('Token refresh failed - please log in again');
-    }
-
-    const tokens = await response.json();
-    storeTokens(tokens);
   }
 
   /**
-   * Check if user is authenticated
+   * Check if user is authenticated (valid JWT token)
    */
-  function isAuthenticated() {
+  function checkAuth() {
     const idToken = localStorage.getItem(STORAGE_KEYS.ID_TOKEN);
     const accessToken = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-    const expiry = localStorage.getItem(STORAGE_KEYS.TOKEN_EXPIRY);
 
-    if (!idToken || !accessToken || !expiry) {
+    if (!idToken || !accessToken) {
       return false;
     }
 
-    // Check if token is expired
-    const now = Date.now();
-    const expiryTime = parseInt(expiry, 10);
+    // Basic JWT expiry check
+    try {
+      const payload = JSON.parse(atob(idToken.split('.')[1]));
+      const expiry = payload.exp * 1000;
+      const now = Date.now();
 
-    if (now >= expiryTime) {
-      // Token expired - attempt refresh
+      if (now >= expiry) {
+        // Token expired
+        logout();
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Failed to validate JWT:', error);
+      logout();
       return false;
     }
-
-    return true;
   }
 
   /**
-   * Get access token (auto-refresh if needed)
-   */
-  async function getAccessToken() {
-    const expiry = localStorage.getItem(STORAGE_KEYS.TOKEN_EXPIRY);
-    const now = Date.now();
-    const expiryTime = parseInt(expiry, 10);
-
-    // Refresh if token expires in less than 5 minutes
-    if (now >= expiryTime - 5 * 60 * 1000) {
-      await refreshTokens();
-    }
-
-    return localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-  }
-
-  /**
-   * Get user info from ID token
+   * Get current user info from ID token claims
    */
   function getUserInfo() {
     const idToken = localStorage.getItem(STORAGE_KEYS.ID_TOKEN);
@@ -264,15 +240,15 @@
     }
 
     try {
-      // Decode JWT payload
       const payload = JSON.parse(atob(idToken.split('.')[1]));
-
       return {
         sub: payload.sub,
         email: payload.email,
+        name: payload.name,
         emailVerified: payload.email_verified,
-        tenantId: payload['custom:tenantId'] || 'demo-tenant',
-        username: payload['cognito:username'],
+        tenantId: payload['custom:tenant_id'],
+        tenantTier: payload['custom:tenant_tier'],
+        groups: payload['cognito:groups'] || [],
       };
     } catch (error) {
       console.error('Failed to parse ID token:', error);
@@ -281,74 +257,73 @@
   }
 
   /**
-   * Logout and clear tokens
+   * Refresh access token using refresh token
    */
-  function logout() {
-    // Clear all tokens
-    localStorage.removeItem(STORAGE_KEYS.ID_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.TOKEN_EXPIRY);
+  async function refreshToken() {
+    const storedRefreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+    if (!storedRefreshToken) {
+      throw new Error('No refresh token available');
+    }
 
-    // Redirect to login
-    window.location.href = '/login.html';
+    try {
+      const response = await fetch('/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: storedRefreshToken }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Token refresh failed');
+      }
+
+      const tokens = await response.json();
+
+      // Update tokens in localStorage
+      localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, tokens.access_token);
+      localStorage.setItem(STORAGE_KEYS.ID_TOKEN, tokens.id_token);
+      // Note: refresh token is not returned in refresh response, keep existing one
+
+      return true;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      logout();
+      throw error;
+    }
   }
 
   /**
-   * Initialize auth module
+   * Log out user
+   * Clears tokens and redirects to Cognito logout endpoint
    */
-  async function init() {
-    // Check if we're on the callback page
-    if (window.location.search.includes('code=')) {
-      try {
-        const handled = await handleCallback();
-        if (handled) {
-          // Successful OAuth callback - redirect to main app
-          window.location.href = '/index.html';
-          return;
-        }
-      } catch (error) {
-        console.error('OAuth callback failed:', error);
-        // Show error and redirect to login
-        alert('Authentication failed: ' + error.message);
-        logout();
-        return;
-      }
-    }
+  async function logout() {
+    // Clear tokens
+    localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.ID_TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.TENANT_ID);
 
-    // Check if we're on a protected page and not authenticated
-    const isLoginPage = window.location.pathname.includes('login');
-    if (!isLoginPage && !isAuthenticated()) {
-      // Not authenticated - redirect to login
+    // Redirect to Cognito logout endpoint
+    try {
+      await loadConfig();
+      const logoutUrl = new URL(config.logoutEndpoint);
+      logoutUrl.searchParams.set('client_id', config.clientId);
+      logoutUrl.searchParams.set('logout_uri', window.location.origin + '/login.html');
+      window.location.href = logoutUrl.toString();
+    } catch (error) {
+      // Fallback: just redirect to login page
       window.location.href = '/login.html';
     }
   }
 
-  // Auto-refresh tokens periodically (every 10 minutes)
-  setInterval(async () => {
-    if (isAuthenticated()) {
-      try {
-        await getAccessToken(); // Will auto-refresh if needed
-      } catch (error) {
-        console.error('Token refresh failed:', error);
-      }
-    }
-  }, 10 * 60 * 1000);
-
   // Expose public API
   window.ChimeraAuth = {
-    login,
-    logout,
-    isAuthenticated,
-    getAccessToken: () => localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN),
+    initLogin,
+    handleCallback,
+    register,
+    checkAuth,
     getUserInfo,
-    init,
+    refreshToken,
+    logout,
   };
-
-  // Auto-initialize on load
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
 })();
