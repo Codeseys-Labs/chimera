@@ -38,6 +38,16 @@ app.use('/auth', authRouter);
 app.use('/tenants', extractTenantContext);
 app.use('/tenants', tenantRouter);
 
+// Handle Slack URL verification before tenant middleware
+// (Slack sends challenges without tenant context during initial setup)
+app.post('/slack/events', (req: Request, res: Response, next: NextFunction) => {
+  if (req.body?.type === 'url_verification') {
+    res.status(200).json({ challenge: req.body.challenge });
+    return;
+  }
+  next();
+});
+
 // Apply tenant middleware and rate limiting to all /chat/* and /slack/* routes
 app.use('/chat', extractTenantContext);
 app.use('/chat', rateLimitMiddleware('api-requests', 1));

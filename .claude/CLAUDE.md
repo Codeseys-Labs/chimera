@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-media-proc
-- **Task ID:** chimera-14e9
+- **Agent Name:** builder-quality-gates
+- **Task ID:** chimera-a442
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-media-proc/chimera-14e9
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc
-- **Parent:** lead-multimodal
+- **Branch:** overstory/builder-quality-gates/chimera-a442
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates
+- **Parent:** lead-quality-gates
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,60 +181,53 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `packages/core/src/media/types.ts`
-- `packages/core/src/media/media-processor.ts`
-- `packages/core/src/media/index.ts`
-- `packages/core/src/media/__tests__/media-processor.test.ts`
-- `packages/core/src/index.ts`
-- `docs/architecture/agent-architecture.md`
+No file scope restrictions
 
 ## Expertise
 
 Prime relevant domain knowledge before starting work:
 
-```bash
-ml prime typescript
-```
+No specific expertise domains configured
 
 
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-media-proc**.
+Use `ov mail` for all communication. Your address is **builder-quality-gates**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-media-proc
+ov mail check --agent builder-quality-gates
 
 # Send a status update to your parent
-ov mail send --to lead-multimodal --subject "status" \
-  --body "Progress update here" --type status --agent builder-media-proc
+ov mail send --to lead-quality-gates --subject "status" \
+  --body "Progress update here" --type status --agent builder-quality-gates
 
 # Ask a question
-ov mail send --to lead-multimodal --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-media-proc
+ov mail send --to lead-quality-gates --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-quality-gates
 
 # Report completion
-ov mail send --to lead-multimodal --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-media-proc
+ov mail send --to lead-quality-gates --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-quality-gates
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-media-proc
+ov mail reply <message-id> --body "Your reply" --agent builder-quality-gates
 ```
 
 ## Spawning Sub-Workers
@@ -248,20 +241,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-media-proc/chimera-14e9)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-media-proc` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-multimodal: `ov mail send --to lead-multimodal --subject "Worker done: chimera-14e9" --body "Quality gates passed." --type worker_done --agent builder-media-proc`
-7. **Close issue:** `sd close chimera-14e9 --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-quality-gates/chimera-a442)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-quality-gates` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-quality-gates: `ov mail send --to lead-quality-gates --subject "Worker done: chimera-a442" --body "Quality gates passed." --type worker_done --agent builder-quality-gates`
+7. **Close issue:** `sd close chimera-a442 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-media-proc`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-media-proc/chimera-14e9
+- Commit only to your branch: overstory/builder-quality-gates/chimera-a442
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`

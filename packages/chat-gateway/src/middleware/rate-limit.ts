@@ -16,16 +16,34 @@ interface DynamoDBClient {
   query(params: any): Promise<any>;
 }
 
-// Mock DynamoDB client for development
+// Mock DynamoDB client for development/testing
+// Simulates unlimited rate limits by always returning a bucket with max tokens
 const mockDynamoDBClient: DynamoDBClient = {
   async get() {
-    return { Item: null };
+    // Return a token bucket with plenty of tokens
+    return {
+      Item: {
+        PK: 'RATE_LIMIT#test',
+        SK: 'api-requests',
+        capacity: 100000,
+        refillRate: 10000,
+        tokens: 100000,
+        lastRefill: new Date().toISOString(),
+        ttl: Math.floor(Date.now() / 1000) + 300,
+      },
+    };
   },
   async put() {
     return {};
   },
   async update() {
-    return { Attributes: {} };
+    // Return updated bucket with plenty of tokens
+    return {
+      Attributes: {
+        tokens: 99999,
+        lastRefill: new Date().toISOString(),
+      },
+    };
   },
   async query() {
     return { Items: [] };
