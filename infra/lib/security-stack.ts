@@ -6,6 +6,8 @@ import { Construct } from 'constructs';
 
 export interface SecurityStackProps extends cdk.StackProps {
   envName: string;
+  callbackUrls?: string[];
+  logoutUrls?: string[];
 }
 
 /**
@@ -101,6 +103,16 @@ export class SecurityStack extends cdk.Stack {
 
     // --- App clients ---
     // Web client: authorization code grant for browser-based apps
+    // Dynamic callback URLs: accept API Gateway URLs from ApiStack or use localhost for dev
+    const defaultCallbackUrls = [
+      'http://localhost:8080/auth/callback',
+      `https://chat-${props.envName}.example.com/auth/callback`,
+    ];
+    const defaultLogoutUrls = [
+      'http://localhost:8080/',
+      `https://chat-${props.envName}.example.com/`,
+    ];
+
     this.userPoolClient = this.userPool.addClient('WebClient', {
       userPoolClientName: 'chimera-web',
       authFlows: { userSrp: true },
@@ -111,14 +123,8 @@ export class SecurityStack extends cdk.Stack {
           cognito.OAuthScope.EMAIL,
           cognito.OAuthScope.PROFILE,
         ],
-        callbackUrls: [
-          'http://localhost:8080/auth/callback',
-          `https://chat-${props.envName}.example.com/auth/callback`, // Replace with actual domain
-        ],
-        logoutUrls: [
-          'http://localhost:8080/',
-          `https://chat-${props.envName}.example.com/`,
-        ],
+        callbackUrls: props.callbackUrls || defaultCallbackUrls,
+        logoutUrls: props.logoutUrls || defaultLogoutUrls,
       },
       accessTokenValidity: cdk.Duration.hours(1),
       idTokenValidity: cdk.Duration.hours(1),

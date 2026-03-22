@@ -57,11 +57,17 @@
 
   // Utility: Make API request
   async function apiRequest(url, options = {}) {
+    const accessToken = localStorage.getItem('chimera_access_token');
     const headers = {
       'Content-Type': 'application/json',
       'X-Tenant-Id': config.tenantId,
       ...options.headers,
     };
+
+    // Add Authorization header if token exists
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
 
     const response = await fetch(url, {
       ...options,
@@ -362,8 +368,50 @@
     }
   }
 
+  // Utility: Check JWT authentication
+  function checkAuth() {
+    // Check for JWT token in localStorage
+    const idToken = localStorage.getItem('chimera_id_token');
+    const accessToken = localStorage.getItem('chimera_access_token');
+
+    if (!idToken || !accessToken) {
+      // No tokens found, redirect to login
+      window.location.href = '/login.html';
+      return false;
+    }
+
+    // Basic JWT expiry check
+    try {
+      // JWT structure: header.payload.signature
+      const payload = JSON.parse(atob(idToken.split('.')[1]));
+      const expiry = payload.exp * 1000; // Convert to milliseconds
+      const now = Date.now();
+
+      if (now >= expiry) {
+        // Token expired, clear storage and redirect
+        localStorage.removeItem('chimera_id_token');
+        localStorage.removeItem('chimera_access_token');
+        localStorage.removeItem('chimera_refresh_token');
+        window.location.href = '/login.html';
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Failed to validate JWT:', error);
+      // Invalid token format, redirect to login
+      window.location.href = '/login.html';
+      return false;
+    }
+  }
+
   // Initialize admin UI
   async function init() {
+    // Check authentication before loading UI
+    if (!checkAuth()) {
+      return; // Redirect in progress
+    }
+
     // Update tenant badge
     document.getElementById('tenant-badge').textContent = config.tenantId;
 
