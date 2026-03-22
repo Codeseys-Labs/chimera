@@ -37,6 +37,8 @@ import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { SageMakerClient } from '@aws-sdk/client-sagemaker';
 import { SFNClient } from '@aws-sdk/client-sfn';
 import { SQSClient } from '@aws-sdk/client-sqs';
+import { CodeCommitClient } from '@aws-sdk/client-codecommit';
+import { CodePipelineClient } from '@aws-sdk/client-codepipeline';
 import type {
   AWSClientFactoryConfig,
   AWSToolContext,
@@ -70,7 +72,9 @@ type AWSClient =
   | BedrockRuntimeClient
   | SageMakerClient
   | SFNClient
-  | SQSClient;
+  | SQSClient
+  | CodeCommitClient
+  | CodePipelineClient;
 
 /**
  * Factory for creating and caching tenant-scoped AWS SDK clients
@@ -603,6 +607,48 @@ export class AWSClientFactory {
       context,
       (credentials, region) =>
         new SQSClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create CodeCommit client for tenant
+   */
+  async getCodeCommitClient(
+    context: AWSToolContext
+  ): Promise<CodeCommitClient> {
+    return this.getOrCreateClient(
+      'codecommit',
+      context,
+      (credentials, region) =>
+        new CodeCommitClient({
+          region,
+          credentials,
+          maxAttempts: this.config.retryConfig.maxAttempts,
+          requestHandler: {
+            requestTimeout: this.config.requestTimeout,
+          },
+        })
+    );
+  }
+
+  /**
+   * Get or create CodePipeline client for tenant
+   */
+  async getCodePipelineClient(
+    context: AWSToolContext
+  ): Promise<CodePipelineClient> {
+    return this.getOrCreateClient(
+      'codepipeline',
+      context,
+      (credentials, region) =>
+        new CodePipelineClient({
           region,
           credentials,
           maxAttempts: this.config.retryConfig.maxAttempts,
