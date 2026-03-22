@@ -33,6 +33,10 @@ from tools.codepipeline_tools import (
     create_pipeline,
     delete_pipeline
 )
+from tools.background_task_tools import (
+    start_background_task,
+    check_background_task
+)
 
 
 # Initialize AgentCore app
@@ -183,6 +187,9 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         get_pipeline_execution_details,
         create_pipeline,
         delete_pipeline,
+        # Background task delegation for long-running operations
+        start_background_task,
+        check_background_task,
     ])
 
     # TODO: Phase 2 - Add tier-gating for AWS tools
