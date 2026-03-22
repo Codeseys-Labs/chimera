@@ -320,6 +320,71 @@
         <p>User pairings will appear here after connecting a platform.</p>
       </div>
     </section>
+
+    <!-- User Management Section -->
+    <section class="section">
+      <h2>User Management</h2>
+      <p style="color: #666; margin-bottom: 1rem;">
+        View and manage Cognito users in your tenant.
+      </p>
+      <div id="users-loading" class="loading">Loading users...</div>
+      <div id="users-container" style="display: none;">
+        <table class="user-pairings-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Last Login</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-table-body"></tbody>
+        </table>
+      </div>
+      <div id="users-empty" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">👤</div>
+        <h3>No users found</h3>
+        <p>Users will appear here after authentication.</p>
+      </div>
+    </section>
+
+    <!-- Cost Tracking Section -->
+    <section class="section">
+      <h2>Cost Tracking</h2>
+      <p style="color: #666; margin-bottom: 1rem;">
+        Monitor token usage and estimated costs for your tenant.
+      </p>
+      <div class="integrations-grid">
+        <div class="integration-card">
+          <div class="integration-header">
+            <div class="integration-title">This Month</div>
+          </div>
+          <div class="integration-details">
+            <p><strong>Tokens:</strong> <span id="cost-tokens-month">-</span></p>
+            <p><strong>Estimated Cost:</strong> <span id="cost-amount-month">-</span></p>
+          </div>
+        </div>
+        <div class="integration-card">
+          <div class="integration-header">
+            <div class="integration-title">This Week</div>
+          </div>
+          <div class="integration-details">
+            <p><strong>Tokens:</strong> <span id="cost-tokens-week">-</span></p>
+            <p><strong>Estimated Cost:</strong> <span id="cost-amount-week">-</span></p>
+          </div>
+        </div>
+        <div class="integration-card">
+          <div class="integration-header">
+            <div class="integration-title">Today</div>
+          </div>
+          <div class="integration-details">
+            <p><strong>Tokens:</strong> <span id="cost-tokens-day">-</span></p>
+            <p><strong>Estimated Cost:</strong> <span id="cost-amount-day">-</span></p>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script src="/admin.js"></script>

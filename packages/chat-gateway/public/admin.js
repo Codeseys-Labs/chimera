@@ -21,6 +21,8 @@
   const state = {
     integrations: [],
     pairings: [],
+    users: [],
+    costData: null,
   };
 
   // Utility: Show error message
@@ -29,10 +31,14 @@
     const errorBox = document.createElement('div');
     errorBox.className = 'error';
     errorBox.textContent = message;
-    errorDiv.innerHTML = '';
+    while (errorDiv.firstChild) {
+      errorDiv.removeChild(errorDiv.firstChild);
+    }
     errorDiv.appendChild(errorBox);
     setTimeout(() => {
-      errorDiv.innerHTML = '';
+      while (errorDiv.firstChild) {
+        errorDiv.removeChild(errorDiv.firstChild);
+      }
     }, 5000);
   }
 
@@ -42,10 +48,14 @@
     const successBox = document.createElement('div');
     successBox.className = 'success';
     successBox.textContent = message;
-    successDiv.innerHTML = '';
+    while (successDiv.firstChild) {
+      successDiv.removeChild(successDiv.firstChild);
+    }
     successDiv.appendChild(successBox);
     setTimeout(() => {
-      successDiv.innerHTML = '';
+      while (successDiv.firstChild) {
+        successDiv.removeChild(successDiv.firstChild);
+      }
     }, 5000);
   }
 
@@ -115,7 +125,9 @@
   // Render integrations list
   function renderIntegrations() {
     const container = document.getElementById('integrations-container');
-    container.innerHTML = '';
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
 
     state.integrations.forEach((integration) => {
       const platformIcon =
@@ -231,7 +243,9 @@
   // Render user pairings table
   function renderPairings() {
     const tbody = document.getElementById('pairings-table-body');
-    tbody.innerHTML = '';
+    while (tbody.firstChild) {
+      tbody.removeChild(tbody.firstChild);
+    }
 
     state.pairings.forEach((pairing) => {
       const platformName =
@@ -368,6 +382,160 @@
     }
   }
 
+  // Load users from API
+  async function loadUsers() {
+    try {
+      const usersLoading = document.getElementById('users-loading');
+      const usersContainer = document.getElementById('users-container');
+      const usersEmpty = document.getElementById('users-empty');
+
+      usersLoading.style.display = 'block';
+      usersContainer.style.display = 'none';
+      usersEmpty.style.display = 'none';
+
+      const response = await apiRequest(`${config.apiBase}/users?tenantId=${config.tenantId}`);
+      state.users = response.users || [];
+
+      usersLoading.style.display = 'none';
+
+      if (state.users.length === 0) {
+        usersEmpty.style.display = 'block';
+      } else {
+        usersContainer.style.display = 'block';
+        renderUsers();
+      }
+    } catch (error) {
+      console.error('Failed to load users:', error);
+      document.getElementById('users-loading').style.display = 'none';
+      document.getElementById('users-empty').style.display = 'block';
+    }
+  }
+
+  // Render users table
+  function renderUsers() {
+    const tbody = document.getElementById('users-table-body');
+    while (tbody.firstChild) {
+      tbody.removeChild(tbody.firstChild);
+    }
+
+    state.users.forEach((user) => {
+      const row = document.createElement('tr');
+
+      // Email
+      const emailCell = document.createElement('td');
+      emailCell.textContent = user.email;
+      row.appendChild(emailCell);
+
+      // Status
+      const statusCell = document.createElement('td');
+      const statusBadge = document.createElement('span');
+      statusBadge.className = `status-badge ${user.status === 'active' ? 'active' : 'inactive'}`;
+      statusBadge.textContent = user.status.toUpperCase();
+      statusCell.appendChild(statusBadge);
+      row.appendChild(statusCell);
+
+      // Created
+      const createdCell = document.createElement('td');
+      createdCell.textContent = formatDate(user.createdAt);
+      row.appendChild(createdCell);
+
+      // Last Login
+      const loginCell = document.createElement('td');
+      loginCell.textContent = user.lastLogin ? formatDate(user.lastLogin) : 'Never';
+      row.appendChild(loginCell);
+
+      // Actions
+      const actionsCell = document.createElement('td');
+      if (user.status === 'active') {
+        const disableBtn = document.createElement('button');
+        disableBtn.className = 'btn btn-danger';
+        disableBtn.textContent = 'Disable';
+        disableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, 'disabled');
+        actionsCell.appendChild(disableBtn);
+      } else {
+        const enableBtn = document.createElement('button');
+        enableBtn.className = 'btn btn-primary';
+        enableBtn.textContent = 'Enable';
+        enableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, 'active');
+        actionsCell.appendChild(enableBtn);
+      }
+      row.appendChild(actionsCell);
+
+      tbody.appendChild(row);
+    });
+  }
+
+  // Toggle user status
+  async function toggleUserStatus(email, newStatus) {
+    const action = newStatus === 'active' ? 'enable' : 'disable';
+    if (!confirm(`Are you sure you want to ${action} this user?`)) {
+      return;
+    }
+
+    try {
+      await apiRequest(`${config.apiBase}/users/${email}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenantId: config.tenantId,
+          status: newStatus,
+        }),
+      });
+
+      showSuccess(`User ${action}d successfully`);
+      await loadUsers();
+    } catch (error) {
+      console.error(`Failed to ${action} user:`, error);
+      showError(`Failed to ${action} user: ` + error.message);
+    }
+  }
+
+  // Utility: Format number
+  function formatNumber(num) {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  }
+
+  // Load cost data from API
+  async function loadCostData() {
+    try {
+      const response = await apiRequest(`${config.apiBase}/costs?tenantId=${config.tenantId}`);
+      state.costData = response.costs || {};
+
+      // Update cost displays
+      document.getElementById('cost-tokens-month').textContent = formatNumber(
+        state.costData.month?.tokens || 0
+      );
+      document.getElementById('cost-amount-month').textContent =
+        '$' + (state.costData.month?.estimatedCost || 0).toFixed(2);
+
+      document.getElementById('cost-tokens-week').textContent = formatNumber(
+        state.costData.week?.tokens || 0
+      );
+      document.getElementById('cost-amount-week').textContent =
+        '$' + (state.costData.week?.estimatedCost || 0).toFixed(2);
+
+      document.getElementById('cost-tokens-day').textContent = formatNumber(
+        state.costData.day?.tokens || 0
+      );
+      document.getElementById('cost-amount-day').textContent =
+        '$' + (state.costData.day?.estimatedCost || 0).toFixed(2);
+    } catch (error) {
+      console.error('Failed to load cost data:', error);
+      // Set defaults on error
+      document.getElementById('cost-tokens-month').textContent = '0';
+      document.getElementById('cost-amount-month').textContent = '$0.00';
+      document.getElementById('cost-tokens-week').textContent = '0';
+      document.getElementById('cost-amount-week').textContent = '$0.00';
+      document.getElementById('cost-tokens-day').textContent = '0';
+      document.getElementById('cost-amount-day').textContent = '$0.00';
+    }
+  }
+
   // Utility: Check JWT authentication
   function checkAuth() {
     // Check for JWT token in localStorage
@@ -419,7 +587,12 @@
     await handleOAuthCallback();
 
     // Load data
-    await Promise.all([loadIntegrations(), loadPairings()]);
+    await Promise.all([
+      loadIntegrations(),
+      loadPairings(),
+      loadUsers(),
+      loadCostData(),
+    ]);
   }
 
   // Expose public API
@@ -427,6 +600,7 @@
     connectSlack,
     removeIntegration,
     removePairing,
+    toggleUserStatus,
   };
 
   // Initialize when DOM is ready
