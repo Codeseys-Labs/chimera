@@ -233,7 +233,7 @@ describe('Chat Gateway Server', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.response_type).toBe('ephemeral');
-      expect(response.body.text).toContain('provide a message');
+      expect(response.body.text).toContain('Invalid command format');
     });
 
     it('should process valid slash command', async () => {
