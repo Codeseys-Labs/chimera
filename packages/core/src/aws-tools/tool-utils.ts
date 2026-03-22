@@ -257,6 +257,36 @@ export const SQS_RETRYABLE_ERRORS = [
 ];
 
 /**
+ * Retryable error codes for CodeCommit operations
+ */
+export const CODECOMMIT_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalServerException',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for CodePipeline operations
+ */
+export const CODEPIPELINE_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalServerException',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
+ * Retryable error codes for Step Functions operations
+ */
+export const STEPFUNCTIONS_RETRYABLE_ERRORS = [
+  'ThrottlingException',
+  'InternalServerException',
+  'ServiceUnavailableException',
+  'TimeoutError',
+];
+
+/**
  * Retry an operation with exponential backoff and jitter
  *
  * @param operation - Async operation to retry
@@ -339,6 +369,9 @@ export function formatToolError(
     ...SAGEMAKER_RETRYABLE_ERRORS,
     ...SFN_RETRYABLE_ERRORS,
     ...SQS_RETRYABLE_ERRORS,
+    ...CODECOMMIT_RETRYABLE_ERRORS,
+    ...CODEPIPELINE_RETRYABLE_ERRORS,
+    ...STEPFUNCTIONS_RETRYABLE_ERRORS,
   ];
 
   return JSON.stringify({
