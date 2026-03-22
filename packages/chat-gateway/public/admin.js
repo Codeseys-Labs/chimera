@@ -21,6 +21,7 @@
   const state = {
     integrations: [],
     pairings: [],
+    users: [],
   };
 
   // Utility: Show error message
@@ -29,10 +30,15 @@
     const errorBox = document.createElement('div');
     errorBox.className = 'error';
     errorBox.textContent = message;
-    errorDiv.innerHTML = '';
+    // Clear using safe DOM methods
+    while (errorDiv.firstChild) {
+      errorDiv.removeChild(errorDiv.firstChild);
+    }
     errorDiv.appendChild(errorBox);
     setTimeout(() => {
-      errorDiv.innerHTML = '';
+      while (errorDiv.firstChild) {
+        errorDiv.removeChild(errorDiv.firstChild);
+      }
     }, 5000);
   }
 
@@ -42,10 +48,15 @@
     const successBox = document.createElement('div');
     successBox.className = 'success';
     successBox.textContent = message;
-    successDiv.innerHTML = '';
+    // Clear using safe DOM methods
+    while (successDiv.firstChild) {
+      successDiv.removeChild(successDiv.firstChild);
+    }
     successDiv.appendChild(successBox);
     setTimeout(() => {
-      successDiv.innerHTML = '';
+      while (successDiv.firstChild) {
+        successDiv.removeChild(successDiv.firstChild);
+      }
     }, 5000);
   }
 
@@ -115,7 +126,10 @@
   // Render integrations list
   function renderIntegrations() {
     const container = document.getElementById('integrations-container');
-    container.innerHTML = '';
+    // Clear container using safe DOM methods
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
 
     state.integrations.forEach((integration) => {
       const platformIcon =
@@ -231,7 +245,10 @@
   // Render user pairings table
   function renderPairings() {
     const tbody = document.getElementById('pairings-table-body');
-    tbody.innerHTML = '';
+    // Clear table using safe DOM methods
+    while (tbody.firstChild) {
+      tbody.removeChild(tbody.firstChild);
+    }
 
     state.pairings.forEach((pairing) => {
       const platformName =
@@ -368,6 +385,112 @@
     }
   }
 
+  // Load users from API
+  async function loadUsers() {
+    try {
+      const usersLoading = document.getElementById('users-loading');
+      const usersContainer = document.getElementById('users-container');
+      const usersEmpty = document.getElementById('users-empty');
+
+      usersLoading.style.display = 'block';
+      usersContainer.style.display = 'none';
+      usersEmpty.style.display = 'none';
+
+      const response = await apiRequest('/admin/users');
+      state.users = response.users || [];
+
+      usersLoading.style.display = 'none';
+
+      if (state.users.length === 0) {
+        usersEmpty.style.display = 'block';
+      } else {
+        usersContainer.style.display = 'block';
+        renderUsers();
+      }
+    } catch (error) {
+      console.error('Failed to load users:', error);
+      showError('Failed to load users: ' + error.message);
+      document.getElementById('users-loading').style.display = 'none';
+      document.getElementById('users-empty').style.display = 'block';
+    }
+  }
+
+  // Render users table
+  function renderUsers() {
+    const tbody = document.getElementById('users-table-body');
+    // Clear table using safe DOM methods
+    while (tbody.firstChild) {
+      tbody.removeChild(tbody.firstChild);
+    }
+
+    state.users.forEach((user) => {
+      const row = document.createElement('tr');
+
+      // Email
+      const emailCell = document.createElement('td');
+      emailCell.textContent = user.email;
+      row.appendChild(emailCell);
+
+      // Name
+      const nameCell = document.createElement('td');
+      nameCell.textContent = user.name || '-';
+      row.appendChild(nameCell);
+
+      // Status
+      const statusCell = document.createElement('td');
+      const statusBadge = document.createElement('span');
+      statusBadge.className = `status-badge ${user.enabled ? 'active' : 'inactive'}`;
+      statusBadge.textContent = user.enabled ? 'ENABLED' : 'DISABLED';
+      statusCell.appendChild(statusBadge);
+      row.appendChild(statusCell);
+
+      // Created
+      const createdCell = document.createElement('td');
+      createdCell.textContent = formatDate(user.createdAt);
+      row.appendChild(createdCell);
+
+      // Actions
+      const actionsCell = document.createElement('td');
+
+      if (user.enabled) {
+        const disableBtn = document.createElement('button');
+        disableBtn.className = 'btn btn-danger';
+        disableBtn.textContent = 'Disable';
+        disableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, false);
+        actionsCell.appendChild(disableBtn);
+      } else {
+        const enableBtn = document.createElement('button');
+        enableBtn.className = 'btn btn-primary';
+        enableBtn.textContent = 'Enable';
+        enableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, true);
+        actionsCell.appendChild(enableBtn);
+      }
+
+      row.appendChild(actionsCell);
+      tbody.appendChild(row);
+    });
+  }
+
+  // Toggle user enabled/disabled status
+  async function toggleUserStatus(email, enable) {
+    const action = enable ? 'enable' : 'disable';
+    if (!confirm(`Are you sure you want to ${action} user ${email}?`)) {
+      return;
+    }
+
+    try {
+      await apiRequest(`/admin/users/${encodeURIComponent(email)}/${action}`, {
+        method: 'POST',
+      });
+
+      showSuccess(`User ${action}d successfully`);
+      await loadUsers();
+    } catch (error) {
+      console.error(`Failed to ${action} user:`, error);
+      showError(`Failed to ${action} user: ` + error.message);
+    }
+  }
+
   // Utility: Check JWT authentication
   function checkAuth() {
     // Check for JWT token in localStorage
@@ -419,7 +542,7 @@
     await handleOAuthCallback();
 
     // Load data
-    await Promise.all([loadIntegrations(), loadPairings()]);
+    await Promise.all([loadIntegrations(), loadPairings(), loadUsers()]);
   }
 
   // Expose public API
@@ -427,6 +550,7 @@
     connectSlack,
     removeIntegration,
     removePairing,
+    toggleUserStatus,
   };
 
   // Initialize when DOM is ready

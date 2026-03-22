@@ -29,6 +29,31 @@
       color: var(--text-secondary);
     }
 
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--bg-user);
+    }
+
     .login-button {
       width: 100%;
       padding: 1rem;
@@ -60,6 +85,15 @@
       font-size: 0.875rem;
     }
 
+    .success-message {
+      margin-top: 1rem;
+      padding: 1rem;
+      background-color: #4caf50;
+      color: white;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+    }
+
     .loading-spinner {
       display: inline-block;
       width: 1rem;
@@ -69,6 +103,30 @@
       border-top-color: transparent;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
+    }
+
+    .toggle-link {
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .toggle-link a {
+      color: var(--bg-user);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .toggle-link a:hover {
+      text-decoration: underline;
+    }
+
+    .password-requirements {
+      margin-top: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      line-height: 1.4;
     }
 
     @keyframes spin {
@@ -83,13 +141,183 @@
       <p>Multi-Tenant Agent Platform</p>
     </div>
 
-    <button id="login-button" class="login-button">
-      Sign in with Cognito
-    </button>
+    <!-- Login View -->
+    <div id="login-view">
+      <button id="login-button" class="login-button">
+        Sign in with Cognito
+      </button>
+      <div class="toggle-link">
+        <p>Don't have an account? <a href="#" id="show-register">Register</a></p>
+      </div>
+    </div>
+
+    <!-- Registration View -->
+    <div id="register-view" style="display: none;">
+      <form id="register-form">
+        <div class="form-group">
+          <label for="register-name">Full Name</label>
+          <input type="text" id="register-name" name="name" required />
+        </div>
+        <div class="form-group">
+          <label for="register-email">Email</label>
+          <input type="email" id="register-email" name="email" required />
+        </div>
+        <div class="form-group">
+          <label for="register-password">Password</label>
+          <input type="password" id="register-password" name="password" required />
+          <div class="password-requirements">
+            Password must be at least 12 characters and include uppercase, lowercase, number, and special character.
+          </div>
+        </div>
+        <button type="submit" id="register-button" class="login-button">
+          Create Account
+        </button>
+      </form>
+      <div class="toggle-link">
+        <p>Already have an account? <a href="#" id="show-login">Sign in</a></p>
+      </div>
+    </div>
 
     <div id="error" style="display: none;" class="error-message"></div>
+    <div id="success" style="display: none;" class="success-message"></div>
   </div>
 
   <script src="/auth.js"></script>
+  <script>
+    (function() {
+      'use strict';
+
+      const loginView = document.getElementById('login-view');
+      const registerView = document.getElementById('register-view');
+      const loginButton = document.getElementById('login-button');
+      const registerForm = document.getElementById('register-form');
+      const registerButton = document.getElementById('register-button');
+      const showRegisterLink = document.getElementById('show-register');
+      const showLoginLink = document.getElementById('show-login');
+      const errorDiv = document.getElementById('error');
+      const successDiv = document.getElementById('success');
+
+      // Show error message
+      function showError(message) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+        successDiv.style.display = 'none';
+      }
+
+      // Show success message
+      function showSuccess(message) {
+        successDiv.textContent = message;
+        successDiv.style.display = 'block';
+        errorDiv.style.display = 'none';
+      }
+
+      // Hide messages
+      function hideMessages() {
+        errorDiv.style.display = 'none';
+        successDiv.style.display = 'none';
+      }
+
+      // Set button loading state (safe DOM methods)
+      function setButtonLoading(button, text) {
+        button.textContent = text;
+        const spinner = document.createElement('span');
+        spinner.className = 'loading-spinner';
+        button.appendChild(spinner);
+      }
+
+      // Toggle to registration view
+      showRegisterLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        loginView.style.display = 'none';
+        registerView.style.display = 'block';
+        hideMessages();
+      });
+
+      // Toggle to login view
+      showLoginLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        registerView.style.display = 'none';
+        loginView.style.display = 'block';
+        hideMessages();
+      });
+
+      // Handle login button click
+      loginButton.addEventListener('click', async () => {
+        loginButton.disabled = true;
+        setButtonLoading(loginButton, 'Redirecting...');
+        hideMessages();
+
+        try {
+          await window.ChimeraAuth.initLogin();
+        } catch (error) {
+          console.error('Login failed:', error);
+          showError('Login failed: ' + error.message);
+          loginButton.disabled = false;
+          loginButton.textContent = 'Sign in with Cognito';
+        }
+      });
+
+      // Handle registration form submission
+      registerForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const name = document.getElementById('register-name').value;
+        const email = document.getElementById('register-email').value;
+        const password = document.getElementById('register-password').value;
+
+        registerButton.disabled = true;
+        setButtonLoading(registerButton, 'Creating account...');
+        hideMessages();
+
+        try {
+          const result = await window.ChimeraAuth.register(name, email, password);
+
+          if (result.confirmationRequired) {
+            showSuccess('Account created! Please check your email to confirm your account, then sign in.');
+            // Switch back to login view after 3 seconds
+            setTimeout(() => {
+              registerView.style.display = 'none';
+              loginView.style.display = 'block';
+              registerForm.reset();
+            }, 3000);
+          } else {
+            showSuccess('Account created successfully! Redirecting to login...');
+            setTimeout(() => {
+              registerView.style.display = 'none';
+              loginView.style.display = 'block';
+              registerForm.reset();
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('Registration failed:', error);
+          showError('Registration failed: ' + error.message);
+        } finally {
+          registerButton.disabled = false;
+          registerButton.textContent = 'Create Account';
+        }
+      });
+
+      // Check for OAuth callback on page load
+      (async function init() {
+        // If already authenticated, redirect to chat
+        if (window.ChimeraAuth.checkAuth()) {
+          window.location.href = '/';
+          return;
+        }
+
+        // Handle OAuth callback
+        try {
+          const isCallback = await window.ChimeraAuth.handleCallback();
+          if (isCallback) {
+            // Successfully authenticated, redirect to chat
+            window.location.href = '/';
+          }
+        } catch (error) {
+          console.error('OAuth callback error:', error);
+          showError('Authentication failed: ' + error.message);
+        }
+      })();
+    })();
+  </script>
 </body>
 </html>
