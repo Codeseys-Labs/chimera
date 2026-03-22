@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-quality-gates
-- **Task ID:** chimera-a442
+- **Agent Name:** builder-frontend-fix2
+- **Task ID:** chimera-a180
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-quality-gates/chimera-a442
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates
-- **Parent:** lead-quality-gates
+- **Branch:** overstory/builder-frontend-fix2/chimera-a180
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2
+- **Parent:** lead-user-reg
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,22 +181,24 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-No file scope restrictions
+- `packages/chat-gateway/public/login.html`
+- `packages/chat-gateway/public/auth.js`
+- `packages/chat-gateway/public/admin.js`
 
 ## Expertise
 
@@ -208,26 +210,26 @@ No specific expertise domains configured
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-quality-gates**.
+Use `ov mail` for all communication. Your address is **builder-frontend-fix2**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-quality-gates
+ov mail check --agent builder-frontend-fix2
 
 # Send a status update to your parent
-ov mail send --to lead-quality-gates --subject "status" \
-  --body "Progress update here" --type status --agent builder-quality-gates
+ov mail send --to lead-user-reg --subject "status" \
+  --body "Progress update here" --type status --agent builder-frontend-fix2
 
 # Ask a question
-ov mail send --to lead-quality-gates --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-quality-gates
+ov mail send --to lead-user-reg --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-frontend-fix2
 
 # Report completion
-ov mail send --to lead-quality-gates --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-quality-gates
+ov mail send --to lead-user-reg --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-frontend-fix2
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-quality-gates
+ov mail reply <message-id> --body "Your reply" --agent builder-frontend-fix2
 ```
 
 ## Spawning Sub-Workers
@@ -241,20 +243,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-quality-gates/chimera-a442)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-quality-gates` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-quality-gates: `ov mail send --to lead-quality-gates --subject "Worker done: chimera-a442" --body "Quality gates passed." --type worker_done --agent builder-quality-gates`
-7. **Close issue:** `sd close chimera-a442 --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-frontend-fix2/chimera-a180)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-frontend-fix2` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-user-reg: `ov mail send --to lead-user-reg --subject "Worker done: chimera-a180" --body "Quality gates passed." --type worker_done --agent builder-frontend-fix2`
+7. **Close issue:** `sd close chimera-a180 --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-quality-gates`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-quality-gates/chimera-a442
+- Commit only to your branch: overstory/builder-frontend-fix2/chimera-a180
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
