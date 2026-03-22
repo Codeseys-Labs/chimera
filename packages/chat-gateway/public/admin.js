@@ -22,7 +22,6 @@
     integrations: [],
     pairings: [],
     users: [],
-    costData: null,
   };
 
   // Utility: Show error message
@@ -31,6 +30,7 @@
     const errorBox = document.createElement('div');
     errorBox.className = 'error';
     errorBox.textContent = message;
+    // Clear using safe DOM methods
     while (errorDiv.firstChild) {
       errorDiv.removeChild(errorDiv.firstChild);
     }
@@ -48,6 +48,7 @@
     const successBox = document.createElement('div');
     successBox.className = 'success';
     successBox.textContent = message;
+    // Clear using safe DOM methods
     while (successDiv.firstChild) {
       successDiv.removeChild(successDiv.firstChild);
     }
@@ -125,6 +126,7 @@
   // Render integrations list
   function renderIntegrations() {
     const container = document.getElementById('integrations-container');
+    // Clear container using safe DOM methods
     while (container.firstChild) {
       container.removeChild(container.firstChild);
     }
@@ -243,6 +245,7 @@
   // Render user pairings table
   function renderPairings() {
     const tbody = document.getElementById('pairings-table-body');
+    // Clear table using safe DOM methods
     while (tbody.firstChild) {
       tbody.removeChild(tbody.firstChild);
     }
@@ -393,7 +396,7 @@
       usersContainer.style.display = 'none';
       usersEmpty.style.display = 'none';
 
-      const response = await apiRequest(`${config.apiBase}/users?tenantId=${config.tenantId}`);
+      const response = await apiRequest('/admin/users');
       state.users = response.users || [];
 
       usersLoading.style.display = 'none';
@@ -406,6 +409,7 @@
       }
     } catch (error) {
       console.error('Failed to load users:', error);
+      showError('Failed to load users: ' + error.message);
       document.getElementById('users-loading').style.display = 'none';
       document.getElementById('users-empty').style.display = 'block';
     }
@@ -414,6 +418,7 @@
   // Render users table
   function renderUsers() {
     const tbody = document.getElementById('users-table-body');
+    // Clear table using safe DOM methods
     while (tbody.firstChild) {
       tbody.removeChild(tbody.firstChild);
     }
@@ -426,11 +431,16 @@
       emailCell.textContent = user.email;
       row.appendChild(emailCell);
 
+      // Name
+      const nameCell = document.createElement('td');
+      nameCell.textContent = user.name || '-';
+      row.appendChild(nameCell);
+
       // Status
       const statusCell = document.createElement('td');
       const statusBadge = document.createElement('span');
-      statusBadge.className = `status-badge ${user.status === 'active' ? 'active' : 'inactive'}`;
-      statusBadge.textContent = user.status.toUpperCase();
+      statusBadge.className = `status-badge ${user.enabled ? 'active' : 'inactive'}`;
+      statusBadge.textContent = user.enabled ? 'ENABLED' : 'DISABLED';
       statusCell.appendChild(statusBadge);
       row.appendChild(statusCell);
 
@@ -439,46 +449,38 @@
       createdCell.textContent = formatDate(user.createdAt);
       row.appendChild(createdCell);
 
-      // Last Login
-      const loginCell = document.createElement('td');
-      loginCell.textContent = user.lastLogin ? formatDate(user.lastLogin) : 'Never';
-      row.appendChild(loginCell);
-
       // Actions
       const actionsCell = document.createElement('td');
-      if (user.status === 'active') {
+
+      if (user.enabled) {
         const disableBtn = document.createElement('button');
         disableBtn.className = 'btn btn-danger';
         disableBtn.textContent = 'Disable';
-        disableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, 'disabled');
+        disableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, false);
         actionsCell.appendChild(disableBtn);
       } else {
         const enableBtn = document.createElement('button');
         enableBtn.className = 'btn btn-primary';
         enableBtn.textContent = 'Enable';
-        enableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, 'active');
+        enableBtn.onclick = () => window.adminApp.toggleUserStatus(user.email, true);
         actionsCell.appendChild(enableBtn);
       }
-      row.appendChild(actionsCell);
 
+      row.appendChild(actionsCell);
       tbody.appendChild(row);
     });
   }
 
-  // Toggle user status
-  async function toggleUserStatus(email, newStatus) {
-    const action = newStatus === 'active' ? 'enable' : 'disable';
-    if (!confirm(`Are you sure you want to ${action} this user?`)) {
+  // Toggle user enabled/disabled status
+  async function toggleUserStatus(email, enable) {
+    const action = enable ? 'enable' : 'disable';
+    if (!confirm(`Are you sure you want to ${action} user ${email}?`)) {
       return;
     }
 
     try {
-      await apiRequest(`${config.apiBase}/users/${email}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          tenantId: config.tenantId,
-          status: newStatus,
-        }),
+      await apiRequest(`/admin/users/${encodeURIComponent(email)}/${action}`, {
+        method: 'POST',
       });
 
       showSuccess(`User ${action}d successfully`);
@@ -486,53 +488,6 @@
     } catch (error) {
       console.error(`Failed to ${action} user:`, error);
       showError(`Failed to ${action} user: ` + error.message);
-    }
-  }
-
-  // Utility: Format number
-  function formatNumber(num) {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    }
-    if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-  }
-
-  // Load cost data from API
-  async function loadCostData() {
-    try {
-      const response = await apiRequest(`${config.apiBase}/costs?tenantId=${config.tenantId}`);
-      state.costData = response.costs || {};
-
-      // Update cost displays
-      document.getElementById('cost-tokens-month').textContent = formatNumber(
-        state.costData.month?.tokens || 0
-      );
-      document.getElementById('cost-amount-month').textContent =
-        '$' + (state.costData.month?.estimatedCost || 0).toFixed(2);
-
-      document.getElementById('cost-tokens-week').textContent = formatNumber(
-        state.costData.week?.tokens || 0
-      );
-      document.getElementById('cost-amount-week').textContent =
-        '$' + (state.costData.week?.estimatedCost || 0).toFixed(2);
-
-      document.getElementById('cost-tokens-day').textContent = formatNumber(
-        state.costData.day?.tokens || 0
-      );
-      document.getElementById('cost-amount-day').textContent =
-        '$' + (state.costData.day?.estimatedCost || 0).toFixed(2);
-    } catch (error) {
-      console.error('Failed to load cost data:', error);
-      // Set defaults on error
-      document.getElementById('cost-tokens-month').textContent = '0';
-      document.getElementById('cost-amount-month').textContent = '$0.00';
-      document.getElementById('cost-tokens-week').textContent = '0';
-      document.getElementById('cost-amount-week').textContent = '$0.00';
-      document.getElementById('cost-tokens-day').textContent = '0';
-      document.getElementById('cost-amount-day').textContent = '$0.00';
     }
   }
 
@@ -587,12 +542,7 @@
     await handleOAuthCallback();
 
     // Load data
-    await Promise.all([
-      loadIntegrations(),
-      loadPairings(),
-      loadUsers(),
-      loadCostData(),
-    ]);
+    await Promise.all([loadIntegrations(), loadPairings(), loadUsers()]);
   }
 
   // Expose public API
