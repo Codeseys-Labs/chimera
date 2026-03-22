@@ -57,6 +57,41 @@ sd close <task-id> --reason "completed"
 
 ---
 
+## Development Conventions
+
+### Bun Package Manager
+
+**CRITICAL:** This project uses **Bun exclusively** for package management and script execution.
+
+- ✅ **Always use `bun`** for package installation: `bun install`, `bun add <package>`, `bun remove <package>`
+- ✅ **Always use `bun` or `bunx`** for script execution: `bun test`, `bun run lint`, `bunx cdk deploy`
+- ❌ **Never use npm** — no `npm install`, `npm run`, or `npx`
+- ❌ **Never use yarn** or `pnpm`
+
+**Why bunx?**
+- CDK and other dev tools are declared as `devDependencies`, not installed globally
+- `bunx <command>` executes packages from `node_modules/.bin/` or downloads them temporarily
+- This ensures consistent versions across all environments
+
+**Examples:**
+```bash
+# ✅ Correct
+bun install
+bun test
+bun run lint
+bunx cdk deploy --all
+bunx tsc --noEmit
+
+# ❌ Wrong
+npm install
+npm test
+npm run lint
+npx cdk deploy
+cdk deploy  # Assumes global install
+```
+
+---
+
 ## Overstory Workflow
 
 ### Worktree-Based Development
