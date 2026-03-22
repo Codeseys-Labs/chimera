@@ -12,6 +12,9 @@ import {
   CodeCommitClient,
   CreateRepositoryCommand,
   GetRepositoryCommand,
+  GetBranchCommand,
+  CreateCommitCommand,
+  type PutFileEntry,
 } from '@aws-sdk/client-codecommit';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
 
@@ -57,29 +60,87 @@ async function ensureCodeCommitRepo(
 }
 
 /**
- * Push local repository to CodeCommit
- * Note: Uses git commands with validated paths - repo URL from AWS SDK, repoRoot from git itself
+ * Get list of files to commit (git tracked files)
+ * Note: Uses git ls-files command with validated repo path from git rev-parse
  */
-function pushToCodeCommit(repoUrl: string, repoRoot: string): void {
-  const execOptions = { cwd: repoRoot, stdio: 'pipe' as const };
+function getTrackedFiles(repoRoot: string): string[] {
+  const execOptions = { cwd: repoRoot, encoding: 'utf8' as const, stdio: 'pipe' as const };
 
-  // Check if git repo exists
+  // Initialize git repo if needed
   if (!fs.existsSync(path.join(repoRoot, '.git'))) {
     execSync('git init', execOptions);
     execSync('git add .', execOptions);
     execSync('git commit -m "Initial Chimera deployment"', execOptions);
   }
 
-  // Add CodeCommit remote (URL is from AWS SDK, safe)
-  try {
-    execSync(`git remote add codecommit "${repoUrl}"`, execOptions);
-  } catch {
-    // Remote already exists, update URL
-    execSync(`git remote set-url codecommit "${repoUrl}"`, execOptions);
+  // Get list of tracked files relative to repo root
+  const output = execSync('git ls-files', execOptions);
+  return output
+    .toString()
+    .trim()
+    .split('\n')
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Push local repository to CodeCommit using CreateCommit API
+ * Bypasses git credential helper requirements by using AWS SDK directly
+ * Note: Repository name validated by AWS SDK, file paths from git ls-files
+ */
+async function pushToCodeCommit(
+  client: CodeCommitClient,
+  repoName: string,
+  repoRoot: string,
+): Promise<void> {
+  const branchName = 'main';
+
+  // Get list of files to commit
+  const files = getTrackedFiles(repoRoot);
+
+  if (files.length === 0) {
+    throw new Error('No files to commit');
   }
 
-  // Push to CodeCommit
-  execSync('git push codecommit main -f', execOptions);
+  // Read file contents and prepare PutFileEntry array
+  const putFiles: PutFileEntry[] = files.map((filePath) => {
+    const absolutePath = path.join(repoRoot, filePath);
+    const content = fs.readFileSync(absolutePath);
+
+    return {
+      filePath,
+      fileMode: fs.statSync(absolutePath).mode & 0o100 ? 'EXECUTABLE' : 'NORMAL',
+      fileContent: content,
+    };
+  });
+
+  // Get parent commit ID if branch exists
+  let parentCommitId: string | undefined;
+  try {
+    const getBranchCommand = new GetBranchCommand({
+      repositoryName: repoName,
+      branchName,
+    });
+    const branchData = await client.send(getBranchCommand);
+    parentCommitId = branchData.branch?.commitId;
+  } catch (error: any) {
+    // Branch doesn't exist yet - this will be the first commit
+    if (error.name !== 'BranchDoesNotExistException') {
+      throw error;
+    }
+  }
+
+  // Create commit via API
+  const createCommitCommand = new CreateCommitCommand({
+    repositoryName: repoName,
+    branchName,
+    parentCommitId,
+    authorName: 'Chimera CLI',
+    email: 'chimera@example.com',
+    commitMessage: 'Deploy Chimera infrastructure and source code',
+    putFiles,
+  });
+
+  await client.send(createCommitCommand);
 }
 
 /**
@@ -122,7 +183,7 @@ export function registerDeployCommands(program: Command): void {
         // Step 2: Create or get CodeCommit repository
         spinner.start('Setting up CodeCommit repository...');
         const codecommitClient = new CodeCommitClient({ region: options.region });
-        const repoUrl = await ensureCodeCommitRepo(codecommitClient, options.repoName);
+        await ensureCodeCommitRepo(codecommitClient, options.repoName);
         spinner.succeed(chalk.green(`CodeCommit repository ready: ${options.repoName}`));
 
         // Step 3: Find repo root
@@ -130,9 +191,9 @@ export function registerDeployCommands(program: Command): void {
         const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
         spinner.succeed(chalk.green(`Repository root: ${repoRoot}`));
 
-        // Step 4: Push source to CodeCommit
+        // Step 4: Push source to CodeCommit (using CreateCommit API - no git auth needed)
         spinner.start('Pushing source code to CodeCommit...');
-        pushToCodeCommit(repoUrl, repoRoot);
+        await pushToCodeCommit(codecommitClient, options.repoName, repoRoot);
         spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
 
         // Step 5: Deploy CDK stacks
