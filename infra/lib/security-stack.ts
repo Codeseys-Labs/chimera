@@ -50,7 +50,7 @@ export class SecurityStack extends cdk.Stack {
     // ======================================================================
     this.userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: `chimera-users-${props.envName}`,
-      selfSignUpEnabled: false, // Platform admin creates users
+      selfSignUpEnabled: true, // Users can self-register via web UI
       signInAliases: { email: true },
       autoVerify: { email: true },
       passwordPolicy: {
