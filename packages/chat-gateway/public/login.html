@@ -23,6 +23,7 @@
     .login-header h1 {
       font-size: 2rem;
       margin-bottom: 0.5rem;
+      color: var(--text-primary);
     }
 
     .login-header p {
@@ -40,6 +41,7 @@
       font-weight: 500;
       cursor: pointer;
       transition: opacity 0.2s;
+      min-height: 44px; /* Touch-friendly */
     }
 
     .login-button:hover:not(:disabled) {
@@ -74,6 +76,52 @@
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+
+    .login-footer {
+      text-align: center;
+      margin-top: 2rem;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .login-footer a {
+      color: var(--bg-user);
+      text-decoration: none;
+    }
+
+    .login-footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* Responsive mobile improvements */
+    @media (max-width: 768px) {
+      .login-container {
+        margin: 5vh auto;
+        padding: 1.5rem;
+        max-width: 90%;
+      }
+
+      .login-header h1 {
+        font-size: 1.5rem;
+      }
+
+      .login-header p {
+        font-size: 0.9rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .login-container {
+        margin: 2vh auto;
+        padding: 1rem;
+        width: calc(100% - 2rem);
+      }
+
+      .login-button {
+        font-size: 1rem;
+        padding: 0.875rem;
+      }
+    }
   </style>
 </head>
 <body>
@@ -88,6 +136,10 @@
     </button>
 
     <div id="error" style="display: none;" class="error-message"></div>
+
+    <div class="login-footer">
+      <p>Secure authentication powered by AWS Cognito</p>
+    </div>
   </div>
 
   <script src="/auth.js"></script>
