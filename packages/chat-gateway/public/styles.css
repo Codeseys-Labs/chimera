@@ -253,8 +253,18 @@ footer {
     max-width: 100%;
   }
 
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
   header h1 {
     font-size: 1.25rem;
+  }
+
+  .status {
+    font-size: 0.75rem;
   }
 
   .message-content {
@@ -271,5 +281,56 @@ footer {
 
   #send-button {
     padding: 0.75rem 1rem;
+  }
+}
+
+/* Mobile-first improvements for all pages */
+@media (max-width: 480px) {
+  body {
+    font-size: 14px;
+  }
+
+  .message-content {
+    max-width: 90%;
+    font-size: 0.9rem;
+  }
+
+  #message-input {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+
+  #send-button {
+    padding: 0.75rem;
+    min-width: 60px;
+  }
+
+  /* Touch-friendly button sizing */
+  button,
+  .btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Tablet portrait */
+@media (min-width: 481px) and (max-width: 768px) {
+  .container {
+    max-width: 100%;
+  }
+}
+
+/* Dark mode enhancements */
+@media (prefers-color-scheme: dark) {
+  /* Improve readability in dark mode */
+  .message-content {
+    border: 1px solid var(--border-color);
+  }
+
+  .message.user .message-content {
+    border-color: var(--bg-user);
+  }
+
+  .message.assistant .message-content {
+    border-color: var(--border-color);
   }
 }
