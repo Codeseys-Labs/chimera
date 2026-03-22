@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   BackgroundTaskManager,
   createBackgroundTaskManager,
-  startBackgroundTaskTool
+  startBackgroundTaskTool,
+  checkBackgroundTaskTool
 } from '../../../packages/core/src/orchestration/background-task';
 import { createOrchestrator } from '../../../packages/core/src/orchestration/orchestrator';
 
@@ -319,6 +320,52 @@ describe('BackgroundTaskManager', () => {
     it('should define priority enum', () => {
       const priorityParam = startBackgroundTaskTool.parameters.properties.priority;
       expect(priorityParam.enum).toEqual(['low', 'normal', 'high', 'urgent']);
+    });
+  });
+
+  describe('checkBackgroundTaskTool', () => {
+    it('should have correct tool schema', () => {
+      expect(checkBackgroundTaskTool.name).toBe('check_background_task');
+      expect(checkBackgroundTaskTool.description).toBeTruthy();
+      expect(checkBackgroundTaskTool.parameters.type).toBe('object');
+      expect(checkBackgroundTaskTool.parameters.required).toContain('taskId');
+    });
+
+    it('should require taskId parameter', () => {
+      const taskIdParam = checkBackgroundTaskTool.parameters.properties.taskId;
+      expect(taskIdParam.type).toBe('string');
+      expect(taskIdParam.description).toBeTruthy();
+    });
+
+    it('should be usable for polling task status', async () => {
+      // Submit a task
+      const result = await manager.submitTask({
+        sourceAgentId: 'agent-001',
+        targetAgentId: 'worker-001',
+        tenantId: 'tenant-123',
+        instruction: 'Test task',
+        context: {}
+      });
+
+      // Check status using the tool's expected input format
+      const task = manager.getTask(result.taskId);
+      expect(task).toBeDefined();
+      expect(task?.status).toBe('queued');
+
+      // Update status to running
+      manager.updateTaskStatus(result.taskId, 'running');
+
+      // Check again
+      const runningTask = manager.getTask(result.taskId);
+      expect(runningTask?.status).toBe('running');
+
+      // Complete the task
+      manager.updateTaskStatus(result.taskId, 'completed', { data: 'result' });
+
+      // Final check
+      const completedTask = manager.getTask(result.taskId);
+      expect(completedTask?.status).toBe('completed');
+      expect(completedTask?.result).toEqual({ data: 'result' });
     });
   });
 });
