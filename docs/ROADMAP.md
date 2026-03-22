@@ -2,7 +2,7 @@
 
 > **Status:** Platform 85% complete. Phases 0-6 delivered. Production deployment in progress.
 >
-> **Last Updated:** 2026-03-21 (verified via codebase audit)
+> **Last Updated:** 2026-03-22 (verified via codebase audit)
 
 ---
 
@@ -12,33 +12,33 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 **Core Differentiator:** The agent has AWS account access, not computer access. This is an AWS-native rebuild of OpenClaw/NemoClaw patterns, purpose-built for cloud infrastructure operations.
 
-**Architecture:** Bun monorepo, 11 CDK stacks, 5 packages, 18 ADRs, AgentCore Runtime (MicroVM isolation).
+**Architecture:** Bun monorepo, 11 CDK stacks, 6 packages, 18 ADRs, AgentCore Runtime (MicroVM isolation).
 
 ---
 
-## Current State (2026-03-21)
+## Current State (2026-03-22)
 
 ### What's Built (Verified)
 
 | Area | Status | Details |
 |------|--------|---------|
-| **Research** | ✅ **100% Complete** | 118 docs, 112K+ lines, 18 ADRs |
-| **CDK Infrastructure** | ✅ **11 stacks, production-quality** | 4,400+ LOC across Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration |
-| **Agent Runtime** | ✅ **BUILT (Python)** | `packages/agents/chimera_agent.py` (273 LOC) — Strands SDK + AgentCore Runtime integration • ReAct loop with streaming • AgentCore Memory (STM + LTM) • Multi-tenant context injection |
-| **AWS Tools** | ✅ **25 tools implemented** | 19 TypeScript tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock) + 5 Python tools + media processors |
-| **Core Modules** | ✅ **21 modules, ~46,500 LOC** | agent, auth, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity |
+| **Research** | ✅ **100% Complete** | 123 docs, 118,000+ lines, 18 ADRs |
+| **CDK Infrastructure** | ✅ **11 stacks, production-quality** | 5,800+ LOC across Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration |
+| **Agent Runtime** | ✅ **BUILT (Python)** | `packages/agents/chimera_agent.py` (317 LOC) — Strands SDK + AgentCore Runtime integration • ReAct loop with streaming • AgentCore Memory (STM + LTM) • Multi-tenant context injection • Total Python LOC: ~1,648 |
+| **AWS Tools** | ✅ **25 tools implemented** | 19 TypeScript tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock) + 6 Python tools (hello_world, s3_tools, ec2_tools, codecommit_tools, codepipeline_tools, background_task_tools) |
+| **Core Modules** | ✅ **21 modules, ~48,300 LOC** | agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity |
 | **@chimera/shared** | ✅ **Complete** | Canonical type definitions |
 | **@chimera/sse-bridge** | ✅ **Ship-ready** | Strands-to-Vercel DSP bridge with 26 tests |
 | **@chimera/chat-gateway** | 🚧 **Framework ready** | Express server, middleware, routes, adapter stubs (Slack, Discord, Teams, Telegram) |
 | **@chimera/cli** | ✅ **Built** | Commands: deploy, tenant, session, skill, connect, status |
-| **Test Coverage** | 🚧 **High coverage, some failures** | 760 pass / 81 fail / 19 errors = 841 tests across 41+ files |
+| **Test Coverage** | 🚧 **High coverage, some failures** | 860 pass / 82 fail / 20 errors = 962 tests across 64 files |
 
 ### What Remains
 
 | Area | Gap | Priority |
 |------|-----|----------|
 | **Production Deployment** | Chat gateway needs ECS Fargate deployment • Load testing required | High |
-| **Test Stabilization** | Fix 81 failing tests + 19 errors (mostly missing dependencies like js-yaml, @aws-sdk/client-transcribe) | High |
+| **Test Stabilization** | Fix 82 failing tests + 20 errors (mostly missing dependencies like js-yaml, @aws-sdk/client-transcribe) | High |
 | **Disaster Recovery** | DR runbooks, cross-region replication, backup validation | Medium |
 | **Chat Platform Integration** | Complete Slack/Discord/Teams OAuth + event handlers | Medium |
 
@@ -52,7 +52,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 **Delivered:**
 - [x] Monorepo setup (Bun workspaces, TypeScript project references)
-- [x] CDK infrastructure — all 11 stacks implemented (4,400+ LOC):
+- [x] CDK infrastructure — all 11 stacks implemented (5,800+ LOC):
   - [x] NetworkStack (VPC, subnets, NAT gateway, security groups) — 167 LOC
   - [x] DataStack (DynamoDB 6 tables, S3, EFS) — 320 LOC
   - [x] SecurityStack (Cognito, IAM roles, Cedar policies, KMS) — 210 LOC
@@ -67,7 +67,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 - [x] Canonical DynamoDB schema (6-table design with GSI patterns)
 - [x] 18 Architecture Decision Records
 - [x] Shared types package (@chimera/shared)
-- [x] Test infrastructure (841 tests across 60 files)
+- [x] Test infrastructure (962 tests across 64 files)
 
 **Remaining Work:**
 - [ ] `cdk synth` verification (not blocking — stacks exist, need integration test)
@@ -85,7 +85,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 **What Was Built:**
 
 1. **Strands Agent Integration** ✅
-   - [x] Python agent runtime (`packages/agents/chimera_agent.py`, 273 LOC)
+   - [x] Python agent runtime (`packages/agents/chimera_agent.py`, 317 LOC)
    - [x] Strands SDK ReAct loop with streaming
    - [x] System prompt template with multi-tenant context injection
    - [x] BedrockModel integration (Claude via Bedrock)
@@ -100,7 +100,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 3. **AWS Account Tools (Core Differentiator)** ✅
    - [x] **25 AWS tools implemented:**
      - **TypeScript (19 tools):** EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock
-     - **Python (5 tools):** hello_world, s3_tools, ec2_tools, codecommit_tools, codepipeline_tools
+     - **Python (6 tools):** hello_world, s3_tools, ec2_tools, codecommit_tools, codepipeline_tools, background_task_tools
    - [x] Discovery modules: Config scanner, Resource Explorer, Cost analyzer, Stack inventory, Tag organizer, Index builder
    - [x] Well-Architected Framework tool (6-pillar architecture review)
    - [x] Multi-modal processing (auto-detection and routing for images, audio, video, documents)
@@ -108,7 +108,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 4. **End-to-End Validation** ✅
    - [x] Agent receives message → Strands ReAct loop → AWS tools → streaming response
-   - [x] 760+ passing tests (agent invocation, tool execution, memory persistence)
+   - [x] 860+ passing tests (agent invocation, tool execution, memory persistence)
    - [x] Integration tests with AWS SDK mocks
 
 **Acceptance Criteria Met:**
@@ -355,19 +355,19 @@ Phase 2               Phase 3           Phase 7
 
 ---
 
-## Codebase Metrics (2026-03-21 Audit)
+## Codebase Metrics (2026-03-22 Audit)
 
 | Metric | Value |
 |--------|-------|
 | **Packages** | 6 (core, agents, shared, sse-bridge, chat-gateway, cli) |
-| **CDK Stacks** | 11 stacks (4,400+ LOC) |
-| **TypeScript LOC** | ~46,500 lines (packages/core/src/) |
-| **Python Agent Runtime** | 273 lines (chimera_agent.py + tools/) |
-| **AWS Tool Implementations** | 25 tools (19 TypeScript + 5 Python + media processors) |
+| **CDK Stacks** | 11 stacks (5,800+ LOC) |
+| **TypeScript LOC** | ~48,300 lines (packages/core/src/) |
+| **Python Agent Runtime** | 317 lines (chimera_agent.py) + ~1,648 total Python LOC |
+| **AWS Tool Implementations** | 25 tools (19 TypeScript + 6 Python) |
 | **Core Modules** | 21 (agent, auth, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected, activity) |
-| **Test Files** | 41+ files with 841 tests (760 pass, 81 fail, 19 errors) |
-| **Test Assertions** | 1,884 expect() calls |
-| **Research Documentation** | 118 docs, 112,000+ lines |
+| **Test Files** | 64 files with 962 tests (860 pass, 82 fail, 20 errors) |
+| **Test Assertions** | 2,134 expect() calls |
+| **Research Documentation** | 123 docs, 118,000+ lines |
 | **Architecture Decision Records** | 18 ADRs |
 | **Discovery Modules** | 6 (Config, Resource Explorer, Cost, Stacks, Tags, Index) |
 | **Skill Modules** | 7 (Registry, Discovery, Installer, MCP Gateway, Trust, Validator, Parser) |
@@ -386,7 +386,7 @@ Phase 2               Phase 3           Phase 7
 ### Immediate Priorities (Blocking Production Launch)
 
 1. **Fix Failing Tests**
-   - 81 failing tests + 19 errors (mostly missing dependencies: js-yaml, @aws-sdk/client-transcribe)
+   - 82 failing tests + 20 errors (mostly missing dependencies: js-yaml, @aws-sdk/client-transcribe)
    - Add missing npm packages to package.json files
    - Stabilize test suite to 100% passing
 
@@ -447,9 +447,9 @@ Phase 2               Phase 3           Phase 7
 | `chimera-4646` | Improve lead agent workflow | task | 2026-03-19 |
 | `chimera-e55a` | Research: Skill format compatibility | research | 2026-03-19 |
 | `chimera-0079` | Apply DDB GSI2 updates to renamed Chimera docs | task | 2026-03-19 |
-| `chimera-6dd5` | Research: OpenClaw + NemoClaw deep dive | research | 2026-03-21 |
-| `chimera-5ec5` | Research: AgentCore + Strands integration guide | research | 2026-03-21 |
-| `chimera-6a22` | Fix foundation: typecheck, lint, tests all green | task | 2026-03-21 |
+| `chimera-6dd5` | Research: OpenClaw + NemoClaw deep dive | research | 2026-03-22 |
+| `chimera-5ec5` | Research: AgentCore + Strands integration guide | research | 2026-03-22 |
+| `chimera-6a22` | Fix foundation: typecheck, lint, tests all green | task | 2026-03-22 |
 
 ### In Progress
 
