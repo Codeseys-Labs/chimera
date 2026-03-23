@@ -44,12 +44,13 @@ const EXCLUDED_PATTERNS = [
 
 /**
  * Recursively collect files from directory, excluding specific paths
+ * Reads file content to detect binaries and check size limits
  */
 function collectFiles(
   dirPath: string,
   repoRoot: string,
-  files: Array<{ path: string; fullPath: string }> = [],
-): Array<{ path: string; fullPath: string }> {
+  files: Array<{ path: string; fullPath: string; content: Buffer }> = [],
+): Array<{ path: string; fullPath: string; content: Buffer }> {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -70,7 +71,28 @@ function collectFiles(
     if (entry.isDirectory()) {
       collectFiles(fullPath, repoRoot, files);
     } else {
-      files.push({ path: relativePath, fullPath });
+      // Read file content for binary detection and size check
+      const content = fs.readFileSync(fullPath);
+
+      // FIX 3: Skip files larger than BATCH_MAX_BYTES individually
+      if (content.length > BATCH_MAX_BYTES) {
+        continue;
+      }
+
+      // FIX 2: Detect binary files by checking for null bytes in first 8KB
+      const checkLen = Math.min(content.length, 8192);
+      let isBinary = false;
+      for (let i = 0; i < checkLen; i++) {
+        if (content[i] === 0) {
+          isBinary = true;
+          break;
+        }
+      }
+      if (isBinary) {
+        continue;
+      }
+
+      files.push({ path: relativePath, fullPath, content });
     }
   }
 
@@ -82,16 +104,16 @@ function collectFiles(
  * Note: File content is base64-encoded, so we track encoded size
  */
 function batchFiles(
-  files: Array<{ path: string; fullPath: string }>,
+  files: Array<{ path: string; fullPath: string; content: Buffer }>,
 ): Array<Array<{ path: string; content: Buffer }>> {
   const batches: Array<Array<{ path: string; content: Buffer }>> = [];
   let currentBatch: Array<{ path: string; content: Buffer }> = [];
   let currentBatchSize = 0;
 
   for (const file of files) {
-    const content = fs.readFileSync(file.fullPath);
+    // Content already read in collectFiles
     // Base64 encoding increases size by ~33%
-    const encodedSize = Math.ceil((content.length * 4) / 3);
+    const encodedSize = Math.ceil((file.content.length * 4) / 3);
 
     // Start new batch if current would exceed limits
     if (
@@ -104,7 +126,7 @@ function batchFiles(
       currentBatchSize = 0;
     }
 
-    currentBatch.push({ path: file.path, content });
+    currentBatch.push({ path: file.path, content: file.content });
     currentBatchSize += encodedSize;
   }
 
@@ -129,6 +151,21 @@ async function getAccountId(): Promise<string> {
   } catch {
     throw new Error('Failed to get AWS account ID. Ensure AWS credentials are configured.');
   }
+}
+
+/**
+ * Find project root by walking up directory tree looking for package.json
+ * Pure Node.js approach - no git binary required
+ */
+function findProjectRoot(): string {
+  let dir = process.cwd();
+  while (dir !== path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  throw new Error('Could not find project root (no package.json found). Run from within the project directory.');
 }
 
 /**
@@ -280,10 +317,10 @@ export function registerDeployCommands(program: Command): void {
         await ensureCodeCommitRepo(codecommitClient, options.repoName);
         spinner.succeed(chalk.green(`CodeCommit repository ready: ${options.repoName}`));
 
-        // Step 3: Find repo root
-        spinner.start('Locating repository root...');
-        const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
-        spinner.succeed(chalk.green(`Repository root: ${repoRoot}`));
+        // Step 3: Find project root
+        spinner.start('Locating project root...');
+        const repoRoot = findProjectRoot();
+        spinner.succeed(chalk.green(`Project root: ${repoRoot}`));
 
         // Step 4: Push source to CodeCommit (using batched CreateCommit API)
         spinner.start('Pushing source code to CodeCommit...');
