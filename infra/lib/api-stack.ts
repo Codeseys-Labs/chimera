@@ -60,6 +60,11 @@ export class ApiStack extends cdk.Stack {
       description: 'Chimera API Gateway for tenant management, skills, agents, and synchronous chat',
       deployOptions: {
         stageName: props.envName,
+        cachingEnabled: isProd,
+        cacheClusterEnabled: isProd,
+        cacheClusterSize: isProd ? '0.5' : undefined,
+        cacheTtl: cdk.Duration.minutes(5),
+        cacheDataEncrypted: true,
         throttlingRateLimit: isProd ? 10000 : 1000,
         throttlingBurstLimit: isProd ? 5000 : 500,
         loggingLevel: apigw.MethodLoggingLevel.INFO,
