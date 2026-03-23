@@ -41,3 +41,28 @@ export {
   type ResourceUsage,
   type ViolationType,
 } from './sandbox-runner';
+
+// Signature Verifier (Stage 4)
+export {
+  SignatureVerifier,
+  type SignatureVerifierConfig,
+  type SignatureVerificationResult,
+  type SignatureVerification,
+  type CertificateValidation,
+  type SignatureMethod,
+  type SignatureTrustLevel,
+  type SkillSignatureMetadata,
+} from './signature-verifier';
+
+// Performance Profiler (Stage 5)
+export {
+  PerformanceProfiler,
+  type PerformanceProfilerConfig,
+  type PerformanceProfilingResult,
+  type TestPerformanceMetrics,
+  type PerformanceViolation,
+  type TokenUsage,
+  type LatencyPercentiles,
+  type MemoryUsage,
+  type TestExecutionContext,
+} from './performance-profiler';
