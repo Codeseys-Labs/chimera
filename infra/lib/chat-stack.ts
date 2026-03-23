@@ -229,10 +229,7 @@ export class ChatStack extends cdk.Stack {
     const httpListener = this.alb.addListener('HttpListener', {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultAction: elbv2.ListenerAction.fixedResponse(200, {
-        contentType: 'text/plain',
-        messageBody: 'Chat gateway is running. Use HTTPS endpoint.',
-      }),
+      defaultAction: elbv2.ListenerAction.forward([this.targetGroup]),
     });
 
     // Placeholder HTTPS listener (certificate will be added via ACM in deployment)
@@ -274,6 +271,7 @@ export class ChatStack extends cdk.Stack {
 
     // Attach target group to service
     this.ecsService.attachToApplicationTargetGroup(this.targetGroup);
+    this.ecsService.node.addDependency(httpListener);
 
     // ======================================================================
     // Auto Scaling
