@@ -21,9 +21,11 @@ phases:
       - bun test --coverage || true
       - cd infra && bunx cdk synth --all && cd ..
       - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
-      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f packages/agents/Dockerfile packages/agents/ || true
-      - docker push $ECR_REPOSITORY:$IMAGE_TAG || true
-      - docker push $ECR_REPOSITORY:latest || true
+      - echo "Building Docker image with tag: $IMAGE_TAG"
+      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f packages/agents/Dockerfile packages/agents/
+      - echo "Pushing Docker image to ECR: $ECR_REPOSITORY:$IMAGE_TAG"
+      - docker push $ECR_REPOSITORY:$IMAGE_TAG
+      - docker push $ECR_REPOSITORY:latest
       - echo "$ECR_REPOSITORY:$IMAGE_TAG" > image-uri.txt
       - export IMAGE_URI="$ECR_REPOSITORY:$IMAGE_TAG"
 
