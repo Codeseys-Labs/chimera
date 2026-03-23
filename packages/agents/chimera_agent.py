@@ -37,6 +37,126 @@ from tools.background_task_tools import (
     start_background_task,
     check_background_task
 )
+# Analytics tools
+from tools.athena_tools import (
+    start_athena_query,
+    get_athena_query_status,
+    get_athena_query_results,
+    stop_athena_query,
+    list_athena_databases
+)
+from tools.glue_tools import (
+    list_glue_databases,
+    list_glue_tables,
+    get_glue_table_schema,
+    start_glue_job,
+    get_glue_job_status
+)
+from tools.redshift_tools import (
+    list_redshift_clusters,
+    create_redshift_cluster,
+    delete_redshift_cluster,
+    pause_redshift_cluster,
+    resume_redshift_cluster,
+    execute_redshift_query,
+    get_redshift_query_results
+)
+# Compute tools
+from tools.codebuild_tools import (
+    create_codebuild_project,
+    start_codebuild_build,
+    get_codebuild_build_details,
+    list_codebuild_builds_for_project,
+    stop_codebuild_build,
+    delete_codebuild_project
+)
+from tools.lambda_tools import (
+    list_lambda_functions,
+    get_lambda_function,
+    invoke_lambda_function,
+    create_lambda_function,
+    update_lambda_function_code,
+    delete_lambda_function
+)
+from tools.stepfunctions_tools import (
+    list_stepfunctions_state_machines,
+    create_stepfunctions_state_machine,
+    describe_stepfunctions_state_machine,
+    start_stepfunctions_execution,
+    describe_stepfunctions_execution,
+    stop_stepfunctions_execution,
+    delete_stepfunctions_state_machine
+)
+# AI/ML tools
+from tools.bedrock_tools import (
+    bedrock_invoke_model,
+    bedrock_invoke_model_stream,
+    bedrock_list_foundation_models,
+    bedrock_get_foundation_model,
+    bedrock_list_inference_profiles
+)
+from tools.rekognition_tools import (
+    rekognition_detect_labels,
+    rekognition_detect_faces,
+    rekognition_detect_text,
+    rekognition_detect_moderation_labels,
+    rekognition_compare_faces
+)
+from tools.sagemaker_tools import (
+    sagemaker_create_model,
+    sagemaker_create_endpoint_config,
+    sagemaker_create_endpoint,
+    sagemaker_describe_endpoint,
+    sagemaker_delete_endpoint,
+    sagemaker_invoke_endpoint
+)
+from tools.textract_tools import (
+    textract_detect_text,
+    textract_analyze_document,
+    textract_start_document_analysis,
+    textract_get_document_analysis
+)
+from tools.transcribe_tools import (
+    transcribe_start_job,
+    transcribe_get_job,
+    transcribe_list_jobs,
+    transcribe_delete_job
+)
+# Monitoring & Databases tools
+from tools.cloudwatch_tools import (
+    put_cloudwatch_metric_data,
+    start_cloudwatch_query,
+    get_cloudwatch_query_results,
+    put_cloudwatch_metric_alarm,
+    describe_cloudwatch_alarms,
+    delete_cloudwatch_alarms
+)
+from tools.opensearch_tools import (
+    describe_opensearch_domains,
+    create_opensearch_domain,
+    delete_opensearch_domain,
+    update_opensearch_domain_config,
+    list_opensearch_domain_names,
+    opensearch_index_document,
+    opensearch_search_documents
+)
+from tools.rds_tools import (
+    describe_rds_db_instances,
+    create_rds_db_instance,
+    delete_rds_db_instance,
+    start_rds_db_instance,
+    stop_rds_db_instance,
+    create_rds_db_snapshot
+)
+from tools.sqs_tools import (
+    create_sqs_queue,
+    send_sqs_message,
+    send_sqs_message_batch,
+    receive_sqs_messages,
+    delete_sqs_message,
+    delete_sqs_queue,
+    purge_sqs_queue
+)
 
 
 # Initialize AgentCore app
@@ -169,17 +289,18 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
     # Phase 1D: AWS tools for all tiers (validation phase)
     # In production, these would be tier-gated
     tools.extend([
+        # Storage & Compute
         list_s3_buckets,
         get_bucket_info,
         list_ec2_instances,
         get_ec2_instance_details,
-        # CodeCommit tools for self-evolution
+        # Self-evolution: Git operations
         list_codecommit_repos,
         get_repo_info,
         git_clone_repo,
         git_commit_push,
         get_commit_history,
-        # CodePipeline tools for CI/CD automation
+        # Self-evolution: CI/CD automation
         list_pipelines,
         get_pipeline_details,
         check_pipeline_status,
@@ -187,6 +308,107 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         get_pipeline_execution_details,
         create_pipeline,
         delete_pipeline,
+        # Analytics: Athena serverless SQL
+        start_athena_query,
+        get_athena_query_status,
+        get_athena_query_results,
+        stop_athena_query,
+        list_athena_databases,
+        # Analytics: Glue ETL
+        list_glue_databases,
+        list_glue_tables,
+        get_glue_table_schema,
+        start_glue_job,
+        get_glue_job_status,
+        # Analytics: Redshift data warehouse
+        list_redshift_clusters,
+        create_redshift_cluster,
+        delete_redshift_cluster,
+        pause_redshift_cluster,
+        resume_redshift_cluster,
+        execute_redshift_query,
+        get_redshift_query_results,
+        # Compute: CodeBuild CI/CD
+        create_codebuild_project,
+        start_codebuild_build,
+        get_codebuild_build_details,
+        list_codebuild_builds_for_project,
+        stop_codebuild_build,
+        delete_codebuild_project,
+        # Compute: Lambda serverless functions
+        list_lambda_functions,
+        get_lambda_function,
+        invoke_lambda_function,
+        create_lambda_function,
+        update_lambda_function_code,
+        delete_lambda_function,
+        # Compute: Step Functions orchestration
+        list_stepfunctions_state_machines,
+        create_stepfunctions_state_machine,
+        describe_stepfunctions_state_machine,
+        start_stepfunctions_execution,
+        describe_stepfunctions_execution,
+        stop_stepfunctions_execution,
+        delete_stepfunctions_state_machine,
+        # AI/ML: Bedrock foundation models
+        bedrock_invoke_model,
+        bedrock_invoke_model_stream,
+        bedrock_list_foundation_models,
+        bedrock_get_foundation_model,
+        bedrock_list_inference_profiles,
+        # AI/ML: Rekognition image/video analysis
+        rekognition_detect_labels,
+        rekognition_detect_faces,
+        rekognition_detect_text,
+        rekognition_detect_moderation_labels,
+        rekognition_compare_faces,
+        # AI/ML: SageMaker model deployment
+        sagemaker_create_model,
+        sagemaker_create_endpoint_config,
+        sagemaker_create_endpoint,
+        sagemaker_describe_endpoint,
+        sagemaker_delete_endpoint,
+        sagemaker_invoke_endpoint,
+        # AI/ML: Textract document extraction
+        textract_detect_text,
+        textract_analyze_document,
+        textract_start_document_analysis,
+        textract_get_document_analysis,
+        # AI/ML: Transcribe speech-to-text
+        transcribe_start_job,
+        transcribe_get_job,
+        transcribe_list_jobs,
+        transcribe_delete_job,
+        # Monitoring: CloudWatch metrics/logs
+        put_cloudwatch_metric_data,
+        start_cloudwatch_query,
+        get_cloudwatch_query_results,
+        put_cloudwatch_metric_alarm,
+        describe_cloudwatch_alarms,
+        delete_cloudwatch_alarms,
+        # Database: OpenSearch full-text search
+        describe_opensearch_domains,
+        create_opensearch_domain,
+        delete_opensearch_domain,
+        update_opensearch_domain_config,
+        list_opensearch_domain_names,
+        opensearch_index_document,
+        opensearch_search_documents,
+        # Database: RDS relational database
+        describe_rds_db_instances,
+        create_rds_db_instance,
+        delete_rds_db_instance,
+        start_rds_db_instance,
+        stop_rds_db_instance,
+        create_rds_db_snapshot,
+        # Messaging: SQS queues
+        create_sqs_queue,
+        send_sqs_message,
+        send_sqs_message_batch,
+        receive_sqs_messages,
+        delete_sqs_message,
+        delete_sqs_queue,
+        purge_sqs_queue,
         # Background task delegation for long-running operations
         start_background_task,
         check_background_task,
