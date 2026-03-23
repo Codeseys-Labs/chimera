@@ -269,5 +269,22 @@
 		"status": "active",
 		"createdAt": "2026-03-22T03:22:55.122Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-2c585f8a",
+		"name": "well-architected-fixes",
+		"memberIssueIds": [
+			"chimera-8cb2",
+			"chimera-d345",
+			"chimera-cc92",
+			"chimera-9349",
+			"chimera-c297",
+			"chimera-89bd",
+			"chimera-d161",
+			"chimera-07a1"
+		],
+		"status": "active",
+		"createdAt": "2026-03-23T19:18:38.444Z",
+		"completedAt": null
 	}
 ]
