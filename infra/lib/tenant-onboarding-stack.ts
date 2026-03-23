@@ -597,10 +597,22 @@ forbid(
       lambdaFunction: this.createTenantRecordFunction,
       resultPath: '$.createTenantResult',
     });
+    createTenantTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const createRoleTask = new tasks.LambdaInvoke(this, 'CreateIAMRoleTask', {
       lambdaFunction: this.createIamRoleFunction,
       resultPath: '$.createRoleResult',
+    });
+    createRoleTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const createGroupTask = new tasks.LambdaInvoke(this, 'CreateCognitoGroupTask', {
@@ -613,20 +625,44 @@ forbid(
         iamRoleArn: sfn.JsonPath.stringAt('$.createRoleResult.Payload.roleArn'),
       }),
     });
+    createGroupTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const initS3Task = new tasks.LambdaInvoke(this, 'InitializeS3PrefixTask', {
       lambdaFunction: this.initializeS3PrefixFunction,
       resultPath: '$.initS3Result',
+    });
+    initS3Task.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const createCedarTask = new tasks.LambdaInvoke(this, 'CreateCedarPoliciesTask', {
       lambdaFunction: this.createCedarPoliciesFunction,
       resultPath: '$.createCedarResult',
     });
+    createCedarTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const initCostTask = new tasks.LambdaInvoke(this, 'InitializeCostTrackingTask', {
       lambdaFunction: this.initializeCostTrackingFunction,
       resultPath: '$.initCostResult',
+    });
+    initCostTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     // Update tenant status to ACTIVE
@@ -645,6 +681,12 @@ forbid(
         ':now': tasks.DynamoAttributeValue.fromString(sfn.JsonPath.stringAt('$$.State.EnteredTime')),
       },
       resultPath: sfn.JsonPath.DISCARD,
+    });
+    updateStatusTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     // Success notification

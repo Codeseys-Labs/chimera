@@ -9,6 +9,7 @@ import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Construct } from 'constructs';
 
 export interface OrchestrationStackProps extends cdk.StackProps {
@@ -126,6 +127,39 @@ export class OrchestrationStack extends cdk.Stack {
         queue: messageDlq,
         maxReceiveCount: 3,
       },
+    });
+
+    // ======================================================================
+    // CloudWatch Alarms: Circuit Breakers for DLQs
+    // Alerts when messages accumulate in DLQs, indicating systemic failures.
+    // ======================================================================
+
+    // Alarm for Task DLQ: trigger when >5 messages in 5 minutes
+    const taskDlqAlarm = new cloudwatch.Alarm(this, 'TaskDLQAlarm', {
+      alarmName: `chimera-task-dlq-alarm-${props.envName}`,
+      alarmDescription: 'Circuit breaker: task DLQ depth exceeds threshold',
+      metric: taskDlq.metricApproximateNumberOfMessagesVisible({
+        statistic: cloudwatch.Stats.AVERAGE,
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 5,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+
+    // Alarm for Message DLQ: trigger when >5 messages in 5 minutes
+    const messageDlqAlarm = new cloudwatch.Alarm(this, 'MessageDLQAlarm', {
+      alarmName: `chimera-message-dlq-alarm-${props.envName}`,
+      alarmDescription: 'Circuit breaker: message DLQ depth exceeds threshold',
+      metric: messageDlq.metricApproximateNumberOfMessagesVisible({
+        statistic: cloudwatch.Stats.AVERAGE,
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 5,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
     // ======================================================================
@@ -460,10 +494,22 @@ def handler(event, context):
       lambdaFunction: startBuildFunction,
       outputPath: '$.Payload',
     });
+    startBuildTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const checkBuildTask = new tasks.LambdaInvoke(this, 'CheckBuildTask', {
       lambdaFunction: checkBuildStatusFunction,
       outputPath: '$.Payload',
+    });
+    checkBuildTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const buildWait = new stepfunctions.Wait(this, 'BuildWait', {
@@ -509,10 +555,22 @@ def handler(event, context):
       lambdaFunction: runDataQueryFunction,
       outputPath: '$.Payload',
     });
+    runQueryTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const checkQueryTask = new tasks.LambdaInvoke(this, 'CheckQueryTask', {
       lambdaFunction: checkQueryStatusFunction,
       outputPath: '$.Payload',
+    });
+    checkQueryTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const queryWait = new stepfunctions.Wait(this, 'QueryWait', {
@@ -558,10 +616,22 @@ def handler(event, context):
       lambdaFunction: executeBackgroundTaskFunction,
       outputPath: '$.Payload',
     });
+    executeTaskStep.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const checkTaskStep = new tasks.LambdaInvoke(this, 'CheckBackgroundTaskStep', {
       lambdaFunction: checkBackgroundTaskStatusFunction,
       outputPath: '$.Payload',
+    });
+    checkTaskStep.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const taskWait = new stepfunctions.Wait(this, 'BackgroundTaskWait', {
