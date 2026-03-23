@@ -3,11 +3,14 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as dax from 'aws-cdk-lib/aws-dax';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
 export interface DataStackProps extends cdk.StackProps {
   envName: string;
   vpc: ec2.IVpc;
+  ecsSecurityGroup: ec2.ISecurityGroup;
 }
 
 /**
@@ -27,6 +30,8 @@ export class DataStack extends cdk.Stack {
   public readonly tenantBucket: s3.Bucket;
   public readonly skillsBucket: s3.Bucket;
   public readonly artifactsBucket: s3.Bucket;
+  public readonly daxCluster: dax.CfnCluster;
+  public readonly daxSecurityGroup: ec2.SecurityGroup;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -197,6 +202,69 @@ export class DataStack extends cdk.Stack {
     });
 
     // ======================================================================
+    // DAX Cluster (DynamoDB Accelerator)
+    // In-memory cache for DynamoDB reads. 40-60% cost reduction for read-heavy workloads.
+    // Environment-aware sizing: 1 node dev (dax.t3.small) / 3 nodes prod (dax.r5.large)
+    // ======================================================================
+
+    // DAX Security Group - allow inbound on port 8111 from ECS tasks
+    this.daxSecurityGroup = new ec2.SecurityGroup(this, 'DaxSecurityGroup', {
+      vpc: props.vpc,
+      description: 'Security group for DAX cluster (DynamoDB Accelerator)',
+      allowAllOutbound: true,
+    });
+    this.daxSecurityGroup.addIngressRule(
+      props.ecsSecurityGroup,
+      ec2.Port.tcp(8111),
+      'Allow DAX access from ECS tasks'
+    );
+
+    // DAX Subnet Group - use isolated subnets (no internet access needed)
+    const daxSubnetGroup = new dax.CfnSubnetGroup(this, 'DaxSubnetGroup', {
+      subnetGroupName: `chimera-dax-${props.envName}`,
+      description: 'Subnet group for Chimera DAX cluster',
+      subnetIds: props.vpc.isolatedSubnets.map(subnet => subnet.subnetId),
+    });
+
+    // IAM Role for DAX - grant permissions to access all 6 DynamoDB tables
+    const daxRole = new iam.Role(this, 'DaxRole', {
+      assumedBy: new iam.ServicePrincipal('dax.amazonaws.com'),
+      description: 'IAM role for DAX cluster to access DynamoDB tables',
+    });
+
+    // Grant DAX read/write access to all tables
+    const allTables = [
+      this.tenantsTable,
+      this.sessionsTable,
+      this.skillsTable,
+      this.rateLimitsTable,
+      this.costTrackingTable,
+      this.auditTable,
+    ];
+    for (const table of allTables) {
+      table.grantReadWriteData(daxRole);
+    }
+
+    // DAX Cluster - environment-aware sizing
+    const daxNodeCount = isProd ? 3 : 1;
+    const daxNodeType = isProd ? 'dax.r5.large' : 'dax.t3.small';
+
+    this.daxCluster = new dax.CfnCluster(this, 'DaxCluster', {
+      clusterName: `chimera-dax-${props.envName}`,
+      description: 'DynamoDB Accelerator cluster for Chimera read operations',
+      iamRoleArn: daxRole.roleArn,
+      nodeType: daxNodeType,
+      replicationFactor: daxNodeCount,
+      subnetGroupName: daxSubnetGroup.subnetGroupName,
+      securityGroupIds: [this.daxSecurityGroup.securityGroupId],
+      // SSE encryption at rest (AWS-managed key)
+      sseSpecification: {
+        sseEnabled: true,
+      },
+    });
+    this.daxCluster.addDependency(daxSubnetGroup);
+
+    // ======================================================================
     // S3 Bucket 1: Tenant Data
     // Memory snapshots, agent outputs, cron outputs, documents.
     // Prefix: tenants/{tenantId}/...
@@ -315,6 +383,13 @@ export class DataStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AuditKeyArn', {
       value: auditKey.keyArn,
       exportName: `${this.stackName}-AuditKeyArn`,
+    });
+
+    // DAX Cluster endpoint for application configuration
+    new cdk.CfnOutput(this, 'DaxClusterEndpoint', {
+      value: this.daxCluster.attrClusterDiscoveryEndpointUrl,
+      exportName: `${this.stackName}-DaxClusterEndpoint`,
+      description: 'DAX cluster discovery endpoint for DynamoDB read caching',
     });
   }
 }
