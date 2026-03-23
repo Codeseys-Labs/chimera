@@ -9,6 +9,7 @@
     "watch": "tsc -w",
     "test": "jest",
     "lint": "eslint src",
+    "format": "prettier --write .",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

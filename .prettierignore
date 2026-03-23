@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+bun.lockb
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+cdk.out/
+
+# Coverage
+coverage/
+
+# Generated files
+*.d.ts.map
+*.js.map
+
+# Overstory
+.overstory/
+
+# Mulch
+.mulch/
+
+# Seeds
+.seeds/
+
+# Canopy
+.canopy/
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Package lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

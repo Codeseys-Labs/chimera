@@ -19,6 +19,7 @@
     "compile:all": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:darwin-x64 && bun run compile:darwin-arm64 && bun run compile:windows-x64",
     "test": "jest",
     "lint": "eslint src",
+    "format": "prettier --write .",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
