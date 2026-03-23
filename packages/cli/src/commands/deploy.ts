@@ -296,6 +296,7 @@ async function pushToCodeCommit(
 /**
  * Deploy CDK stacks via bootstrap script
  * Note: Validates bootstrap script exists, passes validated args
+ * Passes --yes flag to auto-confirm prompts for non-interactive execution
  */
 function deployCdkStacks(repoRoot: string, region: string, environment: string): void {
   const bootstrapScript = path.join(repoRoot, 'scripts', 'bootstrap.sh');
@@ -308,7 +309,8 @@ function deployCdkStacks(repoRoot: string, region: string, environment: string):
   const safeEnv = environment.replace(/[^a-zA-Z0-9-]/g, '');
   const safeRegion = region.replace(/[^a-z0-9-]/g, '');
 
-  execSync(`bash "${bootstrapScript}" "${safeEnv}" "${safeRegion}"`, {
+  // Pass --yes flag to auto-confirm prompts for non-interactive execution
+  execSync(`bash "${bootstrapScript}" "${safeEnv}" "${safeRegion}" --yes`, {
     cwd: repoRoot,
     stdio: 'inherit',
   });
