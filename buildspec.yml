@@ -29,7 +29,7 @@ phases:
 
   post_build:
     commands:
-      - cd infra && bunx cdk deploy --all --require-approval never --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..
+      - cd infra && bunx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..
 
 artifacts:
   files:
