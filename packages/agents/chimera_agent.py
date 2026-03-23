@@ -58,8 +58,7 @@ from tools.redshift_tools import (
     delete_redshift_cluster,
     pause_redshift_cluster,
     resume_redshift_cluster,
-    execute_redshift_query,
-    get_redshift_query_results
+    modify_redshift_cluster
 )
 # Compute tools
 from tools.codebuild_tools import (
@@ -108,7 +107,7 @@ from tools.sagemaker_tools import (
     sagemaker_create_endpoint,
     sagemaker_describe_endpoint,
     sagemaker_delete_endpoint,
-    sagemaker_invoke_endpoint
+    sagemaker_list_endpoints
 )
 from tools.textract_tools import (
     textract_detect_text,
@@ -128,8 +127,7 @@ from tools.cloudwatch_tools import (
     start_cloudwatch_query,
     get_cloudwatch_query_results,
     put_cloudwatch_metric_alarm,
-    describe_cloudwatch_alarms,
-    delete_cloudwatch_alarms
+    describe_cloudwatch_alarms
 )
 from tools.opensearch_tools import (
     describe_opensearch_domains,
@@ -137,8 +135,7 @@ from tools.opensearch_tools import (
     delete_opensearch_domain,
     update_opensearch_domain_config,
     list_opensearch_domain_names,
-    opensearch_index_document,
-    opensearch_search_documents
+    get_opensearch_compatible_versions
 )
 from tools.rds_tools import (
     describe_rds_db_instances,
@@ -146,7 +143,7 @@ from tools.rds_tools import (
     delete_rds_db_instance,
     start_rds_db_instance,
     stop_rds_db_instance,
-    create_rds_db_snapshot
+    modify_rds_db_instance
 )
 from tools.sqs_tools import (
     create_sqs_queue,
@@ -155,7 +152,8 @@ from tools.sqs_tools import (
     receive_sqs_messages,
     delete_sqs_message,
     delete_sqs_queue,
-    purge_sqs_queue
+    get_sqs_queue_attributes,
+    list_sqs_queues
 )
 
 
@@ -326,8 +324,7 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         delete_redshift_cluster,
         pause_redshift_cluster,
         resume_redshift_cluster,
-        execute_redshift_query,
-        get_redshift_query_results,
+        modify_redshift_cluster,
         # Compute: CodeBuild CI/CD
         create_codebuild_project,
         start_codebuild_build,
@@ -368,7 +365,7 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         sagemaker_create_endpoint,
         sagemaker_describe_endpoint,
         sagemaker_delete_endpoint,
-        sagemaker_invoke_endpoint,
+        sagemaker_list_endpoints,
         # AI/ML: Textract document extraction
         textract_detect_text,
         textract_analyze_document,
@@ -385,22 +382,20 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         get_cloudwatch_query_results,
         put_cloudwatch_metric_alarm,
         describe_cloudwatch_alarms,
-        delete_cloudwatch_alarms,
         # Database: OpenSearch full-text search
         describe_opensearch_domains,
         create_opensearch_domain,
         delete_opensearch_domain,
         update_opensearch_domain_config,
         list_opensearch_domain_names,
-        opensearch_index_document,
-        opensearch_search_documents,
+        get_opensearch_compatible_versions,
         # Database: RDS relational database
         describe_rds_db_instances,
         create_rds_db_instance,
         delete_rds_db_instance,
         start_rds_db_instance,
         stop_rds_db_instance,
-        create_rds_db_snapshot,
+        modify_rds_db_instance,
         # Messaging: SQS queues
         create_sqs_queue,
         send_sqs_message,
@@ -408,7 +403,8 @@ def load_tenant_tools(tenant_id: str, tier: str, config: Dict[str, Any]) -> list
         receive_sqs_messages,
         delete_sqs_message,
         delete_sqs_queue,
-        purge_sqs_queue,
+        get_sqs_queue_attributes,
+        list_sqs_queues,
         # Background task delegation for long-running operations
         start_background_task,
         check_background_task,
