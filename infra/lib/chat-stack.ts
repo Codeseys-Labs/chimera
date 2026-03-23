@@ -2,6 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -42,6 +44,7 @@ export class ChatStack extends cdk.Stack {
   public readonly ecsService: ecs.FargateService;
   public readonly taskDefinition: ecs.FargateTaskDefinition;
   public readonly targetGroup: elbv2.ApplicationTargetGroup;
+  public readonly distribution: cloudfront.Distribution;
 
   constructor(scope: Construct, id: string, props: ChatStackProps) {
     super(scope, id, props);
@@ -296,6 +299,63 @@ export class ChatStack extends cdk.Stack {
     });
 
     // ======================================================================
+    // CloudFront Distribution
+    // CDN layer for chat gateway with edge caching
+    // - Default behavior: no-cache (dynamic chat endpoints)
+    // - Static assets: 24h cache for JS/CSS/images
+    // - ALL_VIEWER origin request policy: forwards all headers/cookies/query strings
+    // ======================================================================
+    this.distribution = new cloudfront.Distribution(this, 'ChatDistribution', {
+      comment: `Chimera Chat Gateway CDN (${props.envName})`,
+      defaultBehavior: {
+        origin: new origins.LoadBalancerV2Origin(this.alb, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+          httpPort: 80,
+        }),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        cachedMethods: cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+        compress: true,
+        // No caching for dynamic chat endpoints (SSE streaming, real-time responses)
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        // ALL_VIEWER: forwards all headers, cookies, query strings to origin
+        // Required for: Authorization headers, session cookies, platform user IDs
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+      },
+      additionalBehaviors: {
+        // Static assets: JS bundles, CSS, images (24h cache)
+        '/static/*': {
+          origin: new origins.LoadBalancerV2Origin(this.alb, {
+            protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+            httpPort: 80,
+          }),
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+          cachedMethods: cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+          compress: true,
+          cachePolicy: new cloudfront.CachePolicy(this, 'StaticAssetCachePolicy', {
+            cachePolicyName: `chimera-static-${props.envName}`,
+            comment: '24h cache for static assets (JS, CSS, images)',
+            defaultTtl: cdk.Duration.hours(24),
+            minTtl: cdk.Duration.hours(1),
+            maxTtl: cdk.Duration.days(7),
+            enableAcceptEncodingGzip: true,
+            enableAcceptEncodingBrotli: true,
+            headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+            queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+            cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+          }),
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        },
+      },
+      priceClass: isProd
+        ? cloudfront.PriceClass.PRICE_CLASS_ALL
+        : cloudfront.PriceClass.PRICE_CLASS_100,
+      enableLogging: true,
+      logBucket: undefined, // Will be configured with S3 bucket in deployment
+    });
+
+    // ======================================================================
     // Stack Outputs
     // ======================================================================
     new cdk.CfnOutput(this, 'AlbDnsName', {
@@ -338,6 +398,18 @@ export class ChatStack extends cdk.Stack {
       value: this.targetGroup.targetGroupArn,
       exportName: `${this.stackName}-TargetGroupArn`,
       description: 'Target group ARN',
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDomain', {
+      value: this.distribution.distributionDomainName,
+      exportName: `${this.stackName}-CloudFrontDomain`,
+      description: 'CloudFront distribution domain name',
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
+      value: this.distribution.distributionId,
+      exportName: `${this.stackName}-CloudFrontDistributionId`,
+      description: 'CloudFront distribution ID',
     });
   }
 }
