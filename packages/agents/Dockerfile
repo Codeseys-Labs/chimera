@@ -2,14 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and uv
 RUN apt-get update && apt-get install -y \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Add uv to PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Copy project files
+COPY pyproject.toml .
+COPY .python-version .
+COPY uv.lock* ./
+
+# Install dependencies with uv
+RUN uv sync --frozen --no-dev
 
 # Copy agent code
 COPY chimera_agent.py .
