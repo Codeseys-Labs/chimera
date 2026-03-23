@@ -12,8 +12,109 @@ import {
   CodeCommitClient,
   CreateRepositoryCommand,
   GetRepositoryCommand,
+  CreateCommitCommand,
+  GetBranchCommand,
+  PutFileEntry,
 } from '@aws-sdk/client-codecommit';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
+
+// CodeCommit batch limits
+const BATCH_MAX_BYTES = 5 * 1024 * 1024; // 5MB per commit (leave 1MB buffer from 6MB limit)
+const BATCH_MAX_FILES = 100; // Max files per commit
+const EXCLUDED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.overstory',
+  '.seeds',
+  '.mulch',
+  '.canopy',
+  'dist',
+  'build',
+  'coverage',
+  '.turbo',
+]);
+const EXCLUDED_PATTERNS = [
+  /\.DS_Store$/,
+  /\.log$/,
+  /\.env$/,
+  /\.env\.local$/,
+  /^\..*\.swp$/,
+  /~$/,
+];
+
+/**
+ * Recursively collect files from directory, excluding specific paths
+ */
+function collectFiles(
+  dirPath: string,
+  repoRoot: string,
+  files: Array<{ path: string; fullPath: string }> = [],
+): Array<{ path: string; fullPath: string }> {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    const relativePath = path.relative(repoRoot, fullPath);
+
+    // Skip excluded directories
+    const pathParts = relativePath.split(path.sep);
+    if (pathParts.some((part) => EXCLUDED_DIRS.has(part))) {
+      continue;
+    }
+
+    // Skip excluded patterns
+    if (EXCLUDED_PATTERNS.some((pattern) => pattern.test(entry.name))) {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      collectFiles(fullPath, repoRoot, files);
+    } else {
+      files.push({ path: relativePath, fullPath });
+    }
+  }
+
+  return files;
+}
+
+/**
+ * Batch files into groups under BATCH_MAX_BYTES and BATCH_MAX_FILES limits
+ * Note: File content is base64-encoded, so we track encoded size
+ */
+function batchFiles(
+  files: Array<{ path: string; fullPath: string }>,
+): Array<Array<{ path: string; content: Buffer }>> {
+  const batches: Array<Array<{ path: string; content: Buffer }>> = [];
+  let currentBatch: Array<{ path: string; content: Buffer }> = [];
+  let currentBatchSize = 0;
+
+  for (const file of files) {
+    const content = fs.readFileSync(file.fullPath);
+    // Base64 encoding increases size by ~33%
+    const encodedSize = Math.ceil((content.length * 4) / 3);
+
+    // Start new batch if current would exceed limits
+    if (
+      currentBatch.length > 0 &&
+      (currentBatch.length >= BATCH_MAX_FILES ||
+        currentBatchSize + encodedSize > BATCH_MAX_BYTES)
+    ) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchSize = 0;
+    }
+
+    currentBatch.push({ path: file.path, content });
+    currentBatchSize += encodedSize;
+  }
+
+  // Add final batch
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
 
 /**
  * Get AWS account ID from STS
@@ -57,76 +158,83 @@ async function ensureCodeCommitRepo(
 }
 
 /**
- * Push local repository to CodeCommit using git with credential helper
- * Handles large repos (>6MB) by using standard git push with temporary credential config
- * Note: Configures credential helper, pushes, then cleans up config
+ * Push local repository to CodeCommit using batched CreateCommit API calls
+ * Handles large repos (>6MB) by splitting into multiple commits under 5MB each
+ * Pure AWS SDK approach - no git remote, credential helper, or pip dependencies
+ * Works with any AWS credential type: IAM roles, assumed roles, SSO, etc.
  */
 async function pushToCodeCommit(
   client: CodeCommitClient,
   repoName: string,
   repoRoot: string,
-  region: string,
+  branchName: string = 'main',
 ): Promise<void> {
-  // Validate inputs to prevent injection (defense in depth)
-  const safeRepoName = repoName.replace(/[^a-zA-Z0-9._-]/g, '');
-  const safeRegion = region.replace(/[^a-z0-9-]/g, '');
+  // Step 1: Collect all files from repo root
+  console.log(chalk.gray('  Scanning repository files...'));
+  const allFiles = collectFiles(repoRoot, repoRoot);
+  console.log(chalk.gray(`  Found ${allFiles.length} files`));
 
-  if (safeRepoName !== repoName || safeRegion !== region) {
-    throw new Error('Invalid repository name or region format');
-  }
+  // Step 2: Batch files into groups under size/count limits
+  const batches = batchFiles(allFiles);
+  console.log(chalk.gray(`  Organized into ${batches.length} commit batch(es)`));
 
-  const execOptions = { cwd: repoRoot, encoding: 'utf8' as const, stdio: 'pipe' as const, env: { ...process.env } };
-  const remoteName = 'codecommit-deploy';
-  const cloneUrl = `https://git-codecommit.${safeRegion}.amazonaws.com/v1/repos/${safeRepoName}`;
-
-  // Initialize git repo if needed
-  if (!fs.existsSync(path.join(repoRoot, '.git'))) {
-    execSync('git init', execOptions);
-    execSync('git add .', execOptions);
-    execSync('git commit -m "Initial Chimera deployment"', execOptions);
-  }
-
+  // Step 3: Check if branch exists, get parent commit ID if it does
+  let parentCommitId: string | undefined;
   try {
-    // Configure git credential helper for CodeCommit (temporary)
-    execSync(
-      `git config --local credential.helper '!aws codecommit credential-helper $@'`,
-      execOptions
+    const getBranchResult = await client.send(
+      new GetBranchCommand({
+        repositoryName: repoName,
+        branchName,
+      }),
     );
-    execSync(`git config --local credential.UseHttpPath true`, execOptions);
-
-    // Add remote (remove first if exists)
-    try {
-      execSync(`git remote remove ${remoteName}`, execOptions);
-    } catch {
-      // Remote doesn't exist, that's fine
-    }
-    execSync(`git remote add ${remoteName} ${cloneUrl}`, execOptions);
-
-    // Push to CodeCommit
-    execSync(`git push ${remoteName} HEAD:main --force`, {
-      ...execOptions,
-      stdio: 'inherit', // Show progress
-    });
-
-    console.log(); // Add newline after git output
-  } finally {
-    // Clean up: remove credential helper config and remote
-    try {
-      execSync(`git config --local --unset credential.helper`, execOptions);
-    } catch {
-      // Config might not exist
-    }
-    try {
-      execSync(`git config --local --unset credential.UseHttpPath`, execOptions);
-    } catch {
-      // Config might not exist
-    }
-    try {
-      execSync(`git remote remove ${remoteName}`, execOptions);
-    } catch {
-      // Remote might not exist
+    parentCommitId = getBranchResult.branch?.commitId;
+    console.log(chalk.gray(`  Branch '${branchName}' exists, will update`));
+  } catch (error: any) {
+    if (error.name === 'BranchDoesNotExistException') {
+      console.log(chalk.gray(`  Branch '${branchName}' does not exist, will create`));
+    } else {
+      throw error;
     }
   }
+
+  // Step 4: Create commits in sequence, chaining parentCommitId
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const batchNum = i + 1;
+    const commitMessage =
+      batches.length === 1
+        ? 'Deploy Chimera to AWS'
+        : `Deploy Chimera to AWS (batch ${batchNum}/${batches.length})`;
+
+    console.log(
+      chalk.gray(`  Creating commit ${batchNum}/${batches.length} (${batch.length} files)...`),
+    );
+
+    // Build putFiles array from batch
+    const putFiles: PutFileEntry[] = batch.map((file) => ({
+      filePath: file.path,
+      fileMode: 'NORMAL',
+      fileContent: file.content,
+    }));
+
+    // Create commit
+    const createCommitResult = await client.send(
+      new CreateCommitCommand({
+        repositoryName: repoName,
+        branchName,
+        parentCommitId, // undefined for first commit on new branch
+        commitMessage,
+        authorName: 'Chimera CLI',
+        email: 'deploy@chimera.aws',
+        putFiles,
+      }),
+    );
+
+    // Update parent for next commit
+    parentCommitId = createCommitResult.commitId;
+  }
+
+  console.log(chalk.gray(`  All commits created successfully`));
 }
 
 /**
@@ -177,9 +285,9 @@ export function registerDeployCommands(program: Command): void {
         const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
         spinner.succeed(chalk.green(`Repository root: ${repoRoot}`));
 
-        // Step 4: Push source to CodeCommit (using git credential helper)
+        // Step 4: Push source to CodeCommit (using batched CreateCommit API)
         spinner.start('Pushing source code to CodeCommit...');
-        await pushToCodeCommit(codecommitClient, options.repoName, repoRoot, options.region);
+        await pushToCodeCommit(codecommitClient, options.repoName, repoRoot, 'main');
         spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
 
         // Step 5: Deploy CDK stacks
