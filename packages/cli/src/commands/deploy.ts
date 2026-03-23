@@ -294,26 +294,23 @@ async function pushToCodeCommit(
 }
 
 /**
- * Deploy CDK stacks via bootstrap script
- * Note: Validates bootstrap script exists, passes validated args
- * Passes --yes flag to auto-confirm prompts for non-interactive execution
+ * Deploy only the Pipeline CDK stack — CodePipeline buildspec deploys the rest
+ * Note: CLI deploys Pipeline stack, which watches CodeCommit and auto-deploys all other stacks
  */
 function deployCdkStacks(repoRoot: string, region: string, environment: string): void {
-  const bootstrapScript = path.join(repoRoot, 'scripts', 'bootstrap.sh');
-
-  if (!fs.existsSync(bootstrapScript)) {
-    throw new Error('Bootstrap script not found at scripts/bootstrap.sh');
-  }
-
   // Validate inputs to prevent injection
   const safeEnv = environment.replace(/[^a-zA-Z0-9-]/g, '');
   const safeRegion = region.replace(/[^a-z0-9-]/g, '');
 
-  // Pass --yes flag to auto-confirm prompts for non-interactive execution
-  execSync(`bash "${bootstrapScript}" "${safeEnv}" "${safeRegion}" --yes`, {
-    cwd: repoRoot,
-    stdio: 'inherit',
-  });
+  // Deploy only the Pipeline stack — CodePipeline buildspec deploys the rest
+  // Pass correct context key 'environment' (not 'envName') to match chimera.ts
+  execSync(
+    `cd infra && bunx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`,
+    {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    }
+  );
 }
 
 export function registerDeployCommands(program: Command): void {
