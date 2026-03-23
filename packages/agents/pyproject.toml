@@ -27,5 +27,5 @@ build-backend = "hatchling.build"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-[tool.uv]
-dev-dependencies = []
+[dependency-groups]
+dev = []
