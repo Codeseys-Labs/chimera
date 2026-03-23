@@ -286,5 +286,19 @@
 		"status": "active",
 		"createdAt": "2026-03-23T19:18:38.444Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-2bb91548",
+		"name": "final-polish-batch",
+		"memberIssueIds": [
+			"chimera-5b3b",
+			"chimera-6141",
+			"chimera-1068",
+			"chimera-1cb2",
+			"chimera-17cb"
+		],
+		"status": "active",
+		"createdAt": "2026-03-23T22:23:43.361Z",
+		"completedAt": null
 	}
 ]
