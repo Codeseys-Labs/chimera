@@ -7,6 +7,7 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import { Construct } from 'constructs';
 
 export interface ChatStackProps extends cdk.StackProps {
@@ -17,6 +18,7 @@ export interface ChatStackProps extends cdk.StackProps {
   tenantsTable: dynamodb.ITable;
   sessionsTable: dynamodb.ITable;
   skillsTable: dynamodb.ITable;
+  ecrRepository?: ecr.IRepository;
 }
 
 /**
@@ -140,11 +142,15 @@ export class ChatStack extends cdk.Stack {
     // Port: 8080 (Express/Fastify)
     // Environment variables for runtime configuration
     // ======================================================================
+    const containerImage = props.ecrRepository
+      ? ecs.ContainerImage.fromEcrRepository(props.ecrRepository, 'latest')
+      : ecs.ContainerImage.fromRegistry('public.ecr.aws/docker/library/node:20-alpine');
+
     const container = this.taskDefinition.addContainer('ChatGatewayContainer', {
       containerName: 'chat-gateway',
-      // Image will be built and pushed by CI/CD pipeline
-      // Placeholder: public.ecr.aws/docker/library/node:20-alpine (replace in deployment)
-      image: ecs.ContainerImage.fromRegistry('public.ecr.aws/docker/library/node:20-alpine'),
+      // Image from ECR repository (built by CI/CD pipeline)
+      // Falls back to placeholder if ECR repository not provided
+      image: containerImage,
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: 'chat-gateway',
         logGroup: taskLogGroup,
