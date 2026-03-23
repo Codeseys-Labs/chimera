@@ -165,12 +165,21 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
+<<<<<<< HEAD
 - **Agent Name:** builder-model-router
 - **Task ID:** chimera-6141
 - **Spec:** No spec file provided
 - **Branch:** overstory/builder-model-router/chimera-6141
 - **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-model-router
 - **Parent:** lead-model-enhance
+=======
+- **Agent Name:** builder-cdk-integration
+- **Task ID:** chimera-5b3b
+- **Spec:** No spec file provided
+- **Branch:** overstory/builder-cdk-integration/chimera-5b3b
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration
+- **Parent:** lead-skill-stages
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,26 +190,42 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
+<<<<<<< HEAD
 Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-model-router`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
 - Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-model-router`
+=======
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
+
+**CRITICAL**: All file operations MUST use paths within this directory.
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
+<<<<<<< HEAD
 These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-model-router`
+=======
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
+<<<<<<< HEAD
 - `packages/core/src/evolution/model-router.ts`
 - `packages/core/src/evolution/types.ts`
 - `packages/shared/src/types/tenant.ts`
 - `packages/core/src/tenant/tenant-service.ts`
 - `tests/unit/evolution/model-router.test.ts`
+=======
+- `infra/lib/skill-pipeline-stack.ts`
+- `packages/core/src/skills/scanners/index.ts`
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 
 ## Expertise
 
@@ -214,6 +239,7 @@ ml prime typescript
 
 ## Communication
 
+<<<<<<< HEAD
 Use `ov mail` for all communication. Your address is **builder-model-router**.
 
 ```bash
@@ -234,6 +260,28 @@ ov mail send --to lead-model-enhance --subject "done" \
 
 # Reply to a message
 ov mail reply <message-id> --body "Your reply" --agent builder-model-router
+=======
+Use `ov mail` for all communication. Your address is **builder-cdk-integration**.
+
+```bash
+# Check your inbox (do this regularly)
+ov mail check --agent builder-cdk-integration
+
+# Send a status update to your parent
+ov mail send --to lead-skill-stages --subject "status" \
+  --body "Progress update here" --type status --agent builder-cdk-integration
+
+# Ask a question
+ov mail send --to lead-skill-stages --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-cdk-integration
+
+# Report completion
+ov mail send --to lead-skill-stages --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-cdk-integration
+
+# Reply to a message
+ov mail reply <message-id> --body "Your reply" --agent builder-cdk-integration
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 ```
 
 ## Spawning Sub-Workers
@@ -247,20 +295,34 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
+<<<<<<< HEAD
 4. **Commit:** all changes committed to your branch (overstory/builder-model-router/chimera-6141)
 5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-model-router` — capture insights from your work
 6. **Signal completion:** send `worker_done` mail to lead-model-enhance: `ov mail send --to lead-model-enhance --subject "Worker done: chimera-6141" --body "Quality gates passed." --type worker_done --agent builder-model-router`
 7. **Close issue:** `sd close chimera-6141 --reason "summary of changes"`
+=======
+4. **Commit:** all changes committed to your branch (overstory/builder-cdk-integration/chimera-5b3b)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-cdk-integration` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-skill-stages: `ov mail send --to lead-skill-stages --subject "Worker done: chimera-5b3b" --body "Quality gates passed." --type worker_done --agent builder-cdk-integration`
+7. **Close issue:** `sd close chimera-5b3b --reason "summary of changes"`
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
+<<<<<<< HEAD
 - **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-model-router`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
 - Commit only to your branch: overstory/builder-model-router/chimera-6141
+=======
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
+- NEVER write to the canonical repo root — all writes go to your worktree copy
+- Only modify files in your File Scope
+- Commit only to your branch: overstory/builder-cdk-integration/chimera-5b3b
+>>>>>>> overstory/builder-cdk-integration/chimera-5b3b
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
