@@ -21,10 +21,10 @@ export interface SkillPipelineStackProps extends cdk.StackProps {
  * 1. Static Analysis (AST pattern detection)
  * 2. Dependency Audit (OSV database checks)
  * 3. Sandbox Run (isolated test execution)
- * 4. Permission Validation (declared vs actual permissions)
- * 5. Cryptographic Signing (Ed25519 dual-signature)
- * 6. Runtime Monitoring Configuration (anomaly detection setup)
- * 7. Community Reporting (post-publication monitoring)
+ * 4. Signature Verification (GPG/Sigstore check on skill packages)
+ * 5. Performance Testing (token cost, latency, memory usage)
+ * 6. Manual Review (approval queue with admin notification)
+ * 7. Skill Deployment (publish to DynamoDB registry + S3)
  *
  * Reference: docs/research/architecture-reviews/Chimera-Skill-Ecosystem-Design.md § 4.2
  */
@@ -152,97 +152,151 @@ def handler(event, context):
       memorySize: 1024,
     });
 
-    // Stage 4: Permission Validation
-    const permissionValidationFunction = new lambda.Function(this, 'PermissionValidationFunction', {
-      functionName: `chimera-skill-permission-validation-${props.envName}`,
-      runtime: lambda.Runtime.PYTHON_3_12,
+    // Stage 4: Signature Verification
+    // Implementation: packages/core/src/skills/scanners/signature-verifier.ts
+    const signatureVerificationFunction = new lambda.Function(this, 'SignatureVerificationFunction', {
+      functionName: `chimera-skill-signature-verification-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-def handler(event, context):
-    """
-    Permission validation: Compare declared vs actual permissions.
+// Signature verification: GPG/Sigstore check on skill packages
+// Production implementation in: packages/core/src/skills/scanners/signature-verifier.ts
 
-    Ensures actual permissions are a subset of declared permissions.
-    """
-    # TODO: Implement actual permission validation
-    return {
-        'permission_result': 'PASS',
-        'violations': [],
-        'unused_permissions': []
-    }
+exports.handler = async (event) => {
+  // TODO: Import and use SignatureVerifier from @chimera/core
+  // const { SignatureVerifier } = require('@chimera/core/skills/scanners');
+  // const verifier = new SignatureVerifier({ verifyPlatformSignature: true });
+  // const result = await verifier.verifySkillBundle(event.skillBundle, event.signatures);
+
+  return {
+    signature_result: 'PASS',
+    authorSignature: { valid: true, signer: 'placeholder@example.com', trustLevel: 'trusted', method: 'ed25519' },
+    platformSignature: { valid: true, signer: 'platform@chimera.aws', trustLevel: 'trusted', method: 'ed25519' },
+    bundleHash: 'placeholder_sha256',
+  };
+};
+`),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 512,
+      environment: {
+        SKILLS_TABLE: props.skillsTable.tableName,
+        SKILLS_BUCKET: props.skillsBucket.bucketName,
+      },
+    });
+
+    // Stage 5: Performance Testing
+    // Implementation: packages/core/src/skills/scanners/performance-profiler.ts
+    const performanceTestingFunction = new lambda.Function(this, 'PerformanceTestingFunction', {
+      functionName: `chimera-skill-performance-testing-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+// Performance testing: Measure token cost, latency, memory usage in sandbox
+// Production implementation in: packages/core/src/skills/scanners/performance-profiler.ts
+
+exports.handler = async (event) => {
+  // TODO: Import and use PerformanceProfiler from @chimera/core
+  // const { PerformanceProfiler } = require('@chimera/core/skills/scanners');
+  // const profiler = new PerformanceProfiler({ maxTokensPerExecution: 10000, maxLatencyMs: 5000 });
+  // const result = await profiler.profileSkill(event.skillBundle, event.tests);
+
+  return {
+    performance_result: 'PASS',
+    testMetrics: [
+      { testName: 'placeholder', passed: true, tokenUsage: { input: 100, output: 50, total: 150 }, latencyMs: 250, memoryMb: 128 }
+    ],
+    violations: [],
+    aggregateMetrics: { totalTokens: 150, avgLatencyMs: 250, peakMemoryMb: 128 },
+  };
+};
+`),
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 1024,
+      environment: {
+        SKILLS_TABLE: props.skillsTable.tableName,
+        SKILLS_BUCKET: props.skillsBucket.bucketName,
+      },
+    });
+
+    // Stage 6: Manual Review
+    // Implementation: packages/core/src/skills/scanners/manual-review.ts
+    const manualReviewFunction = new lambda.Function(this, 'ManualReviewFunction', {
+      functionName: `chimera-skill-manual-review-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+// Manual review: Approval queue with admin UI notification
+// Production implementation in: packages/core/src/skills/scanners/manual-review.ts
+
+exports.handler = async (event) => {
+  // TODO: Import and use ManualReviewScanner from @chimera/core
+  // const { ManualReviewScanner } = require('@chimera/core/skills/scanners');
+  // const scanner = new ManualReviewScanner({ autoApproveThreshold: 0.8 });
+  // const result = await scanner.evaluateSkill(event.skillMetadata, event.scanResults);
+
+  return {
+    review_result: 'PASS',
+    reviewStatus: 'auto_approved',
+    reviewPriority: 'low',
+    criteria: { trustLevel: 'high', hasWarnings: false, requiresManualReview: false },
+    decision: { approved: true, reviewer: 'auto', reviewedAt: new Date().toISOString() },
+  };
+};
 `),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      environment: {
+        SKILLS_TABLE: props.skillsTable.tableName,
+      },
     });
 
-    // Stage 5: Cryptographic Signing
-    const signingFunction = new lambda.Function(this, 'SigningFunction', {
-      functionName: `chimera-skill-signing-service-${props.envName}`,
-      runtime: lambda.Runtime.PYTHON_3_12,
+    // Stage 7: Skill Deployment
+    // Implementation: packages/core/src/skills/scanners/skill-deployer.ts
+    const skillDeploymentFunction = new lambda.Function(this, 'SkillDeploymentFunction', {
+      functionName: `chimera-skill-deployment-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-def handler(event, context):
-    """
-    Cryptographic signing: Generate Ed25519 platform signature.
+// Skill deployment: Publish validated skill to DDB registry + S3
+// Production implementation in: packages/core/src/skills/scanners/skill-deployer.ts
 
-    Dual-signature chain: author signature + platform co-signature.
-    """
-    # TODO: Implement actual Ed25519 signing via AWS KMS
-    return {
-        'platform_signature': 'placeholder_sig',
-        'signed_at': '2026-03-20T00:00:00Z'
-    }
+exports.handler = async (event) => {
+  // TODO: Import and use SkillDeployer from @chimera/core
+  // const { SkillDeployer } = require('@chimera/core/skills/scanners');
+  // const deployer = new SkillDeployer({ enableRollback: true });
+  // const result = await deployer.deploySkill(event.skillBundle, event.metadata);
+
+  return {
+    deployment_result: 'SUCCESS',
+    deploymentId: 'placeholder_deploy_123',
+    publishedAt: new Date().toISOString(),
+    targets: { s3: true, dynamodb: true },
+    rollbackAvailable: true,
+  };
+};
 `),
-      timeout: cdk.Duration.seconds(30),
-      memorySize: 256,
+      timeout: cdk.Duration.minutes(2),
+      memorySize: 512,
+      environment: {
+        SKILLS_TABLE: props.skillsTable.tableName,
+        SKILLS_BUCKET: props.skillsBucket.bucketName,
+      },
     });
 
-    // Stage 6: Runtime Monitoring Configuration
-    const monitoringConfigFunction = new lambda.Function(this, 'MonitoringConfigFunction', {
-      functionName: `chimera-skill-monitoring-config-${props.envName}`,
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(`
-def handler(event, context):
-    """
-    Runtime monitoring configuration: Generate anomaly detection profile.
-
-    Based on test behavior, sets:
-    - Max tool calls per session
-    - Max network endpoints
-    - Max file writes per session
-    - Max memory writes per session
-    """
-    # TODO: Implement actual monitoring profile generation
-    return {
-        'monitoring_profile': {
-            'max_tool_calls_per_session': 50,
-            'max_network_endpoints': 0,
-            'max_file_writes_per_session': 10
-        }
-    }
-`),
-      timeout: cdk.Duration.seconds(30),
-      memorySize: 256,
-    });
-
-    // Stage 7: Scan Failure Notification
+    // Scan Failure Notification (error path)
     const scanFailureFunction = new lambda.Function(this, 'ScanFailureFunction', {
       functionName: `chimera-skill-scan-notify-failure-${props.envName}`,
-      runtime: lambda.Runtime.PYTHON_3_12,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-def handler(event, context):
-    """
-    Scan failure notification: Notify skill author of scan failure.
-
-    Sends detailed failure report to author.
-    """
-    # TODO: Implement actual notification (SNS/SES)
-    return {
-        'notification_sent': True,
-        'author_notified': True
-    }
+// Scan failure notification: Notify skill author of scan failure
+exports.handler = async (event) => {
+  // TODO: Implement actual notification (SNS/SES)
+  return {
+    notification_sent: true,
+    author_notified: true,
+  };
+};
 `),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -251,6 +305,13 @@ def handler(event, context):
     // Grant permissions
     props.skillsTable.grantReadWriteData(staticAnalysisFunction);
     props.skillsBucket.grantRead(staticAnalysisFunction);
+    props.skillsTable.grantReadWriteData(signatureVerificationFunction);
+    props.skillsBucket.grantRead(signatureVerificationFunction);
+    props.skillsTable.grantReadWriteData(performanceTestingFunction);
+    props.skillsBucket.grantRead(performanceTestingFunction);
+    props.skillsTable.grantReadWriteData(manualReviewFunction);
+    props.skillsTable.grantReadWriteData(skillDeploymentFunction);
+    props.skillsBucket.grantReadWrite(skillDeploymentFunction);
 
     // ======================================================================
     // Step Functions State Machine
@@ -290,33 +351,44 @@ def handler(event, context):
       interval: cdk.Duration.seconds(1),
     });
 
-    const permissionValidationTask = new tasks.LambdaInvoke(this, 'PermissionValidation', {
-      lambdaFunction: permissionValidationFunction,
+    const signatureVerificationTask = new tasks.LambdaInvoke(this, 'SignatureVerification', {
+      lambdaFunction: signatureVerificationFunction,
       outputPath: '$.Payload',
     });
-    permissionValidationTask.addRetry({
+    signatureVerificationTask.addRetry({
       errors: ['States.ALL'],
       maxAttempts: 3,
       backoffRate: 2,
       interval: cdk.Duration.seconds(1),
     });
 
-    const signingTask = new tasks.LambdaInvoke(this, 'SignSkill', {
-      lambdaFunction: signingFunction,
+    const performanceTestingTask = new tasks.LambdaInvoke(this, 'PerformanceTesting', {
+      lambdaFunction: performanceTestingFunction,
       outputPath: '$.Payload',
     });
-    signingTask.addRetry({
+    performanceTestingTask.addRetry({
       errors: ['States.ALL'],
       maxAttempts: 3,
       backoffRate: 2,
       interval: cdk.Duration.seconds(1),
     });
 
-    const monitoringConfigTask = new tasks.LambdaInvoke(this, 'ConfigureMonitoring', {
-      lambdaFunction: monitoringConfigFunction,
+    const manualReviewTask = new tasks.LambdaInvoke(this, 'ManualReview', {
+      lambdaFunction: manualReviewFunction,
       outputPath: '$.Payload',
     });
-    monitoringConfigTask.addRetry({
+    manualReviewTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
+
+    const skillDeploymentTask = new tasks.LambdaInvoke(this, 'SkillDeployment', {
+      lambdaFunction: skillDeploymentFunction,
+      outputPath: '$.Payload',
+    });
+    skillDeploymentTask.addRetry({
       errors: ['States.ALL'],
       maxAttempts: 3,
       backoffRate: 2,
@@ -364,14 +436,35 @@ def handler(event, context):
         stepfunctions.Condition.stringEquals('$.sandbox_result', 'FAIL'),
         failureChain
       )
-      .otherwise(permissionValidationTask);
+      .otherwise(signatureVerificationTask);
 
-    const checkPermissionResult = new stepfunctions.Choice(this, 'CheckPermissionResult')
+    const checkSignatureResult = new stepfunctions.Choice(this, 'CheckSignatureResult')
       .when(
-        stepfunctions.Condition.stringEquals('$.permission_result', 'FAIL'),
+        stepfunctions.Condition.stringEquals('$.signature_result', 'FAIL'),
         failureChain
       )
-      .otherwise(signingTask);
+      .otherwise(performanceTestingTask);
+
+    const checkPerformanceResult = new stepfunctions.Choice(this, 'CheckPerformanceResult')
+      .when(
+        stepfunctions.Condition.stringEquals('$.performance_result', 'FAIL'),
+        failureChain
+      )
+      .otherwise(manualReviewTask);
+
+    const checkManualReviewResult = new stepfunctions.Choice(this, 'CheckManualReviewResult')
+      .when(
+        stepfunctions.Condition.stringEquals('$.review_result', 'FAIL'),
+        failureChain
+      )
+      .otherwise(skillDeploymentTask);
+
+    const checkDeploymentResult = new stepfunctions.Choice(this, 'CheckDeploymentResult')
+      .when(
+        stepfunctions.Condition.stringEquals('$.deployment_result', 'FAIL'),
+        failureChain
+      )
+      .otherwise(scanPassed);
 
     // Chain the pipeline
     const definition = staticAnalysisTask
@@ -383,9 +476,10 @@ def handler(event, context):
 
     dependencyAuditTask.next(checkDependencyResult);
     sandboxRunTask.next(checkSandboxResult);
-    permissionValidationTask.next(checkPermissionResult);
-    signingTask.next(monitoringConfigTask);
-    monitoringConfigTask.next(scanPassed);
+    signatureVerificationTask.next(checkSignatureResult);
+    performanceTestingTask.next(checkPerformanceResult);
+    manualReviewTask.next(checkManualReviewResult);
+    skillDeploymentTask.next(checkDeploymentResult);
 
     // Create log group for state machine
     const logGroup = new logs.LogGroup(this, 'StateMachineLogGroup', {
