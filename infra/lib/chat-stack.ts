@@ -300,10 +300,12 @@ export class ChatStack extends cdk.Stack {
 
     // ======================================================================
     // CloudFront Distribution
-<<<<<<< HEAD
     // Global edge caching layer in front of ALB
     // Default behavior: no caching (pass-through for SSE streaming)
     // /static/* behavior: 24h TTL for static assets
+    // Uses ALL_VIEWER origin request policy to forward all headers including
+    // Authorization (which is a restricted header that gets silently stripped
+    // when explicitly listed in OriginRequestHeaderBehavior.allowList)
     // ======================================================================
 
     // Cache policy for static assets (24h TTL)
@@ -312,49 +314,12 @@ export class ChatStack extends cdk.Stack {
       comment: 'Cache policy for static assets with 24h TTL',
       defaultTtl: cdk.Duration.hours(24),
       maxTtl: cdk.Duration.days(7),
-      minTtl: cdk.Duration.seconds(1),
+      minTtl: cdk.Duration.hours(1),
       enableAcceptEncodingGzip: true,
       enableAcceptEncodingBrotli: true,
       headerBehavior: cloudfront.CacheHeaderBehavior.none(),
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-    });
-
-    // Cache policy for API/streaming (disabled caching)
-    const noCachePolicy = new cloudfront.CachePolicy(this, 'NoCachePolicy', {
-      cachePolicyName: `chimera-no-cache-${props.envName}`,
-      comment: 'No caching for SSE streaming and API endpoints',
-      defaultTtl: cdk.Duration.seconds(0),
-      maxTtl: cdk.Duration.seconds(0),
-      minTtl: cdk.Duration.seconds(0),
-      enableAcceptEncodingGzip: false,
-      enableAcceptEncodingBrotli: false,
-      headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
-        'Authorization',
-        'Accept',
-        'Content-Type',
-        'X-Platform-User-Id',
-        'X-Platform-Type',
-        'X-Thread-Id',
-      ),
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
-      cookieBehavior: cloudfront.CacheCookieBehavior.all(),
-    });
-
-    // Origin request policy to forward headers to ALB
-    const originRequestPolicy = new cloudfront.OriginRequestPolicy(this, 'OriginRequestPolicy', {
-      originRequestPolicyName: `chimera-origin-${props.envName}`,
-      comment: 'Forward necessary headers to ALB origin',
-      headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList(
-        'Authorization',
-        'Accept',
-        'Content-Type',
-        'X-Platform-User-Id',
-        'X-Platform-Type',
-        'X-Thread-Id',
-      ),
-      queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
-      cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
     });
 
     // CloudFront distribution
@@ -366,46 +331,28 @@ export class ChatStack extends cdk.Stack {
         : cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       enableIpv6: true,
-=======
-    // CDN layer for chat gateway with edge caching
-    // - Default behavior: no-cache (dynamic chat endpoints)
-    // - Static assets: 24h cache for JS/CSS/images
-    // - ALL_VIEWER origin request policy: forwards all headers/cookies/query strings
-    // ======================================================================
-    this.distribution = new cloudfront.Distribution(this, 'ChatDistribution', {
-      comment: `Chimera Chat Gateway CDN (${props.envName})`,
->>>>>>> overstory/builder-cf-fix/chimera-9349
       defaultBehavior: {
         origin: new origins.LoadBalancerV2Origin(this.alb, {
           protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
           httpPort: 80,
-<<<<<<< HEAD
           connectionAttempts: 3,
           connectionTimeout: cdk.Duration.seconds(10),
           readTimeout: cdk.Duration.seconds(60),
           keepaliveTimeout: cdk.Duration.seconds(60),
-=======
->>>>>>> overstory/builder-cf-fix/chimera-9349
         }),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
         cachedMethods: cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
         compress: true,
-<<<<<<< HEAD
-        cachePolicy: noCachePolicy,
-        originRequestPolicy: originRequestPolicy,
-      },
-      additionalBehaviors: {
-=======
         // No caching for dynamic chat endpoints (SSE streaming, real-time responses)
         cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
         // ALL_VIEWER: forwards all headers, cookies, query strings to origin
         // Required for: Authorization headers, session cookies, platform user IDs
+        // Note: Authorization is a restricted header that gets silently stripped
+        // when explicitly listed in OriginRequestHeaderBehavior.allowList()
         originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
       },
       additionalBehaviors: {
-        // Static assets: JS bundles, CSS, images (24h cache)
->>>>>>> overstory/builder-cf-fix/chimera-9349
         '/static/*': {
           origin: new origins.LoadBalancerV2Origin(this.alb, {
             protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
@@ -415,7 +362,6 @@ export class ChatStack extends cdk.Stack {
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
           cachedMethods: cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
           compress: true,
-<<<<<<< HEAD
           cachePolicy: staticCachePolicy,
         },
       },
@@ -439,28 +385,6 @@ export class ChatStack extends cdk.Stack {
       ],
       logBucket: undefined, // CloudFront access logs can be added later
       enableLogging: false, // Disabled to reduce costs in dev
-=======
-          cachePolicy: new cloudfront.CachePolicy(this, 'StaticAssetCachePolicy', {
-            cachePolicyName: `chimera-static-${props.envName}`,
-            comment: '24h cache for static assets (JS, CSS, images)',
-            defaultTtl: cdk.Duration.hours(24),
-            minTtl: cdk.Duration.hours(1),
-            maxTtl: cdk.Duration.days(7),
-            enableAcceptEncodingGzip: true,
-            enableAcceptEncodingBrotli: true,
-            headerBehavior: cloudfront.CacheHeaderBehavior.none(),
-            queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
-            cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-          }),
-          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
-        },
-      },
-      priceClass: isProd
-        ? cloudfront.PriceClass.PRICE_CLASS_ALL
-        : cloudfront.PriceClass.PRICE_CLASS_100,
-      enableLogging: true,
-      logBucket: undefined, // Will be configured with S3 bucket in deployment
->>>>>>> overstory/builder-cf-fix/chimera-9349
     });
 
     // ======================================================================
@@ -508,21 +432,11 @@ export class ChatStack extends cdk.Stack {
       description: 'Target group ARN',
     });
 
-<<<<<<< HEAD
-=======
-    new cdk.CfnOutput(this, 'CloudFrontDomain', {
-      value: this.distribution.distributionDomainName,
-      exportName: `${this.stackName}-CloudFrontDomain`,
-      description: 'CloudFront distribution domain name',
-    });
-
->>>>>>> overstory/builder-cf-fix/chimera-9349
     new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
       value: this.distribution.distributionId,
       exportName: `${this.stackName}-CloudFrontDistributionId`,
       description: 'CloudFront distribution ID',
     });
-<<<<<<< HEAD
 
     new cdk.CfnOutput(this, 'CloudFrontDomainName', {
       value: this.distribution.distributionDomainName,
@@ -535,7 +449,5 @@ export class ChatStack extends cdk.Stack {
       exportName: `${this.stackName}-CloudFrontUrl`,
       description: 'CloudFront HTTPS endpoint URL',
     });
-=======
->>>>>>> overstory/builder-cf-fix/chimera-9349
   }
 }
