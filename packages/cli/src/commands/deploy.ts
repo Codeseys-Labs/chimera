@@ -14,7 +14,6 @@ import {
   GetRepositoryCommand,
   CreateCommitCommand,
   GetBranchCommand,
-  DeleteBranchCommand,
   PutFileEntry,
 } from '@aws-sdk/client-codecommit';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
@@ -216,24 +215,18 @@ async function pushToCodeCommit(
   const batches = batchFiles(allFiles);
   console.log(chalk.gray(`  Organized into ${batches.length} commit batch(es)`));
 
-  // Step 3: Check if branch exists, delete it to enable force-overwrite
-  // This fixes CreateCommit rejection when files are unchanged from parent
+  // Step 3: Get current branch tip (if exists) to use as parent for first commit
+  // Cannot delete default branch in CodeCommit, so we chain from existing tip
+  let parentCommitId: string | undefined;
   try {
-    await client.send(
+    const branchInfo = await client.send(
       new GetBranchCommand({
         repositoryName: repoName,
         branchName,
       }),
     );
-    console.log(chalk.gray(`  Branch '${branchName}' exists, deleting for force-overwrite...`));
-
-    await client.send(
-      new DeleteBranchCommand({
-        repositoryName: repoName,
-        branchName,
-      }),
-    );
-    console.log(chalk.gray(`  Branch deleted, will create fresh`));
+    parentCommitId = branchInfo.branch?.commitId;
+    console.log(chalk.gray(`  Branch '${branchName}' exists, will update from tip`));
   } catch (error: any) {
     if (error.name === 'BranchDoesNotExistException') {
       console.log(chalk.gray(`  Branch '${branchName}' does not exist, will create`));
@@ -243,8 +236,7 @@ async function pushToCodeCommit(
   }
 
   // Step 4: Create commits in sequence, chaining parentCommitId
-  // Since we deleted the branch, start fresh with no parent
-  let parentCommitId: string | undefined;
+  // If batch has no changes, skip it and keep chaining from current tip
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
     const batchNum = i + 1;
@@ -264,21 +256,38 @@ async function pushToCodeCommit(
       fileContent: file.content,
     }));
 
-    // Create commit
-    const createCommitResult = await client.send(
-      new CreateCommitCommand({
-        repositoryName: repoName,
-        branchName,
-        parentCommitId, // undefined for first commit, then chains subsequent commits
-        commitMessage,
-        authorName: 'Chimera CLI',
-        email: 'deploy@chimera.aws',
-        putFiles,
-      }),
-    );
+    // Create commit, catching "no changes" errors per batch
+    try {
+      const createCommitResult = await client.send(
+        new CreateCommitCommand({
+          repositoryName: repoName,
+          branchName,
+          parentCommitId, // chains from previous commit or branch tip
+          commitMessage,
+          authorName: 'Chimera CLI',
+          email: 'deploy@chimera.aws',
+          putFiles,
+        }),
+      );
 
-    // Update parent for next commit in batch sequence
-    parentCommitId = createCommitResult.commitId;
+      // Update parent for next commit in batch sequence
+      parentCommitId = createCommitResult.commitId;
+    } catch (error: any) {
+      // If batch has no changes (files same as parent), skip it
+      // Error message contains "same as" or "requires at least one change"
+      const isNoChangesError =
+        error.message?.includes('same as') || error.message?.includes('at least one change');
+
+      if (isNoChangesError) {
+        console.log(
+          chalk.gray(`  Batch ${batchNum}/${batches.length} skipped (no changes from parent)`),
+        );
+        // Keep parentCommitId as-is for next batch to chain from current branch tip
+      } else {
+        // Unexpected error, re-throw
+        throw error;
+      }
+    }
   }
 
   console.log(chalk.gray(`  All commits created successfully`));
