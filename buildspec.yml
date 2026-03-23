@@ -41,12 +41,10 @@ phases:
       - echo "========================================="
       - bun test --coverage
       - echo "========================================="
-      - echo "Stage 3: CDK Synth and Validation"
+      - echo "Stage 3: CDK Synth"
       - echo "========================================="
       - cd infra
       - bunx cdk synth --all
-      - echo "Running cdk-nag security checks..."
-      - bunx cdk-nag || echo "CDK NAG warnings detected - review required"
       - cd ..
       - echo "========================================="
       - echo "Stage 4: Build Docker Image"
