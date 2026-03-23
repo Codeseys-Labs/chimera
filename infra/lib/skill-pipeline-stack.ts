@@ -41,6 +41,7 @@ export class SkillPipelineStack extends cdk.Stack {
     // ======================================================================
 
     // Stage 1: Static Analysis
+    // Implementation: packages/core/src/skills/scanners/static-analyzer.ts
     const staticAnalysisFunction = new lambda.Function(this, 'StaticAnalysisFunction', {
       functionName: `chimera-skill-static-analysis-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -50,13 +51,21 @@ def handler(event, context):
     """
     Static analysis: AST pattern detection for dangerous patterns.
 
-    Scans SKILL.md and tool source code for:
-    - Prompt injection attempts
-    - Remote code execution patterns
-    - Base64-encoded payloads
-    - Dynamic code evaluation
+    Production implementation in: packages/core/src/skills/scanners/static-analyzer.ts
+    - Detects code execution patterns (eval, exec, Function)
+    - Detects prompt injection attempts
+    - Detects hardcoded credentials
+    - Detects shell command injection
+    - Detects path traversal and SSRF patterns
+
+    Input: { skillBundle: { filename: content }, bundleUrl: s3://... }
+    Output: { static_result: 'PASS'|'FAIL', findings: [...], scannerVersion: '1.0.0' }
     """
-    # TODO: Implement actual static analysis
+    # TODO: Import and use StaticAnalyzer from @chimera/core
+    # from chimera.scanners import StaticAnalyzer
+    # analyzer = StaticAnalyzer()
+    # result = analyzer.scan_bundle(event['skillBundle'])
+
     return {
         'static_result': 'PASS',
         'findings': [],
@@ -72,6 +81,7 @@ def handler(event, context):
     });
 
     // Stage 2: Dependency Audit
+    // Implementation: packages/core/src/skills/scanners/dependency-auditor.ts
     const dependencyAuditFunction = new lambda.Function(this, 'DependencyAuditFunction', {
       functionName: `chimera-skill-dependency-audit-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -81,9 +91,20 @@ def handler(event, context):
     """
     Dependency audit: Check pip/npm packages against OSV database.
 
-    Checks all declared dependencies for known vulnerabilities.
+    Production implementation in: packages/core/src/skills/scanners/dependency-auditor.ts
+    - Queries OSV API (https://osv.dev) for known vulnerabilities
+    - Supports PyPI (pip) and npm package ecosystems
+    - Returns CVE/GHSA advisories with severity ratings
+    - Includes fixed version recommendations
+
+    Input: { pipPackages: [...], npmPackages: [...] }
+    Output: { dependency_result: 'PASS'|'FAIL', vulnerabilities: [...], advisories: [...] }
     """
-    # TODO: Implement actual dependency audit via OSV API
+    # TODO: Import and use DependencyAuditor from @chimera/core
+    # from chimera.scanners import DependencyAuditor
+    # auditor = DependencyAuditor()
+    # result = auditor.audit_all(event.get('pipPackages', []), event.get('npmPackages', []))
+
     return {
         'dependency_result': 'PASS',
         'vulnerabilities': [],
@@ -95,6 +116,7 @@ def handler(event, context):
     });
 
     // Stage 3: Sandbox Run
+    // Implementation: packages/core/src/skills/scanners/sandbox-runner.ts
     const sandboxRunFunction = new lambda.Function(this, 'SandboxRunFunction', {
       functionName: `chimera-skill-sandbox-test-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -102,17 +124,27 @@ def handler(event, context):
       code: lambda.Code.fromInline(`
 def handler(event, context):
     """
-    Sandbox run: Execute skill tests in isolated OpenSandbox MicroVM.
+    Sandbox run: Execute skill tests in isolated environment.
 
-    - Network egress blocked
-    - Filesystem limited to /tmp and skill directory
-    - 60 second timeout, 512 MB memory limit
-    - All syscalls logged and compared against declared permissions
+    Production implementation in: packages/core/src/skills/scanners/sandbox-runner.ts
+    - Validates skill bundle structure
+    - Executes test cases with resource limits
+    - Monitors syscalls and resource usage
+    - Detects violations (network, filesystem, resource limits)
+    - Production: Firecracker MicroVM integration
+
+    Input: { tests: [...], skillBundle: {...}, config: {...} }
+    Output: { sandbox_result: 'PASS'|'FAIL', test_results: [...], violations: [...], syscall_log: [...] }
     """
-    # TODO: Implement actual sandbox execution via OpenSandbox
+    # TODO: Import and use SandboxRunner from @chimera/core
+    # from chimera.scanners import SandboxRunner
+    # runner = SandboxRunner()
+    # result = runner.run_tests(event['tests'], event['skillBundle'])
+
     return {
         'sandbox_result': 'PASS',
         'test_results': [],
+        'violations': [],
         'syscall_log': []
     }
 `),

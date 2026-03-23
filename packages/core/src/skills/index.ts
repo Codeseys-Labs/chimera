@@ -82,3 +82,26 @@ export {
   type SkillLoadResult,
   type LoadedTool,
 } from './skill-bridge';
+
+// Security Scanners (7-stage pipeline)
+export {
+  StaticAnalyzer,
+  type StaticAnalyzerConfig,
+  type StaticAnalysisResult,
+  type StaticAnalysisFinding,
+  type FindingSeverity,
+  DependencyAuditor,
+  type DependencyAuditorConfig,
+  type DependencyAuditResult,
+  type VulnerabilityAdvisory,
+  type VulnerabilitySeverity,
+  type PackageEcosystem,
+  SandboxRunner,
+  type SandboxConfig,
+  type SandboxTestResult,
+  type SandboxViolation,
+  type TestExecutionResult,
+  type SyscallLogEntry,
+  type ResourceUsage,
+  type ViolationType,
+} from './scanners';
