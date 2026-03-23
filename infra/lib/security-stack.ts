@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
 export interface SecurityStackProps extends cdk.StackProps {
@@ -40,6 +41,28 @@ export class SecurityStack extends cdk.Stack {
       description: 'Chimera platform encryption key for secrets and SNS',
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
+
+    // Grant CloudWatch Logs permission to use this key for LogGroup encryption
+    // CloudWatch Logs can ONLY access KMS via key policy, not IAM policies
+    this.platformKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowCloudWatchLogs',
+      effect: iam.Effect.ALLOW,
+      principals: [new iam.ServicePrincipal(`logs.${this.region}.amazonaws.com`)],
+      actions: [
+        'kms:Encrypt',
+        'kms:Decrypt',
+        'kms:ReEncrypt*',
+        'kms:GenerateDataKey*',
+        'kms:CreateGrant',
+        'kms:DescribeKey',
+      ],
+      resources: ['*'], // Key policy always uses '*' for resources (refers to this key)
+      conditions: {
+        ArnLike: {
+          'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${this.region}:${this.account}:log-group:*`,
+        },
+      },
+    }));
 
     // ======================================================================
     // Cognito User Pool
