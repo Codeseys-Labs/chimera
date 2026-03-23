@@ -1,78 +1,35 @@
 version: 0.2
 
-# AWS CodeBuild Build Specification for Chimera Agent Platform
-#
-# This build performs the following stages:
-# 1. Install: Set up Bun runtime environment
-# 2. Pre-build: Install dependencies and authenticate to ECR
-# 3. Build: Lint, test, synth CDK, build Docker images
-# 4. Post-build: Push images and prepare artifacts
-#
-# Duration target: < 8 minutes (per Testing Strategy requirement)
-# Reference: docs/research/enhancement/06-Testing-Strategy.md
-
 phases:
   install:
     runtime-versions:
       nodejs: 20
     commands:
-      - echo "Installing Bun runtime..."
       - curl -fsSL https://bun.sh/install | bash
       - export PATH="$HOME/.bun/bin:$PATH"
       - bun --version
-      - echo "Bun installation complete"
 
   pre_build:
     commands:
-      - echo "Installing dependencies..."
       - bun install --frozen-lockfile
-      - echo "Logging into Amazon ECR..."
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
   build:
     commands:
-      - echo "========================================="
-      - echo "Stage 1: Lint and Type Check"
-      - echo "========================================="
       - bun run lint
       - bun run typecheck
-      - echo "========================================="
-      - echo "Stage 2: Unit Tests"
-      - echo "========================================="
       - bun test --coverage
-      - echo "========================================="
-      - echo "Stage 3: CDK Synth"
-      - echo "========================================="
-      - cd infra
-      - bunx cdk synth --all
-      - cd ..
-      - echo "========================================="
-      - echo "Stage 4: Build Docker Image"
-      - echo "========================================="
+      - cd infra && bunx cdk synth --all && cd ..
       - export IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}
-      - echo "Building image with tag $IMAGE_TAG..."
       - docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest -f packages/agents/Dockerfile packages/agents/
-      - echo "========================================="
-      - echo "Stage 5: Push Docker Image to ECR"
-      - echo "========================================="
       - docker push $ECR_REPOSITORY:$IMAGE_TAG
       - docker push $ECR_REPOSITORY:latest
-      - echo "Writing image URI to artifact..."
       - echo "$ECR_REPOSITORY:$IMAGE_TAG" > image-uri.txt
       - export IMAGE_URI="$ECR_REPOSITORY:$IMAGE_TAG"
 
   post_build:
     commands:
-      - echo "========================================="
-      - echo "Build completed on $(date)"
-      - echo "Image URI - $(cat image-uri.txt)"
-      - echo "========================================="
-      - echo "========================================="
-      - echo "Stage 6: Deploy All CDK Stacks"
-      - echo "========================================="
-      - cd infra
-      - bunx cdk deploy --all --require-approval never --context environment="$ENV_NAME" --context repositoryName="chimera"
-      - cd ..
+      - cd infra && bunx cdk deploy --all --require-approval never --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..
 
 artifacts:
   files:
@@ -87,6 +44,6 @@ env:
 
 cache:
   paths:
-    - '$HOME/.bun/install/cache/**/*'
-    - 'node_modules/**/*'
-    - '.next/cache/**/*'
+    - $HOME/.bun/install/cache/**/*
+    - node_modules/**/*
+    - .next/cache/**/*
