@@ -14,6 +14,9 @@ import type {
 } from './types';
 import type { EvolutionSafetyHarness } from './safety-harness';
 
+// Module-level singleton CodeCommit client
+const codecommitClient = new CodeCommitClient({});
+
 /**
  * Infrastructure modifier with GitOps workflow
  */
@@ -28,7 +31,7 @@ export class InfrastructureModifier {
   }) {
     this.repositoryName = params.repositoryName;
     this.safetyHarness = params.safetyHarness;
-    this.codecommit = new CodeCommitClient({});
+    this.codecommit = codecommitClient;
   }
 
   /**

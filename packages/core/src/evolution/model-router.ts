@@ -21,6 +21,10 @@ import type {
   BEDROCK_MODELS,
 } from './types';
 
+// Module-level singleton DynamoDB client
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+
 /**
  * Model costs per 1k tokens
  */
@@ -46,7 +50,7 @@ export class ModelRouter {
   }) {
     this.tableName = params.tableName;
     this.costSensitivity = params.costSensitivity ?? 0.3;
-    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    this.ddb = ddbDocClient;
     this.arms = new Map();
   }
 

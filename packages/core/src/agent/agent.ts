@@ -20,6 +20,11 @@ import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { TaskCategory, ModelId, FeedbackEvent, FeedbackType } from '../evolution/types';
 import { BudgetMonitor } from '../billing/budget-monitor';
 import { estimateTokenCount, estimateMessageTokens, estimateRequestCost, BudgetExceededError } from './token-estimator';
+import type { Message, ContentBlock, ToolSpec } from './bedrock-model';
+
+// Module-level singleton DynamoDB client (reused across all agent instances)
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
 
 /**
  * Agent configuration options
@@ -47,7 +52,8 @@ export interface AgentConfig {
   skills?: string[];
 
   /** Skill registry (optional, for dynamic skill loading) */
-  skillRegistry?: any; // SkillRegistry type from skills module
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  skillRegistry?: any; // SkillRegistry type from skills module - avoid circular dependency
 
   /** Agent name/identifier */
   name?: string;
@@ -62,13 +68,17 @@ export interface AgentConfig {
   tier?: 'basic' | 'advanced' | 'premium';
 
   /** Model instance with converse API (optional, for real LLM calls) */
-  model?: { converse(turn: any): Promise<any> };
+  model?: {
+    converse(turn: { messages: Message[]; tools?: ToolSpec[]; systemPrompt?: string }): Promise<{ output: { message: Message }; stopReason: string }>
+  };
 
   /** Loaded tools with full specifications (optional, for tool calling) */
   loadedTools?: Array<{
     name: string;
     description: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     inputSchema: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     callback: (input: any) => Promise<string>
   }>;
 
@@ -173,9 +183,9 @@ export class ChimeraAgent {
     // Initialize memory with tier-based configuration (async, will complete before first use)
     this.initializeMemory(config.tier || 'basic');
 
-    // Initialize DynamoDB client if evolution table is provided
+    // Use module-level DynamoDB client if evolution table is provided
     if (config.evolutionTable) {
-      this.ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+      this.ddbClient = ddbDocClient;
     }
 
     // Load skills if specified and registry provided
@@ -188,6 +198,7 @@ export class ChimeraAgent {
    * Load skills asynchronously and inject into agent
    * Private helper called during initialization
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async loadSkillsAsync(skillNames: string[], registry: any): Promise<void> {
     try {
       // Dynamically import skill bridge to avoid circular dependency
@@ -364,6 +375,7 @@ export class ChimeraAgent {
       });
 
       // Load prompt from S3 based on variant
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const experiment = await (this.config.promptOptimizer as any).getExperiment(
         this.context.tenantId,
         this.config.promptExperimentId
@@ -488,7 +500,7 @@ export class ChimeraAgent {
    * Run the ReAct (Reason + Act) loop with tool calling
    */
   private async runReActLoop(message: string, systemPrompt: string): Promise<AgentResult> {
-    const messages: any[] = [];
+    const messages: Message[] = [];
     const toolCalls: ToolCall[] = [];
     const maxIterations = 10;
     let iterations = 0;
@@ -524,13 +536,13 @@ export class ChimeraAgent {
       const assistantMessage = response.output.message;
 
       // Extract text content
-      const textBlocks = assistantMessage.content.filter((block: any) => block.text);
+      const textBlocks = assistantMessage.content.filter((block): block is ContentBlock & { text: string } => !!block.text);
       if (textBlocks.length > 0) {
-        finalOutput = textBlocks.map((block: any) => block.text).join('\n');
+        finalOutput = textBlocks.map(block => block.text).join('\n');
       }
 
       // Check for tool use
-      const toolUseBlocks = assistantMessage.content.filter((block: any) => block.toolUse);
+      const toolUseBlocks = assistantMessage.content.filter((block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } => !!block.toolUse);
 
       if (toolUseBlocks.length === 0 || stopReason === 'end_turn') {
         // No tools to execute, we're done
@@ -542,7 +554,12 @@ export class ChimeraAgent {
       messages.push(assistantMessage);
 
       // Execute tools and collect results
-      const toolResults: any[] = [];
+      interface ToolResultBlock {
+        toolUseId: string;
+        content: string;
+        status: 'success' | 'error';
+      }
+      const toolResults: ToolResultBlock[] = [];
 
       for (const block of toolUseBlocks) {
         const toolUse = block.toolUse;
@@ -628,6 +645,7 @@ export class ChimeraAgent {
   /**
    * Convert Zod schema to JSON Schema format for Bedrock API
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private convertZodToJsonSchema(zodSchema: any): any {
     // For now, pass through assuming it's already in correct format
     // TODO: Implement full Zod -> JSON Schema conversion if needed
@@ -642,7 +660,7 @@ export class ChimeraAgent {
           type: 'object',
           properties: zodSchema._def.shape ?
             Object.fromEntries(
-              Object.entries(zodSchema._def.shape()).map(([key, val]: [string, any]) => [
+              Object.entries(zodSchema._def.shape()).map(([key]) => [
                 key,
                 { type: 'string' } // Simplified
               ])
@@ -841,7 +859,7 @@ export class ChimeraAgent {
 
     const systemPrompt = this.config.systemPrompt.render(promptContext);
 
-    const messages: any[] = [];
+    const messages: Message[] = [];
     messages.push({
       role: 'user',
       content: [{ text: message }]
@@ -869,7 +887,7 @@ export class ChimeraAgent {
       const assistantMessage = response.output.message;
 
       // Emit text content
-      const textBlocks = assistantMessage.content.filter((block: any) => block.text);
+      const textBlocks = assistantMessage.content.filter((block): block is ContentBlock & { text: string } => !!block.text);
       for (const block of textBlocks) {
         yield {
           type: 'content_block_delta',
@@ -878,7 +896,7 @@ export class ChimeraAgent {
       }
 
       // Check for tool use
-      const toolUseBlocks = assistantMessage.content.filter((block: any) => block.toolUse);
+      const toolUseBlocks = assistantMessage.content.filter((block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } => !!block.toolUse);
 
       if (toolUseBlocks.length === 0 || response.stopReason === 'end_turn') {
         messages.push(assistantMessage);
