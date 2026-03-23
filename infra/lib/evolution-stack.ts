@@ -525,15 +525,33 @@ def handler(event, context):
       lambdaFunction: analyzeConversationLogsFunction,
       outputPath: '$.Payload',
     });
+    analyzeLogsTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const generateVariantTask = new tasks.LambdaInvoke(this, 'GenerateVariant', {
       lambdaFunction: generatePromptVariantFunction,
       outputPath: '$.Payload',
     });
+    generateVariantTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const testVariantTask = new tasks.LambdaInvoke(this, 'TestVariant', {
       lambdaFunction: testPromptVariantFunction,
       outputPath: '$.Payload',
+    });
+    testVariantTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const variantTestPassed = new stepfunctions.Choice(this, 'VariantTestPassed')
@@ -577,10 +595,22 @@ def handler(event, context):
       lambdaFunction: detectPatternsFunction,
       outputPath: '$.Payload',
     });
+    detectPatternsTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const generateSkillTask = new tasks.LambdaInvoke(this, 'GenerateSkill', {
       lambdaFunction: generateSkillFunction,
       outputPath: '$.Payload',
+    });
+    generateSkillTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const patternsFound = new stepfunctions.Choice(this, 'PatternsFound')
@@ -618,6 +648,12 @@ def handler(event, context):
       lambdaFunction: memoryGarbageCollectionFunction,
       outputPath: '$.Payload',
     });
+    memoryGCTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const memoryEvolutionDefinition = memoryGCTask.next(
       new stepfunctions.Succeed(this, 'MemoryEvolutionSuccess')
@@ -648,6 +684,12 @@ def handler(event, context):
     const processFeedbackTask = new tasks.LambdaInvoke(this, 'ProcessFeedback', {
       lambdaFunction: processFeedbackFunction,
       outputPath: '$.Payload',
+    });
+    processFeedbackTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const feedbackProcessorDefinition = processFeedbackTask.next(

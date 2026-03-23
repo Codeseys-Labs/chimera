@@ -229,35 +229,77 @@ def handler(event, context):
       lambdaFunction: staticAnalysisFunction,
       outputPath: '$.Payload',
     });
+    staticAnalysisTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const dependencyAuditTask = new tasks.LambdaInvoke(this, 'DependencyAudit', {
       lambdaFunction: dependencyAuditFunction,
       outputPath: '$.Payload',
+    });
+    dependencyAuditTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const sandboxRunTask = new tasks.LambdaInvoke(this, 'SandboxRun', {
       lambdaFunction: sandboxRunFunction,
       outputPath: '$.Payload',
     });
+    sandboxRunTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const permissionValidationTask = new tasks.LambdaInvoke(this, 'PermissionValidation', {
       lambdaFunction: permissionValidationFunction,
       outputPath: '$.Payload',
+    });
+    permissionValidationTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     const signingTask = new tasks.LambdaInvoke(this, 'SignSkill', {
       lambdaFunction: signingFunction,
       outputPath: '$.Payload',
     });
+    signingTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const monitoringConfigTask = new tasks.LambdaInvoke(this, 'ConfigureMonitoring', {
       lambdaFunction: monitoringConfigFunction,
       outputPath: '$.Payload',
     });
+    monitoringConfigTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const scanFailureTask = new tasks.LambdaInvoke(this, 'NotifyScanFailure', {
       lambdaFunction: scanFailureFunction,
       outputPath: '$.Payload',
+    });
+    scanFailureTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
 
     // Define success/failure end states
