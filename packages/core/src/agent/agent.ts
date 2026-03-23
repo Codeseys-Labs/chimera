@@ -18,6 +18,8 @@ import { PromptOptimizer } from '../evolution/prompt-optimizer';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { TaskCategory, ModelId, FeedbackEvent, FeedbackType } from '../evolution/types';
+import { BudgetMonitor } from '../billing/budget-monitor';
+import { estimateTokenCount, estimateMessageTokens, estimateRequestCost, BudgetExceededError } from './token-estimator';
 
 /**
  * Agent configuration options
@@ -84,6 +86,9 @@ export interface AgentConfig {
 
   /** DynamoDB table for evolution metrics persistence (optional) */
   evolutionTable?: string;
+
+  /** Budget monitor for pre-flight cost checking (optional) */
+  budgetMonitor?: BudgetMonitor;
 }
 
 /**
@@ -405,6 +410,11 @@ export class ChimeraAgent {
       return result;
     }
 
+    // Pre-flight budget check if BudgetMonitor is configured
+    if (this.config.budgetMonitor) {
+      await this.checkBudgetBeforeInvoke(message, systemPrompt);
+    }
+
     // Run ReAct loop with model
     const result = await this.runReActLoop(message, systemPrompt);
 
@@ -412,6 +422,66 @@ export class ChimeraAgent {
     await this.recordEvolutionOutcomes(result);
 
     return result;
+  }
+
+  /**
+   * Check budget before invocation
+   *
+   * Estimates token costs and enforces budget limits.
+   * Throws BudgetExceededError if budget is exhausted.
+   */
+  private async checkBudgetBeforeInvoke(message: string, systemPrompt: string): Promise<void> {
+    if (!this.config.budgetMonitor) {
+      return;
+    }
+
+    // Build tool specs for token estimation
+    const toolSpecs = this.config.loadedTools?.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: this.convertZodToJsonSchema(tool.inputSchema)
+    })) || [];
+
+    // Estimate input tokens
+    const inputTokens = estimateMessageTokens({
+      messages: [{ role: 'user', content: [{ text: message }] }],
+      systemPrompt,
+      tools: toolSpecs.length > 0 ? toolSpecs : undefined
+    });
+
+    // Estimate max output tokens (use config default)
+    const maxOutputTokens = 4096; // Default from BedrockModel config
+
+    // Estimate cost using selected model (or fall back to default)
+    const modelId = this.currentModelId || 'us.anthropic.claude-sonnet-4-6-v1:0';
+    const estimatedCost = estimateRequestCost({
+      modelId,
+      inputTokens,
+      maxOutputTokens
+    });
+
+    // Check budget action
+    const action = await this.config.budgetMonitor.getBudgetAction(this.context.tenantId);
+
+    if (action === 'block') {
+      // Get budget details for error message
+      const check = await this.config.budgetMonitor.checkBudget(this.context.tenantId);
+      throw new BudgetExceededError(
+        this.context.tenantId,
+        estimatedCost,
+        check.budgetLimit - check.currentSpend
+      );
+    }
+
+    if (action === 'warn') {
+      // Log warning but proceed
+      console.warn(
+        `[BudgetWarning] Tenant ${this.context.tenantId} has exceeded budget threshold. ` +
+        `Estimated cost: $${estimatedCost.toFixed(4)}`
+      );
+    }
+
+    // action === 'allow' - proceed without warning
   }
 
   /**
@@ -442,11 +512,12 @@ export class ChimeraAgent {
     while (iterations < maxIterations) {
       iterations++;
 
-      // Call model
+      // Call model (pass selected modelId if available)
       const response = await this.config.model!.converse({
         messages,
         tools: toolSpecs.length > 0 ? toolSpecs : undefined,
-        systemPrompt
+        systemPrompt,
+        modelId: this.currentModelId
       });
 
       stopReason = response.stopReason;
@@ -791,7 +862,8 @@ export class ChimeraAgent {
       const response = await this.config.model.converse({
         messages,
         tools: toolSpecs.length > 0 ? toolSpecs : undefined,
-        systemPrompt
+        systemPrompt,
+        modelId: this.currentModelId
       });
 
       const assistantMessage = response.output.message;

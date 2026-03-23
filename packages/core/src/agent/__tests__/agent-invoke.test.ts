@@ -7,6 +7,9 @@ import { MockModel, mockTextResponse, mockToolCallResponse } from '../../../../.
 import { createAgent, ChimeraAgent } from '../agent';
 import { createDefaultSystemPrompt } from '../prompt';
 import { z } from 'zod';
+import { ModelRouter } from '../../evolution/model-router';
+import { BudgetMonitor } from '../../billing/budget-monitor';
+import { BudgetExceededError } from '../token-estimator';
 
 describe('ChimeraAgent.invoke()', () => {
   describe('Backward compatibility', () => {
@@ -445,6 +448,158 @@ describe('ChimeraAgent.invoke()', () => {
       expect(typeof result.context.sessionId).toBe('string');
       expect(result.context.sessionId.length).toBeGreaterThan(0);
       expect(result.context.memoryNamespace).toContain('test-tenant');
+    });
+  });
+
+  describe('Model routing integration', () => {
+    it('should pass selected modelId to model.converse when modelRouter configured', async () => {
+      const model = new MockModel([mockTextResponse('Response')]);
+
+      // Create mock ModelRouter that selects Nova Lite
+      const mockRouter = {
+        selectModel: async () => ({
+          selectedModel: 'us.amazon.nova-lite-v1:0' as any,
+          taskCategory: 'analysis' as any,
+          routingWeights: {}
+        }),
+        recordOutcome: async () => {}
+      } as ModelRouter;
+
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model,
+        modelRouter: mockRouter,
+        taskCategory: 'analysis'
+      });
+
+      await agent.invoke('Test message');
+
+      const lastCall = model.getLastCall();
+      expect(lastCall?.modelId).toBe('us.amazon.nova-lite-v1:0');
+    });
+
+    it('should work without modelRouter (uses model default)', async () => {
+      const model = new MockModel([mockTextResponse('Response')]);
+
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model
+      });
+
+      await agent.invoke('Test message');
+
+      const lastCall = model.getLastCall();
+      // modelId should be undefined when no router is configured
+      expect(lastCall?.modelId).toBeUndefined();
+    });
+  });
+
+  describe('Budget enforcement', () => {
+    it('should block invocation when budget exceeded', async () => {
+      const model = new MockModel([mockTextResponse('Should not reach here')]);
+
+      // Create mock BudgetMonitor that blocks all requests
+      const mockBudgetMonitor = {
+        getBudgetAction: async () => 'block' as const,
+        checkBudget: async () => ({
+          withinBudget: false,
+          currentSpend: 100,
+          budgetLimit: 100,
+          percentUsed: 100,
+          thresholdExceeded: true,
+          thresholdPercent: 80
+        })
+      } as BudgetMonitor;
+
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model,
+        budgetMonitor: mockBudgetMonitor
+      });
+
+      // Should throw BudgetExceededError
+      await expect(agent.invoke('Test message')).rejects.toThrow(BudgetExceededError);
+
+      // Model should never be called
+      expect(model.getCallCount()).toBe(0);
+    });
+
+    it('should warn but proceed when budget threshold exceeded', async () => {
+      const model = new MockModel([mockTextResponse('Response')]);
+
+      // Create mock BudgetMonitor that warns
+      const mockBudgetMonitor = {
+        getBudgetAction: async () => 'warn' as const,
+        checkBudget: async () => ({
+          withinBudget: true,
+          currentSpend: 85,
+          budgetLimit: 100,
+          percentUsed: 85,
+          thresholdExceeded: true,
+          thresholdPercent: 80
+        })
+      } as BudgetMonitor;
+
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model,
+        budgetMonitor: mockBudgetMonitor
+      });
+
+      // Should succeed despite warning
+      const result = await agent.invoke('Test message');
+
+      expect(result.output).toBe('Response');
+      expect(model.getCallCount()).toBe(1);
+    });
+
+    it('should allow invocation when within budget', async () => {
+      const model = new MockModel([mockTextResponse('Response')]);
+
+      // Create mock BudgetMonitor that allows
+      const mockBudgetMonitor = {
+        getBudgetAction: async () => 'allow' as const,
+        checkBudget: async () => ({
+          withinBudget: true,
+          currentSpend: 50,
+          budgetLimit: 100,
+          percentUsed: 50,
+          thresholdExceeded: false,
+          thresholdPercent: 80
+        })
+      } as BudgetMonitor;
+
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model,
+        budgetMonitor: mockBudgetMonitor
+      });
+
+      const result = await agent.invoke('Test message');
+
+      expect(result.output).toBe('Response');
+      expect(model.getCallCount()).toBe(1);
+    });
+
+    it('should work without budgetMonitor (no budget checks)', async () => {
+      const model = new MockModel([mockTextResponse('Response')]);
+
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model
+        // No budgetMonitor configured
+      });
+
+      const result = await agent.invoke('Test message');
+
+      expect(result.output).toBe('Response');
+      expect(model.getCallCount()).toBe(1);
     });
   });
 });

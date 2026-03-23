@@ -41,6 +41,7 @@ export interface ConverseTurn {
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
+  modelId?: string;
   [key: string]: unknown;
 }
 
@@ -238,7 +239,7 @@ export class BedrockModel {
   async converse(turn: ConverseTurn): Promise<ConverseResponse> {
     // Build Bedrock API request
     const input: ConverseCommandInput = {
-      modelId: this.config.modelId,
+      modelId: turn.modelId || this.config.modelId,
       messages: turn.messages.map(msg => this.convertMessage(msg)),
       inferenceConfig: {
         maxTokens: turn.maxTokens || this.config.maxTokens,

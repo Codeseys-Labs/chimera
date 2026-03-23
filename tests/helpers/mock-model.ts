@@ -34,6 +34,7 @@ export interface ConverseTurn {
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
+  modelId?: string;
   [key: string]: unknown;
 }
 
@@ -130,6 +131,7 @@ export class MockModel {
       systemPrompt: turn.systemPrompt,
       maxTokens: turn.maxTokens,
       temperature: turn.temperature,
+      modelId: turn.modelId,
     });
 
     // Check if we've exhausted responses
