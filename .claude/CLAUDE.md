@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-frontend-fix2
-- **Task ID:** chimera-a180
+- **Agent Name:** builder-cdk-integration
+- **Task ID:** chimera-5b3b
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-frontend-fix2/chimera-a180
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2
-- **Parent:** lead-user-reg
+- **Branch:** overstory/builder-cdk-integration/chimera-5b3b
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration
+- **Parent:** lead-skill-stages
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,55 +181,56 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `packages/chat-gateway/public/login.html`
-- `packages/chat-gateway/public/auth.js`
-- `packages/chat-gateway/public/admin.js`
+- `infra/lib/skill-pipeline-stack.ts`
+- `packages/core/src/skills/scanners/index.ts`
 
 ## Expertise
 
 Prime relevant domain knowledge before starting work:
 
-No specific expertise domains configured
+```bash
+ml prime typescript
+```
 
 
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-frontend-fix2**.
+Use `ov mail` for all communication. Your address is **builder-cdk-integration**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-frontend-fix2
+ov mail check --agent builder-cdk-integration
 
 # Send a status update to your parent
-ov mail send --to lead-user-reg --subject "status" \
-  --body "Progress update here" --type status --agent builder-frontend-fix2
+ov mail send --to lead-skill-stages --subject "status" \
+  --body "Progress update here" --type status --agent builder-cdk-integration
 
 # Ask a question
-ov mail send --to lead-user-reg --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-frontend-fix2
+ov mail send --to lead-skill-stages --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-cdk-integration
 
 # Report completion
-ov mail send --to lead-user-reg --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-frontend-fix2
+ov mail send --to lead-skill-stages --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-cdk-integration
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-frontend-fix2
+ov mail reply <message-id> --body "Your reply" --agent builder-cdk-integration
 ```
 
 ## Spawning Sub-Workers
@@ -243,20 +244,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-frontend-fix2/chimera-a180)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-frontend-fix2` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-user-reg: `ov mail send --to lead-user-reg --subject "Worker done: chimera-a180" --body "Quality gates passed." --type worker_done --agent builder-frontend-fix2`
-7. **Close issue:** `sd close chimera-a180 --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-cdk-integration/chimera-5b3b)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-cdk-integration` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-skill-stages: `ov mail send --to lead-skill-stages --subject "Worker done: chimera-5b3b" --body "Quality gates passed." --type worker_done --agent builder-cdk-integration`
+7. **Close issue:** `sd close chimera-5b3b --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-frontend-fix2`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-cdk-integration`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-frontend-fix2/chimera-a180
+- Commit only to your branch: overstory/builder-cdk-integration/chimera-5b3b
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
