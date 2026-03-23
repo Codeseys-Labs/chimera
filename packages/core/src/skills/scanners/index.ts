@@ -1,10 +1,14 @@
 /**
  * Skill Security Scanners
  *
- * Implements stages 1-3 of the 7-stage skill security pipeline:
+ * Implements stages 1-7 of the 7-stage skill security pipeline:
  * 1. Static Analysis - AST pattern detection
  * 2. Dependency Audit - OSV database vulnerability checks
  * 3. Sandbox Testing - Isolated test execution with syscall monitoring
+ * 4. Signature Verification - GPG/Sigstore check (TODO)
+ * 5. Performance Testing - Token cost, latency, memory (TODO)
+ * 6. Manual Review - Approval queue with admin notification
+ * 7. Deployment - Publish to DynamoDB registry + S3
  *
  * Reference: docs/research/architecture-reviews/Chimera-Skill-Ecosystem-Design.md § 4.2
  *
@@ -66,3 +70,25 @@ export {
   type MemoryUsage,
   type TestExecutionContext,
 } from './performance-profiler';
+
+// Manual Review Scanner (Stage 6)
+export {
+  ManualReviewScanner,
+  type ManualReviewConfig,
+  type ManualReviewResult,
+  type ReviewStatus,
+  type ReviewPriority,
+  type ReviewDecision,
+  type ReviewCriteria,
+  type SkillReviewMetadata,
+} from './manual-review';
+
+// Skill Deployer (Stage 7)
+export {
+  SkillDeployer,
+  type SkillDeployerConfig,
+  type DeploymentResult,
+  type DeploymentStatus,
+  type DeploymentTarget,
+  type SkillDeploymentMetadata,
+} from './skill-deployer';
