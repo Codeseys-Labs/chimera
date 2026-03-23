@@ -19,6 +19,10 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { TaskCategory, ModelId, FeedbackEvent, FeedbackType } from '../evolution/types';
 
+// Module-level singleton DynamoDB client (reused across all agent instances)
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+
 /**
  * Agent configuration options
  */
@@ -168,9 +172,9 @@ export class ChimeraAgent {
     // Initialize memory with tier-based configuration (async, will complete before first use)
     this.initializeMemory(config.tier || 'basic');
 
-    // Initialize DynamoDB client if evolution table is provided
+    // Use module-level DynamoDB client if evolution table is provided
     if (config.evolutionTable) {
-      this.ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+      this.ddbClient = ddbDocClient;
     }
 
     // Load skills if specified and registry provided

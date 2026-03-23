@@ -26,6 +26,11 @@ import type {
   IaCChangeType,
 } from './types';
 
+// Module-level singleton clients
+const avpClient = new VerifiedPermissionsClient({});
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+
 /**
  * Safety harness for evolution operations
  */
@@ -36,8 +41,8 @@ export class EvolutionSafetyHarness {
 
   constructor(config: EvolutionConfig) {
     this.config = config;
-    this.avp = new VerifiedPermissionsClient({});
-    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    this.avp = avpClient;
+    this.ddb = ddbDocClient;
   }
 
   /**

@@ -14,6 +14,10 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
+// Module-level singleton DynamoDB client
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+
 /**
  * Agent role types
  */
@@ -126,7 +130,7 @@ export class RoleAssigner {
 
   constructor(config: RoleAssignerConfig) {
     this.config = config;
-    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    this.ddb = ddbDocClient;
   }
 
   /**

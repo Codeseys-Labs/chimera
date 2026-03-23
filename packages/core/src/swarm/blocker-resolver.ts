@@ -15,6 +15,11 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
+// Module-level singleton clients
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+const s3Client = new S3Client({});
+
 /**
  * Blocker taxonomy categories
  */
@@ -134,8 +139,8 @@ export class BlockerResolver {
 
   constructor(config: BlockerResolverConfig) {
     this.config = config;
-    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-    this.s3 = new S3Client({});
+    this.ddb = ddbDocClient;
+    this.s3 = s3Client;
   }
 
   /**

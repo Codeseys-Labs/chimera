@@ -24,6 +24,11 @@ import type {
   ISOTimestamp,
 } from './types';
 
+// Module-level singleton clients
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+const s3Client = new S3Client({});
+
 /**
  * Prompt optimizer with A/B testing
  */
@@ -42,8 +47,8 @@ export class PromptOptimizer {
     this.evolutionTable = params.evolutionTable;
     this.sessionsTable = params.sessionsTable;
     this.artifactsBucket = params.artifactsBucket;
-    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-    this.s3 = new S3Client({});
+    this.ddb = ddbDocClient;
+    this.s3 = s3Client;
   }
 
   /**
