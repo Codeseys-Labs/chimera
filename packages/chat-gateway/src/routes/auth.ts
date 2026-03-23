@@ -19,7 +19,7 @@ import {
 
 const router = Router();
 
-// Initialize Cognito client
+// Module-level singleton Cognito client (reused across all requests)
 const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
 });
