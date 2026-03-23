@@ -33,6 +33,8 @@
     "lint": "bun run lint:packages && bun run lint:infra",
     "lint:packages": "cd packages/shared && bun run lint && cd ../core && bun run lint && cd ../sse-bridge && bun run lint && cd ../chat-gateway && bun run lint && cd ../cli && bun run lint",
     "lint:infra": "cd infra && bun run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --build",
     "clean": "bun run clean:packages && bun run clean:infra",
     "clean:packages": "rm -rf packages/*/dist packages/*/node_modules",
@@ -95,6 +97,7 @@
     "@typescript-eslint/eslint-plugin": "^8.57.1",
     "@typescript-eslint/parser": "^8.57.1",
     "eslint": "8.57.1",
+    "prettier": "^3.4.2",
     "typescript": "~5.7.0"
   },
   "engines": {
