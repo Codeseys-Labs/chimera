@@ -14,11 +14,12 @@ set -euo pipefail
 # - Running post-deployment verification
 #
 # Usage:
-#   ./scripts/bootstrap.sh [environment] [region]
+#   ./scripts/bootstrap.sh [environment] [region] [--yes|-y]
 #
 # Examples:
 #   ./scripts/bootstrap.sh dev us-west-2
 #   ./scripts/bootstrap.sh prod us-east-1
+#   ./scripts/bootstrap.sh dev us-west-2 --yes  # Skip interactive prompts
 #
 # Prerequisites:
 #   - AWS credentials configured (aws configure or AWS_ACCESS_KEY_ID/SECRET)
@@ -42,6 +43,15 @@ ENVIRONMENT="${1:-dev}"
 AWS_REGION="${2:-us-west-2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Parse --yes flag for non-interactive mode
+AUTO_CONFIRM=0
+for arg in "$@"; do
+    if [[ "$arg" == "--yes" || "$arg" == "-y" ]]; then
+        AUTO_CONFIRM=1
+        break
+    fi
+done
 
 # ============================================================================
 # Helper Functions
@@ -86,6 +96,13 @@ check_command() {
 prompt_continue() {
     local message="$1"
     echo -e "${YELLOW}$message${NC}"
+
+    # Skip prompt if AUTO_CONFIRM flag is set
+    if [[ $AUTO_CONFIRM -eq 1 ]]; then
+        log_info "Auto-confirming (--yes flag provided)"
+        return 0
+    fi
+
     read -p "Continue? (y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
