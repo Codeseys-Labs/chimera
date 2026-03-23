@@ -73,7 +73,7 @@ export class SecurityStack extends cdk.Stack {
     // ======================================================================
     this.userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: `chimera-users-${props.envName}`,
-      selfSignUpEnabled: true, // Users can self-register via web UI
+      selfSignUpEnabled: false, // Admin-only user creation for security
       signInAliases: { email: true },
       autoVerify: { email: true },
       passwordPolicy: {
@@ -82,6 +82,11 @@ export class SecurityStack extends cdk.Stack {
         requireUppercase: true,
         requireDigits: true,
         requireSymbols: true,
+      },
+      mfa: cognito.Mfa.REQUIRED,
+      mfaSecondFactor: {
+        sms: false,
+        otp: true,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       customAttributes: {

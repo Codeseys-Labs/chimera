@@ -76,6 +76,13 @@ describe('SecurityStack', () => {
         });
       });
 
+      it('should require MFA with TOTP', () => {
+        template.hasResourceProperties('AWS::Cognito::UserPool', {
+          MfaConfiguration: 'ON',
+          EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
+        });
+      });
+
       it('should have email-only account recovery', () => {
         template.hasResourceProperties('AWS::Cognito::UserPool', {
           AccountRecoverySetting: {

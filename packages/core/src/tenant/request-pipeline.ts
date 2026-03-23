@@ -259,12 +259,13 @@ export class RequestPipeline {
     // Build authorization request
     const request = CedarAuthorization.buildRequest(context, action, resource);
 
-    // Add tenant ID to resource attributes for policy evaluation
+    // Add tenant context to resource attributes for policy evaluation
+    // Resource-owned attributes take precedence to enable cross-tenant isolation checks
     request.resource.attributes = {
-      ...request.resource.attributes,
       tenantId: context.tenantId,
       tenantStatus: context.tenantConfig.profile.status,
       tier: context.tenantConfig.profile.tier,
+      ...request.resource.attributes,
     };
 
     // Evaluate policies
