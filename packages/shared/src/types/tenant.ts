@@ -53,6 +53,19 @@ export interface ModelRoutingConfig {
 }
 
 /**
+ * Model routing mode
+ */
+export type ModelRoutingMode = 'static' | 'auto';
+
+/**
+ * Model with cost information
+ */
+export interface ModelWithCost {
+  modelId: string;
+  costPer1kTokens: number;
+}
+
+/**
  * Model configuration (SK=CONFIG#models)
  */
 export interface TenantModelConfig {
@@ -64,6 +77,8 @@ export interface TenantModelConfig {
   fallbackChain: string[];
   monthlyBudgetUsd: number;
   costAlertThreshold: number; // 0-1 (e.g., 0.8 = 80%)
+  routingMode?: ModelRoutingMode; // 'static' (use defaultModel) or 'auto' (Thompson Sampling)
+  availableModelsWithCosts?: ModelWithCost[]; // Expandable model pool
 }
 
 /**

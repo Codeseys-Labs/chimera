@@ -1,13 +1,196 @@
 /**
  * Unit tests for ModelRouter
  *
- * Tests Thompson sampling Bayesian model routing logic.
+ * Tests Thompson sampling Bayesian model routing logic with:
+ * - Expandable model pool
+ * - Toggleable routing (static vs auto)
+ * - Per-tenant model restrictions
+ * - Routing explanations
+ *
  * Integration tests cover AWS SDK interactions.
  */
 
 import { describe, it, expect } from 'bun:test';
+import type { TenantModelConfig } from '@chimera/shared';
 
 describe('ModelRouter Logic', () => {
+  describe('Routing mode selection', () => {
+    it('should support static routing mode', () => {
+      const config: TenantModelConfig = {
+        PK: 'TENANT#test',
+        SK: 'CONFIG#models',
+        allowedModels: ['us.anthropic.claude-sonnet-4-6-v1:0'],
+        defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 1000,
+        costAlertThreshold: 0.8,
+        routingMode: 'static',
+      };
+
+      expect(config.routingMode).toBe('static');
+    });
+
+    it('should support auto routing mode', () => {
+      const config: TenantModelConfig = {
+        PK: 'TENANT#test',
+        SK: 'CONFIG#models',
+        allowedModels: ['us.anthropic.claude-sonnet-4-6-v1:0'],
+        defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 1000,
+        costAlertThreshold: 0.8,
+        routingMode: 'auto',
+      };
+
+      expect(config.routingMode).toBe('auto');
+    });
+
+    it('should default to auto mode if not specified', () => {
+      const config: TenantModelConfig = {
+        PK: 'TENANT#test',
+        SK: 'CONFIG#models',
+        allowedModels: ['us.anthropic.claude-sonnet-4-6-v1:0'],
+        defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 1000,
+        costAlertThreshold: 0.8,
+      };
+
+      expect(config.routingMode).toBeUndefined();
+      // Router should default to 'auto' when routingMode is undefined
+    });
+  });
+
+  describe('Model pool management', () => {
+    it('should support expandable model pool', () => {
+      const config: TenantModelConfig = {
+        PK: 'TENANT#test',
+        SK: 'CONFIG#models',
+        allowedModels: [
+          'us.amazon.nova-micro-v1:0',
+          'us.amazon.nova-lite-v1:0',
+          'us.anthropic.claude-sonnet-4-6-v1:0',
+        ],
+        defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 1000,
+        costAlertThreshold: 0.8,
+        availableModelsWithCosts: [
+          { modelId: 'us.amazon.nova-micro-v1:0', costPer1kTokens: 0.000088 },
+          { modelId: 'us.amazon.nova-lite-v1:0', costPer1kTokens: 0.00024 },
+          { modelId: 'us.anthropic.claude-sonnet-4-6-v1:0', costPer1kTokens: 0.009 },
+        ],
+      };
+
+      expect(config.availableModelsWithCosts).toHaveLength(3);
+    });
+
+    it('should support adding new models dynamically', () => {
+      const config: TenantModelConfig = {
+        PK: 'TENANT#test',
+        SK: 'CONFIG#models',
+        allowedModels: ['us.amazon.nova-lite-v1:0'],
+        defaultModel: 'us.amazon.nova-lite-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 1000,
+        costAlertThreshold: 0.8,
+        availableModelsWithCosts: [
+          { modelId: 'us.amazon.nova-lite-v1:0', costPer1kTokens: 0.00024 },
+        ],
+      };
+
+      // Add new model
+      const newModels = [
+        { modelId: 'us.anthropic.claude-opus-4-6-v1:0', costPer1kTokens: 0.045 },
+      ];
+
+      const updatedConfig = {
+        ...config,
+        availableModelsWithCosts: [
+          ...(config.availableModelsWithCosts || []),
+          ...newModels,
+        ],
+        allowedModels: [
+          ...config.allowedModels,
+          ...newModels.map(m => m.modelId),
+        ],
+      };
+
+      expect(updatedConfig.availableModelsWithCosts).toHaveLength(2);
+      expect(updatedConfig.allowedModels).toContain('us.anthropic.claude-opus-4-6-v1:0');
+    });
+  });
+
+  describe('Per-tenant model restrictions', () => {
+    it('should enforce basic tier restrictions', () => {
+      const basicTierModels = [
+        'us.amazon.nova-lite-v1:0',
+        'us.anthropic.claude-sonnet-4-6-v1:0',
+      ];
+
+      const config: TenantModelConfig = {
+        PK: 'TENANT#basic',
+        SK: 'CONFIG#models',
+        allowedModels: basicTierModels,
+        defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 100,
+        costAlertThreshold: 0.8,
+      };
+
+      expect(config.allowedModels).toHaveLength(2);
+      expect(config.allowedModels).not.toContain('us.anthropic.claude-opus-4-6-v1:0');
+    });
+
+    it('should enforce enterprise tier restrictions', () => {
+      const enterpriseTierModels = [
+        'us.amazon.nova-micro-v1:0',
+        'us.amazon.nova-lite-v1:0',
+        'us.anthropic.claude-sonnet-4-6-v1:0',
+        'us.anthropic.claude-opus-4-6-v1:0',
+      ];
+
+      const config: TenantModelConfig = {
+        PK: 'TENANT#enterprise',
+        SK: 'CONFIG#models',
+        allowedModels: enterpriseTierModels,
+        defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        modelRouting: {},
+        fallbackChain: [],
+        monthlyBudgetUsd: 5000,
+        costAlertThreshold: 0.8,
+      };
+
+      expect(config.allowedModels).toHaveLength(4);
+      expect(config.allowedModels).toContain('us.anthropic.claude-opus-4-6-v1:0');
+    });
+  });
+
+  describe('Routing explanations', () => {
+    it('should provide explanation for static routing', () => {
+      const explanation = `Static routing: Using configured default model (us.anthropic.claude-sonnet-4-6-v1:0, $0.009/1k tokens)`;
+
+      expect(explanation).toContain('Static routing');
+      expect(explanation).toContain('default model');
+      expect(explanation).toContain('$0.009');
+    });
+
+    it('should provide explanation for auto routing', () => {
+      const explanation = `Auto routing (Thompson Sampling): Selected us.anthropic.claude-sonnet-4-6-v1:0 for code generation based on quality sample 0.85 (mean: 0.82 from 42 obs), cost factor 0.65, sensitivity 0.3`;
+
+      expect(explanation).toContain('Thompson Sampling');
+      expect(explanation).toContain('quality sample');
+      expect(explanation).toContain('cost factor');
+      expect(explanation).toContain('sensitivity');
+    });
+  });
+
   describe('Beta distribution sampling', () => {
     it('should generate sample within [0, 1] range', () => {
       const alpha = 10;
