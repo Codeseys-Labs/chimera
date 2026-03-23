@@ -21,6 +21,12 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
+// Module-level singleton clients
+const sfnClient = new SFNClient({});
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+const s3Client = new S3Client({});
+
 /**
  * Experiment configuration
  */
@@ -81,9 +87,9 @@ export class ExperimentRunner {
     this.evolutionTable = params.evolutionTable;
     this.artifactsBucket = params.artifactsBucket;
     this.stateMachineArn = params.stateMachineArn;
-    this.sfn = new SFNClient({});
-    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-    this.s3 = new S3Client({});
+    this.sfn = sfnClient;
+    this.ddb = ddbDocClient;
+    this.s3 = s3Client;
   }
 
   /**

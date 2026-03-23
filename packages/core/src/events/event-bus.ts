@@ -32,6 +32,16 @@ import {
   AllEventDetails,
 } from './event-types';
 
+// Module-level singleton client cache per region
+const eventBridgeClientCache = new Map<string, EventBridgeClient>();
+
+function getEventBridgeClient(region: string): EventBridgeClient {
+  if (!eventBridgeClientCache.has(region)) {
+    eventBridgeClientCache.set(region, new EventBridgeClient({ region }));
+  }
+  return eventBridgeClientCache.get(region)!;
+}
+
 /**
  * EventBus configuration options
  */
@@ -163,9 +173,8 @@ export class ChimeraEventBus {
       maxRetries: config.maxRetries || 3,
     };
 
-    this.client = new EventBridgeClient({
-      region: this.config.region,
-    });
+    // Use cached singleton client
+    this.client = getEventBridgeClient(this.config.region);
   }
 
   /**

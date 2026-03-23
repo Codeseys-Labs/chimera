@@ -15,6 +15,17 @@ import {
   Tool as BedrockTool,
 } from '@aws-sdk/client-bedrock-runtime';
 
+// Module-level singleton client cache per region
+// AWS SDK v3 clients are designed to be reused across requests
+const bedrockClientCache = new Map<string, BedrockRuntimeClient>();
+
+function getBedrockClient(region: string): BedrockRuntimeClient {
+  if (!bedrockClientCache.has(region)) {
+    bedrockClientCache.set(region, new BedrockRuntimeClient({ region }));
+  }
+  return bedrockClientCache.get(region)!;
+}
+
 export interface BedrockModelConfig {
   /** Model ID (e.g., 'anthropic.claude-3-sonnet-20240229-v1:0') */
   modelId: string;
@@ -120,10 +131,8 @@ export class BedrockModel {
       topP: config.topP,
     };
 
-    // Use provided client or create new one
-    this.client = config.client || new BedrockRuntimeClient({
-      region: this.config.region,
-    });
+    // Use provided client or get cached singleton
+    this.client = config.client || getBedrockClient(this.config.region);
   }
 
   /**
