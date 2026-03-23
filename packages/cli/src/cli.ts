@@ -12,6 +12,7 @@ import { registerTenantCommands } from './commands/tenant';
 import { registerSessionCommands } from './commands/session';
 import { registerSkillCommands } from './commands/skill';
 import { registerDeployCommands } from './commands/deploy';
+import { registerDestroyCommands } from './commands/destroy';
 import { registerConnectCommand } from './commands/connect';
 import { registerStatusCommand } from './commands/status';
 
@@ -27,6 +28,7 @@ registerTenantCommands(program);
 registerSessionCommands(program);
 registerSkillCommands(program);
 registerDeployCommands(program);
+registerDestroyCommands(program);
 registerConnectCommand(program);
 registerStatusCommand(program);
 
