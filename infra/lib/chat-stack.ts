@@ -237,7 +237,7 @@ export class ChatStack extends cdk.Stack {
 
     // Placeholder HTTPS listener (certificate will be added via ACM in deployment)
     // For now, this is a placeholder that returns 503
-    const httpsListener = this.alb.addListener('HttpsListener', {
+    this.alb.addListener('HttpsListener', {
       port: 443,
       protocol: elbv2.ApplicationProtocol.HTTP, // Will be changed to HTTPS with certificate
       defaultAction: elbv2.ListenerAction.fixedResponse(503, {
@@ -249,7 +249,7 @@ export class ChatStack extends cdk.Stack {
     });
 
     // In production, replace the placeholder with actual target group
-    // httpsListener.addAction('ForwardToChat', {
+    // Use: this.alb.listeners[1].addAction('ForwardToChat', {
     //   action: elbv2.ListenerAction.forward([this.targetGroup]),
     // });
 
