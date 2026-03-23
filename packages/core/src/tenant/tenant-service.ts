@@ -225,18 +225,49 @@ export class TenantService {
       ...params.features,
     };
 
+    // Tier-based model restrictions
+    const modelsByTier: Record<TenantTier, string[]> = {
+      basic: ['us.amazon.nova-lite-v1:0', 'us.anthropic.claude-sonnet-4-6-v1:0'],
+      advanced: [
+        'us.amazon.nova-lite-v1:0',
+        'us.anthropic.claude-sonnet-4-6-v1:0',
+        'us.anthropic.claude-opus-4-6-v1:0',
+      ],
+      enterprise: [
+        'us.amazon.nova-micro-v1:0',
+        'us.amazon.nova-lite-v1:0',
+        'us.anthropic.claude-sonnet-4-6-v1:0',
+        'us.anthropic.claude-opus-4-6-v1:0',
+      ],
+      dedicated: [
+        'us.amazon.nova-micro-v1:0',
+        'us.amazon.nova-lite-v1:0',
+        'us.anthropic.claude-sonnet-4-6-v1:0',
+        'us.anthropic.claude-opus-4-6-v1:0',
+      ],
+    };
+
+    const availableModels = modelsByTier[params.tier];
+
     // Create CONFIG#models item with sensible defaults
     const models: TenantModelConfig = {
       PK: pk,
       SK: 'CONFIG#models',
-      allowedModels: ['anthropic.claude-3-5-sonnet-20241022-v2:0'],
-      defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+      allowedModels: availableModels,
+      defaultModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
       modelRouting: {
-        default: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        default: 'us.anthropic.claude-sonnet-4-6-v1:0',
       },
-      fallbackChain: ['anthropic.claude-3-5-sonnet-20241022-v2:0'],
+      fallbackChain: ['us.anthropic.claude-sonnet-4-6-v1:0'],
       monthlyBudgetUsd: params.tier === 'basic' ? 100 : params.tier === 'advanced' ? 1000 : 5000,
       costAlertThreshold: 0.8,
+      routingMode: 'auto', // Default to auto-routing with Thompson Sampling
+      availableModelsWithCosts: [
+        { modelId: 'us.amazon.nova-micro-v1:0', costPer1kTokens: 0.000088 },
+        { modelId: 'us.amazon.nova-lite-v1:0', costPer1kTokens: 0.00024 },
+        { modelId: 'us.anthropic.claude-sonnet-4-6-v1:0', costPer1kTokens: 0.009 },
+        { modelId: 'us.anthropic.claude-opus-4-6-v1:0', costPer1kTokens: 0.045 },
+      ].filter(m => availableModels.includes(m.modelId)),
       ...params.models,
     };
 

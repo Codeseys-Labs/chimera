@@ -119,16 +119,9 @@ export type TaskCategory =
   | 'research';
 
 /**
- * Available Bedrock models with costs
+ * Model ID (flexible string type for extensibility)
  */
-export const BEDROCK_MODELS = {
-  'us.amazon.nova-micro-v1:0': 0.000088,
-  'us.amazon.nova-lite-v1:0': 0.00024,
-  'us.anthropic.claude-sonnet-4-6-v1:0': 0.009,
-  'us.anthropic.claude-opus-4-6-v1:0': 0.045,
-} as const;
-
-export type ModelId = keyof typeof BEDROCK_MODELS;
+export type ModelId = string;
 
 /**
  * Beta distribution parameters for Thompson sampling
@@ -161,7 +154,9 @@ export interface ModelRoutingState {
 export interface ModelSelection {
   selectedModel: ModelId;
   taskCategory: TaskCategory;
-  routingWeights: Record<ModelId, {
+  routingMode: 'static' | 'auto';
+  explanation: string;
+  routingWeights?: Record<ModelId, {
     meanQuality: number;
     observations: number;
     costPer1k: number;
