@@ -180,6 +180,7 @@ describe('RequestPipeline', () => {
       expect(result.stages[1].stage).toBe('authorization');
       expect(result.stages[1].allowed).toBe(false);
       expect(result.stages[1].error?.code).toBe('AUTHORIZATION_DENIED');
+      expect(result.authorizationResult?.reasons).toContain('cross-tenant-isolation');
       expect(result.stages.length).toBe(2); // Auth and authz only
     });
 
