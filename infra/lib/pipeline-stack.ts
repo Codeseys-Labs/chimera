@@ -209,6 +209,16 @@ export class PipelineStack extends cdk.Stack {
       buildSpec: codebuild.BuildSpec.fromObject({
         version: '0.2',
         phases: {
+          install: {
+            'runtime-versions': {
+              nodejs: 20,
+            },
+            commands: [
+              'curl -fsSL https://bun.sh/install | bash',
+              'export PATH="$HOME/.bun/bin:$PATH"',
+              'bun --version',
+            ],
+          },
           pre_build: {
             commands: [
               'echo "Installing test dependencies..."',
