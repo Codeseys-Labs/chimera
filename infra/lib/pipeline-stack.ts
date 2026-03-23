@@ -182,6 +182,16 @@ export class PipelineStack extends cdk.Stack {
       })
     );
 
+    // Grant CDK deploy permissions — CodeBuild assumes CDK bootstrap roles
+    buildProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sts:AssumeRole'],
+        resources: [
+          `arn:aws:iam::${this.account}:role/cdk-*`,
+        ],
+      })
+    );
+
     // ======================================================================
     // CodeBuild Project for Test Stage
     // ======================================================================
@@ -749,6 +759,7 @@ def handler(event, context):
               project: buildProject,
               input: sourceOutput,
               outputs: [buildOutput],
+              variablesNamespace: 'BuildVars',
             }),
           ],
         },
@@ -771,7 +782,7 @@ def handler(event, context):
               actionName: 'Canary_Orchestration',
               stateMachine: orchestrationStateMachine,
               stateMachineInput: codepipeline_actions.StateMachineInput.literal({
-                imageUri: '#{BuildOutput.image-uri.txt}',
+                imageUri: '#{BuildVars.IMAGE_URI}',
               }),
             }),
           ],

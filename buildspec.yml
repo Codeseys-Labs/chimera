@@ -56,9 +56,9 @@ phases:
       - echo "Stage 4: CDK Synth and Validation"
       - echo "========================================="
       - cd infra
-      - npx cdk synth --all
+      - bunx cdk synth --all
       - echo "Running cdk-nag security checks..."
-      - npx cdk-nag || echo "CDK NAG warnings detected - review required"
+      - bunx cdk-nag || echo "CDK NAG warnings detected - review required"
       - cd ..
       - echo ""
 
@@ -79,6 +79,7 @@ phases:
 
       - echo "Writing image URI to artifact..."
       - echo "$ECR_REPOSITORY:$IMAGE_TAG" > image-uri.txt
+      - export IMAGE_URI="$ECR_REPOSITORY:$IMAGE_TAG"
 
   post_build:
     commands:
@@ -86,6 +87,13 @@ phases:
       - echo "Build completed on $(date)"
       - echo "Image URI - $(cat image-uri.txt)"
       - echo "========================================="
+      - echo ""
+      - echo "========================================="
+      - echo "Stage 7: Deploy All CDK Stacks"
+      - echo "========================================="
+      - cd infra
+      - bunx cdk deploy --all --require-approval never --context environment="$ENV_NAME" --context repositoryName="chimera"
+      - cd ..
 
 artifacts:
   files:
@@ -93,6 +101,10 @@ artifacts:
     - infra/**/*
     - packages/**/*
   name: ChimeraBuildArtifacts
+
+env:
+  exported-variables:
+    - IMAGE_URI
 
 cache:
   paths:
