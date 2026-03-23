@@ -237,7 +237,7 @@ export class ChatStack extends cdk.Stack {
 
     // Placeholder HTTPS listener (certificate will be added via ACM in deployment)
     // For now, this is a placeholder that returns 503
-    const httpsListener = this.alb.addListener('HttpsListener', {
+    this.alb.addListener('HttpsListener', {
       port: 443,
       protocol: elbv2.ApplicationProtocol.HTTP, // Will be changed to HTTPS with certificate
       defaultAction: elbv2.ListenerAction.fixedResponse(503, {
@@ -249,7 +249,7 @@ export class ChatStack extends cdk.Stack {
     });
 
     // In production, replace the placeholder with actual target group
-    // httpsListener.addAction('ForwardToChat', {
+    // Use: this.alb.listeners[1].addAction('ForwardToChat', {
     //   action: elbv2.ListenerAction.forward([this.targetGroup]),
     // });
 
@@ -300,6 +300,7 @@ export class ChatStack extends cdk.Stack {
 
     // ======================================================================
     // CloudFront Distribution
+<<<<<<< HEAD
     // Global edge caching layer in front of ALB
     // Default behavior: no caching (pass-through for SSE streaming)
     // /static/* behavior: 24h TTL for static assets
@@ -365,23 +366,46 @@ export class ChatStack extends cdk.Stack {
         : cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       enableIpv6: true,
+=======
+    // CDN layer for chat gateway with edge caching
+    // - Default behavior: no-cache (dynamic chat endpoints)
+    // - Static assets: 24h cache for JS/CSS/images
+    // - ALL_VIEWER origin request policy: forwards all headers/cookies/query strings
+    // ======================================================================
+    this.distribution = new cloudfront.Distribution(this, 'ChatDistribution', {
+      comment: `Chimera Chat Gateway CDN (${props.envName})`,
+>>>>>>> overstory/builder-cf-fix/chimera-9349
       defaultBehavior: {
         origin: new origins.LoadBalancerV2Origin(this.alb, {
           protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
           httpPort: 80,
+<<<<<<< HEAD
           connectionAttempts: 3,
           connectionTimeout: cdk.Duration.seconds(10),
           readTimeout: cdk.Duration.seconds(60),
           keepaliveTimeout: cdk.Duration.seconds(60),
+=======
+>>>>>>> overstory/builder-cf-fix/chimera-9349
         }),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
         cachedMethods: cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
         compress: true,
+<<<<<<< HEAD
         cachePolicy: noCachePolicy,
         originRequestPolicy: originRequestPolicy,
       },
       additionalBehaviors: {
+=======
+        // No caching for dynamic chat endpoints (SSE streaming, real-time responses)
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        // ALL_VIEWER: forwards all headers, cookies, query strings to origin
+        // Required for: Authorization headers, session cookies, platform user IDs
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+      },
+      additionalBehaviors: {
+        // Static assets: JS bundles, CSS, images (24h cache)
+>>>>>>> overstory/builder-cf-fix/chimera-9349
         '/static/*': {
           origin: new origins.LoadBalancerV2Origin(this.alb, {
             protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
@@ -391,6 +415,7 @@ export class ChatStack extends cdk.Stack {
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
           cachedMethods: cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
           compress: true,
+<<<<<<< HEAD
           cachePolicy: staticCachePolicy,
         },
       },
@@ -414,6 +439,28 @@ export class ChatStack extends cdk.Stack {
       ],
       logBucket: undefined, // CloudFront access logs can be added later
       enableLogging: false, // Disabled to reduce costs in dev
+=======
+          cachePolicy: new cloudfront.CachePolicy(this, 'StaticAssetCachePolicy', {
+            cachePolicyName: `chimera-static-${props.envName}`,
+            comment: '24h cache for static assets (JS, CSS, images)',
+            defaultTtl: cdk.Duration.hours(24),
+            minTtl: cdk.Duration.hours(1),
+            maxTtl: cdk.Duration.days(7),
+            enableAcceptEncodingGzip: true,
+            enableAcceptEncodingBrotli: true,
+            headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+            queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+            cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+          }),
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        },
+      },
+      priceClass: isProd
+        ? cloudfront.PriceClass.PRICE_CLASS_ALL
+        : cloudfront.PriceClass.PRICE_CLASS_100,
+      enableLogging: true,
+      logBucket: undefined, // Will be configured with S3 bucket in deployment
+>>>>>>> overstory/builder-cf-fix/chimera-9349
     });
 
     // ======================================================================
@@ -461,11 +508,21 @@ export class ChatStack extends cdk.Stack {
       description: 'Target group ARN',
     });
 
+<<<<<<< HEAD
+=======
+    new cdk.CfnOutput(this, 'CloudFrontDomain', {
+      value: this.distribution.distributionDomainName,
+      exportName: `${this.stackName}-CloudFrontDomain`,
+      description: 'CloudFront distribution domain name',
+    });
+
+>>>>>>> overstory/builder-cf-fix/chimera-9349
     new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
       value: this.distribution.distributionId,
       exportName: `${this.stackName}-CloudFrontDistributionId`,
       description: 'CloudFront distribution ID',
     });
+<<<<<<< HEAD
 
     new cdk.CfnOutput(this, 'CloudFrontDomainName', {
       value: this.distribution.distributionDomainName,
@@ -478,5 +535,7 @@ export class ChatStack extends cdk.Stack {
       exportName: `${this.stackName}-CloudFrontUrl`,
       description: 'CloudFront HTTPS endpoint URL',
     });
+=======
+>>>>>>> overstory/builder-cf-fix/chimera-9349
   }
 }
