@@ -14,6 +14,7 @@ import {
   GetRepositoryCommand,
   CreateCommitCommand,
   GetBranchCommand,
+  DeleteBranchCommand,
   PutFileEntry,
 } from '@aws-sdk/client-codecommit';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
@@ -215,17 +216,24 @@ async function pushToCodeCommit(
   const batches = batchFiles(allFiles);
   console.log(chalk.gray(`  Organized into ${batches.length} commit batch(es)`));
 
-  // Step 3: Check if branch exists, get parent commit ID if it does
-  let parentCommitId: string | undefined;
+  // Step 3: Check if branch exists, delete it to enable force-overwrite
+  // This fixes CreateCommit rejection when files are unchanged from parent
   try {
-    const getBranchResult = await client.send(
+    await client.send(
       new GetBranchCommand({
         repositoryName: repoName,
         branchName,
       }),
     );
-    parentCommitId = getBranchResult.branch?.commitId;
-    console.log(chalk.gray(`  Branch '${branchName}' exists, will update`));
+    console.log(chalk.gray(`  Branch '${branchName}' exists, deleting for force-overwrite...`));
+
+    await client.send(
+      new DeleteBranchCommand({
+        repositoryName: repoName,
+        branchName,
+      }),
+    );
+    console.log(chalk.gray(`  Branch deleted, will create fresh`));
   } catch (error: any) {
     if (error.name === 'BranchDoesNotExistException') {
       console.log(chalk.gray(`  Branch '${branchName}' does not exist, will create`));
@@ -235,6 +243,8 @@ async function pushToCodeCommit(
   }
 
   // Step 4: Create commits in sequence, chaining parentCommitId
+  // Since we deleted the branch, start fresh with no parent
+  let parentCommitId: string | undefined;
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
     const batchNum = i + 1;
@@ -259,7 +269,7 @@ async function pushToCodeCommit(
       new CreateCommitCommand({
         repositoryName: repoName,
         branchName,
-        parentCommitId, // undefined for first commit on new branch
+        parentCommitId, // undefined for first commit, then chains subsequent commits
         commitMessage,
         authorName: 'Chimera CLI',
         email: 'deploy@chimera.aws',
@@ -267,7 +277,7 @@ async function pushToCodeCommit(
       }),
     );
 
-    // Update parent for next commit
+    // Update parent for next commit in batch sequence
     parentCommitId = createCommitResult.commitId;
   }
 
