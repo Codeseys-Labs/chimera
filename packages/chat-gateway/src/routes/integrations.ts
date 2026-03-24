@@ -9,11 +9,11 @@
  * - Query existing integrations
  */
 
-import { Router, Request, Response } from 'express';
-import type { Router as ExpressRouter } from 'express';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import crypto from 'crypto';
 
-const router: ExpressRouter = Router();
+const router = new Hono();
 
 // Local DynamoDBClient type (matches TenantService interface)
 interface DynamoDBClient {

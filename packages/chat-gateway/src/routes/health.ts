@@ -2,18 +2,18 @@
  * Health check routes
  */
 
-import { Router, Request, Response } from 'express';
-import type { Router as ExpressRouter } from 'express';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { HealthResponse } from '../types';
 
-const router: ExpressRouter = Router();
+const router = new Hono();
 
 /**
  * GET /health
  *
  * Health check endpoint for ALB target group health checks
  */
-router.get('/health', (_req: Request, res: Response) => {
+router.get('/health', (c: Context) => {
   const response: HealthResponse = {
     status: 'healthy',
     service: 'chimera-chat-gateway',
@@ -21,7 +21,7 @@ router.get('/health', (_req: Request, res: Response) => {
     version: '0.1.0',
   };
 
-  res.status(200).json(response);
+  return c.json(response, 200);
 });
 
 export default router;
