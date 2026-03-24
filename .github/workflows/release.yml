@@ -168,10 +168,56 @@ jobs:
           asset_name: chimera-${{ needs.create-release.outputs.version }}-${{ matrix.platform }}.zip
           asset_content_type: application/zip
 
+  # Build agent source archive for deployment
+  build-agent-archive:
+    name: Build Agent Archive
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create agent archive
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          # Create archive with deployable source files
+          tar -czf chimera-agent-${VERSION}.tar.gz \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='.overstory' \
+            --exclude='dist' \
+            --exclude='.mulch' \
+            --exclude='.seeds' \
+            --exclude='*.log' \
+            --exclude='.DS_Store' \
+            packages/ \
+            infra/ \
+            scripts/ \
+            docs/ \
+            buildspec.yml \
+            SOUL.md \
+            AGENTS.md \
+            package.json \
+            bun.lockb \
+            tsconfig.json
+
+      - name: Upload agent archive to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: chimera-agent-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_name: chimera-agent-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_content_type: application/gzip
+
   # Update release with installation instructions after all binaries are uploaded
   finalize-release:
     name: Finalize Release
-    needs: [create-release, build-binaries]
+    needs: [create-release, build-binaries, build-agent-archive]
     runs-on: ubuntu-latest
     steps:
       - name: Update release description
