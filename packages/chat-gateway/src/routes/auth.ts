@@ -4,8 +4,9 @@
  * Implements OAuth2 PKCE authorization code flow with Cognito.
  */
 
-import { Router, Request, Response } from 'express';
-import { authenticateJWT, AuthenticatedRequest } from '../middleware/auth';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
+import { authenticateJWT } from '../middleware/auth';
 import {
   CognitoIdentityProviderClient,
   SignUpCommand,
@@ -17,7 +18,7 @@ import {
   AdminUpdateUserAttributesCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 
-const router = Router();
+const router = new Hono();
 
 // Module-level singleton Cognito client (reused across all requests)
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -38,21 +39,20 @@ const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'default';
  * Returns OAuth configuration for the frontend.
  * Public endpoint (no auth required).
  */
-router.get('/config', (req: Request, res: Response) => {
+router.get('/config', (c: Context) => {
   if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'AUTH_NOT_CONFIGURED',
         message: 'OAuth not configured',
       },
       timestamp: new Date().toISOString(),
-    });
-    return;
+    }, 500);
   }
 
   const oauthUrl = `https://${COGNITO_DOMAIN}.auth.${COGNITO_REGION}.amazoncognito.com`;
 
-  res.json({
+  return c.json({
     domain: COGNITO_DOMAIN,
     region: COGNITO_REGION,
     clientId: COGNITO_CLIENT_ID,
@@ -74,30 +74,29 @@ router.get('/config', (req: Request, res: Response) => {
  * Body: { code: string, codeVerifier: string }
  * Returns: { access_token, id_token, refresh_token, expires_in }
  */
-router.post('/exchange', async (req: Request, res: Response) => {
+router.post('/exchange', async (c: Context) => {
   try {
-    const { code, codeVerifier } = req.body;
+    const body = await c.req.json();
+    const { code, codeVerifier } = body as { code?: string; codeVerifier?: string };
 
     if (!code || !codeVerifier) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REQUEST',
           message: 'Missing code or codeVerifier',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'OAuth not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     // Exchange authorization code for tokens
@@ -122,28 +121,27 @@ router.post('/exchange', async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorData = await tokenResponse.json().catch(() => ({})) as { error_description?: string };
       console.error('Token exchange failed:', errorData);
-      res.status(tokenResponse.status).json({
+      return c.json({
         error: {
           code: 'TOKEN_EXCHANGE_FAILED',
           message: errorData.error_description || 'Failed to exchange authorization code',
           details: errorData,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, tokenResponse.status);
     }
 
     const tokens = await tokenResponse.json();
-    res.json(tokens);
+    return c.json(tokens);
   } catch (error) {
     console.error('Token exchange error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Token exchange failed',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 

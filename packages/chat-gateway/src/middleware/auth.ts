@@ -5,7 +5,7 @@
  * Uses aws-jwt-verify for secure token validation.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Context, Next } from 'hono';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 
 // Cognito configuration from environment
@@ -22,22 +22,20 @@ const verifier = USER_POOL_ID && CLIENT_ID
     })
   : null;
 
-// Extend Express Request to include auth context
-export interface AuthenticatedRequest extends Request {
-  auth?: {
-    sub: string; // Cognito user ID (UUID)
-    email?: string;
-    tenantId: string; // From custom:tenant_id claim
-    tenantTier?: string; // From custom:tenant_tier claim
-    groups?: string[]; // Cognito user pool groups
-  };
+// Auth context type (stored in Hono context)
+export interface AuthContext {
+  sub: string; // Cognito user ID (UUID)
+  email?: string;
+  tenantId: string; // From custom:tenant_id claim
+  tenantTier?: string; // From custom:tenant_tier claim
+  groups?: string[]; // Cognito user pool groups
 }
 
 /**
  * Extract Bearer token from Authorization header
  */
-function extractToken(req: Request): string | null {
-  const authHeader = req.headers.authorization;
+function extractToken(c: Context): string | null {
+  const authHeader = c.req.header('authorization');
   if (!authHeader) return null;
 
   const parts = authHeader.split(' ');
@@ -49,43 +47,40 @@ function extractToken(req: Request): string | null {
 /**
  * JWT authentication middleware
  *
- * Validates Cognito JWT tokens and populates req.auth with user context.
+ * Validates Cognito JWT tokens and populates context with auth data.
  * Fails closed: rejects requests when tokens are invalid or verification fails.
  *
  * Usage:
- *   app.use('/chat', authenticateJWT);
- *   app.use('/admin', authenticateJWT, requireGroup('admin'));
+ *   app.use('/chat/*', authenticateJWT);
+ *   app.use('/admin/*', authenticateJWT);
  */
 export async function authenticateJWT(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
+  c: Context,
+  next: Next
+): Promise<Response | void> {
   try {
     // Extract token
-    const token = extractToken(req);
+    const token = extractToken(c);
     if (!token) {
-      res.status(401).json({
+      return c.json({
         error: {
           code: 'UNAUTHORIZED',
           message: 'Missing or invalid Authorization header',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 401);
     }
 
     // Verify configuration
     if (!verifier) {
       console.error('JWT verifier not configured: missing COGNITO_USER_POOL_ID or COGNITO_CLIENT_ID');
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Authentication service unavailable',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     // Verify token
@@ -94,37 +89,35 @@ export async function authenticateJWT(
     // Extract custom claims
     const tenantId = payload['custom:tenant_id'];
     if (!tenantId || typeof tenantId !== 'string') {
-      res.status(403).json({
+      return c.json({
         error: {
           code: 'FORBIDDEN',
           message: 'Token missing required tenant_id claim',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    // Populate auth context
-    const authReq = req as AuthenticatedRequest;
-    authReq.auth = {
+    // Populate auth context in Hono context
+    c.set('auth', {
       sub: payload.sub,
       email: payload.email as string | undefined,
       tenantId: tenantId,
       tenantTier: payload['custom:tenant_tier'] as string | undefined,
       groups: payload['cognito:groups'] as string[] | undefined,
-    };
+    });
 
-    next();
+    await next();
   } catch (error) {
     // Token verification failed
     console.error('JWT verification failed:', error);
-    res.status(401).json({
+    return c.json({
       error: {
         code: 'INVALID_TOKEN',
         message: 'Token verification failed',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 401);
   }
 }
 
@@ -132,38 +125,36 @@ export async function authenticateJWT(
  * Require specific Cognito group membership
  *
  * Usage:
- *   app.post('/admin/users', authenticateJWT, requireGroup('admin'), handler);
+ *   app.post('/admin/users', authenticateJWT, requireGroup('admin'));
  */
 export function requireGroup(...allowedGroups: string[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const authReq = req as AuthenticatedRequest;
+  return async (c: Context, next: Next): Promise<Response | void> => {
+    const auth = c.get('auth') as AuthContext | undefined;
 
-    if (!authReq.auth) {
-      res.status(401).json({
+    if (!auth) {
+      return c.json({
         error: {
           code: 'UNAUTHORIZED',
           message: 'Authentication required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 401);
     }
 
-    const userGroups = authReq.auth.groups || [];
+    const userGroups = auth.groups || [];
     const hasAccess = allowedGroups.some((group) => userGroups.includes(group));
 
     if (!hasAccess) {
-      res.status(403).json({
+      return c.json({
         error: {
           code: 'FORBIDDEN',
           message: `Required group: ${allowedGroups.join(' or ')}`,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    next();
+    await next();
   };
 }
 
@@ -174,13 +165,12 @@ export function requireGroup(...allowedGroups: string[]) {
  * Useful for endpoints that support both authenticated and anonymous access.
  */
 export async function optionalAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  c: Context,
+  next: Next
 ): Promise<void> {
-  const token = extractToken(req);
+  const token = extractToken(c);
   if (!token) {
-    next();
+    await next();
     return;
   }
 
@@ -190,14 +180,13 @@ export async function optionalAuth(
       const tenantId = payload['custom:tenant_id'];
 
       if (tenantId && typeof tenantId === 'string') {
-        const authReq = req as AuthenticatedRequest;
-        authReq.auth = {
+        c.set('auth', {
           sub: payload.sub,
           email: payload.email as string | undefined,
           tenantId: tenantId,
           tenantTier: payload['custom:tenant_tier'] as string | undefined,
           groups: payload['cognito:groups'] as string[] | undefined,
-        };
+        });
       }
     }
   } catch (error) {
@@ -205,5 +194,5 @@ export async function optionalAuth(
     console.warn('Optional auth token verification failed:', error);
   }
 
-  next();
+  await next();
 }

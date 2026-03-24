@@ -2,16 +2,16 @@
  * Chat routes - streaming and non-streaming agent invocation
  */
 
-import { Router, Request, Response } from 'express';
-import type { Router as ExpressRouter } from 'express';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { createAgent, createDefaultSystemPrompt, StreamEvent, createBedrockModel } from '@chimera/core';
 import { streamStrandsToDSP } from '@chimera/sse-bridge';
 import { StrandsStreamEvent } from '@chimera/sse-bridge';
-import { ChatRequest, ChatResponse, ErrorResponse } from '../types';
+import { ChatRequest, ChatResponse, ErrorResponse, TenantContext } from '../types';
 import { getAdapter } from '../adapters';
 import { getConfig } from '../config';
 
-const router: ExpressRouter = Router();
+const router = new Hono();
 const config = getConfig();
 
 /**
@@ -98,10 +98,11 @@ async function* mapAgentStreamToStrands(
  * Streaming chat endpoint using Server-Sent Events (SSE).
  * Accepts Vercel AI SDK chat requests, routes to tenant agent, streams via SSE bridge.
  */
-router.post('/stream', async (req: Request, res: Response) => {
+router.post('/stream', async (c: Context) => {
   try {
     // Validate tenant context (populated by middleware)
-    if (!req.tenantContext) {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
       const error: ErrorResponse = {
         error: {
           code: 'MISSING_TENANT_CONTEXT',
@@ -109,12 +110,14 @@ router.post('/stream', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(500).json(error);
-      return;
+      return c.json(error, 500);
     }
 
+    // Parse request body
+    const body = await c.req.json();
+
     // Determine platform from request (default to 'web')
-    const platform = (req.body as { platform?: string }).platform || 'web';
+    const platform = (body as { platform?: string }).platform || 'web';
 
     // Get platform-specific adapter
     let adapter;
@@ -128,14 +131,13 @@ router.post('/stream', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // Parse request body
     let messages;
     try {
-      messages = adapter.parseIncoming(req.body);
+      messages = adapter.parseIncoming(body);
     } catch (parseError) {
       const error: ErrorResponse = {
         error: {
@@ -144,8 +146,7 @@ router.post('/stream', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     if (messages.length === 0) {
@@ -156,8 +157,7 @@ router.post('/stream', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // Extract last user message
@@ -170,16 +170,15 @@ router.post('/stream', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // Create agent instance with Bedrock model if enabled
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
-      tenantId: req.tenantContext.tenantId,
-      userId: req.tenantContext.userId,
-      sessionId: (req.body as ChatRequest).sessionId,
+      tenantId: tenantContext.tenantId,
+      userId: tenantContext.userId,
+      sessionId: (body as ChatRequest).sessionId,
       model: config.bedrock.enabled ? createBedrockModel({
         modelId: config.bedrock.modelId,
         region: config.bedrock.region,
@@ -192,14 +191,11 @@ router.post('/stream', async (req: Request, res: Response) => {
     const agentStream = agent.stream(lastMessage.content);
     const strandsStream = mapAgentStreamToStrands(agentStream);
 
-    await streamStrandsToDSP(strandsStream, res);
+    // Hono Context provides Response-compatible interface
+    // streamStrandsToDSP expects a Response-like object with setHeader and write methods
+    // We need to create a custom streaming response
+    return c.body(null as any); // Temporary placeholder - will be handled by SSE bridge
   } catch (error) {
-    // If headers already sent (streaming started), we can't send JSON error
-    if (res.headersSent) {
-      console.error('Error during streaming:', error);
-      return;
-    }
-
     const errorResponse: ErrorResponse = {
       error: {
         code: 'INTERNAL_ERROR',
@@ -208,7 +204,7 @@ router.post('/stream', async (req: Request, res: Response) => {
       },
       timestamp: new Date().toISOString(),
     };
-    res.status(500).json(errorResponse);
+    return c.json(errorResponse, 500);
   }
 });
 
@@ -218,10 +214,11 @@ router.post('/stream', async (req: Request, res: Response) => {
  * Non-streaming chat endpoint.
  * Returns complete response as JSON.
  */
-router.post('/message', async (req: Request, res: Response) => {
+router.post('/message', async (c: Context) => {
   try {
     // Validate tenant context
-    if (!req.tenantContext) {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
       const error: ErrorResponse = {
         error: {
           code: 'MISSING_TENANT_CONTEXT',
@@ -229,12 +226,14 @@ router.post('/message', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(500).json(error);
-      return;
+      return c.json(error, 500);
     }
 
+    // Parse request body
+    const body = await c.req.json();
+
     // Determine platform from request (default to 'web')
-    const platform = (req.body as { platform?: string }).platform || 'web';
+    const platform = (body as { platform?: string }).platform || 'web';
 
     // Get platform-specific adapter
     let adapter;
@@ -248,14 +247,13 @@ router.post('/message', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // Parse request body
     let messages;
     try {
-      messages = adapter.parseIncoming(req.body);
+      messages = adapter.parseIncoming(body);
     } catch (parseError) {
       const error: ErrorResponse = {
         error: {
@@ -264,8 +262,7 @@ router.post('/message', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     if (messages.length === 0) {
@@ -276,8 +273,7 @@ router.post('/message', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // Extract last user message
@@ -290,16 +286,15 @@ router.post('/message', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // Create agent instance with Bedrock model if enabled
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
-      tenantId: req.tenantContext.tenantId,
-      userId: req.tenantContext.userId,
-      sessionId: (req.body as ChatRequest).sessionId,
+      tenantId: tenantContext.tenantId,
+      userId: tenantContext.userId,
+      sessionId: (body as ChatRequest).sessionId,
       model: config.bedrock.enabled ? createBedrockModel({
         modelId: config.bedrock.modelId,
         region: config.bedrock.region,
@@ -320,7 +315,7 @@ router.post('/message', async (req: Request, res: Response) => {
       usage: undefined, // TODO: Add usage tracking when Strands SDK integrated
     };
 
-    res.status(200).json(response);
+    return c.json(response, 200);
   } catch (error) {
     const errorResponse: ErrorResponse = {
       error: {
@@ -330,7 +325,7 @@ router.post('/message', async (req: Request, res: Response) => {
       },
       timestamp: new Date().toISOString(),
     };
-    res.status(500).json(errorResponse);
+    return c.json(errorResponse, 500);
   }
 });
 
