@@ -191,6 +191,7 @@ jobs:
             --exclude='dist' \
             --exclude='.mulch' \
             --exclude='.seeds' \
+            --exclude='.claude' \
             --exclude='*.log' \
             --exclude='.DS_Store' \
             packages/ \
@@ -200,8 +201,9 @@ jobs:
             buildspec.yml \
             SOUL.md \
             AGENTS.md \
+            CLAUDE.md \
             package.json \
-            bun.lockb \
+            bun.lock \
             tsconfig.json
 
       - name: Upload agent archive to release
@@ -274,6 +276,12 @@ jobs:
 
             ### Windows (x64)
             Download and extract \`chimera-${version}-windows-x64.zip\`, then add the directory to your PATH.
+
+            ### Agent Archive (for chimera deploy)
+            \`\`\`bash
+            wget https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${version}/chimera-agent-${version}.tar.gz
+            tar -xzf chimera-agent-${version}.tar.gz
+            \`\`\`
 
             ## Verify Installation
             \`\`\`bash
