@@ -100,3 +100,14 @@ export {
   type BroadcastMessage,
   type RoutingConfig
 } from './a2a-protocol';
+
+// GroupChat
+export {
+  GroupChat,
+  createGroupChat,
+  GroupChatMessageBuilder,
+  type GroupChatMessage,
+  type GroupChatConfig,
+  type AgentSubscription,
+  type GroupChatMetrics
+} from './groupchat';
