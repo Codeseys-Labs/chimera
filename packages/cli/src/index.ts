@@ -10,5 +10,7 @@ export * from './commands/skill';
 export * from './commands/deploy';
 export * from './commands/connect';
 export * from './commands/status';
+export * from './commands/sync';
+export * from './commands/upgrade';
 export * from './utils/config';
 export * from './utils/output';
