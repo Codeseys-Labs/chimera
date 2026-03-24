@@ -19,7 +19,7 @@ phases:
       - bun run lint || true
       - bun run typecheck || true
       - bun test --coverage || true
-      - cd infra && bunx cdk synth --all && cd ..
+      - cd infra && npx cdk synth --all && cd ..
       - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
 
       # Build and push chat-gateway image (Bun + Hono)
@@ -44,7 +44,7 @@ phases:
 
   post_build:
     commands:
-      - cd infra && bunx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..
+      - cd infra && npx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..
 
 artifacts:
   files:

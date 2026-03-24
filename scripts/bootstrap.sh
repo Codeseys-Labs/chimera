@@ -225,7 +225,7 @@ if aws cloudformation describe-stacks --stack-name CDKToolkit --region "$AWS_REG
     log_warn "CDK already bootstrapped in this account/region"
 else
     log_info "Bootstrapping CDK in $AWS_ACCOUNT_ID / $AWS_REGION..."
-    bunx cdk bootstrap "aws://${AWS_ACCOUNT_ID}/${AWS_REGION}"
+    npx cdk bootstrap "aws://${AWS_ACCOUNT_ID}/${AWS_REGION}"
     log_success "CDK bootstrap complete"
 fi
 
@@ -256,7 +256,7 @@ echo
 log_info "Step 7: Synthesizing CDK stacks..."
 echo
 
-bunx cdk synth --quiet
+npx cdk synth --quiet
 
 log_success "CDK synthesis complete - all stacks validated"
 echo
@@ -289,13 +289,13 @@ echo
 if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
     prompt_continue "Ready to deploy all 11 stacks?"
     log_info "Deploying all stacks (--require-approval never)..."
-    bunx cdk deploy --all --require-approval never \
+    npx cdk deploy --all --require-approval never \
         --context environment="$ENVIRONMENT" \
         --context region="$AWS_REGION"
 else
     prompt_continue "Ready to deploy 10 stacks (excluding ChatStack)?"
     log_info "Deploying stacks (--require-approval never)..."
-    bunx cdk deploy \
+    npx cdk deploy \
         Chimera-${ENVIRONMENT}-Network \
         Chimera-${ENVIRONMENT}-Data \
         Chimera-${ENVIRONMENT}-Security \
@@ -314,7 +314,7 @@ fi
 if [[ $DOCKER_AVAILABLE -eq 1 ]]; then
     log_success "All 11 stacks deployed successfully"
 else
-    log_success "10 stacks deployed successfully (ChatStack skipped - install Docker and run 'bunx cdk deploy ChatStack' to add it later)"
+    log_success "10 stacks deployed successfully (ChatStack skipped - install Docker and run 'npx cdk deploy ChatStack' to add it later)"
 fi
 echo
 

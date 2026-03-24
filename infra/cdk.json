@@ -1,5 +1,5 @@
 {
-  "app": "bun run bin/chimera.ts",
+  "app": "npx ts-node bin/chimera.ts",
   "watch": {
     "include": ["**"],
     "exclude": [

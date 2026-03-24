@@ -61,33 +61,34 @@ sd close <task-id> --reason "completed"
 
 ### Bun Package Manager
 
-**CRITICAL:** This project uses **Bun exclusively** for package management and script execution.
+**CRITICAL:** This project uses **Bun exclusively** for package management and script execution, **with one exception: AWS CDK**.
 
 - ✅ **Always use `bun`** for package installation: `bun install`, `bun add <package>`, `bun remove <package>`
-- ✅ **Always use `bun` or `bunx`** for script execution: `bun test`, `bun run lint`, `bunx cdk deploy`
-- ❌ **Never use npm** — no `npm install`, `npm run`, or `npx`
+- ✅ **Always use `bun` or `bunx`** for script execution: `bun test`, `bun run lint`, `bunx tsc`
+- ⚠️ **EXCEPTION: AWS CDK commands must use `npx`** — `npx cdk deploy`, `npx cdk synth`, `npx cdk bootstrap`
+- ❌ **Never use npm** for package management — no `npm install`, `npm run`
 - ❌ **Never use yarn** or `pnpm`
 
-**Why bunx?**
-- CDK and other dev tools are declared as `devDependencies`, not installed globally
-- `bunx <command>` executes packages from `node_modules/.bin/` or downloads them temporarily
-- This ensures consistent versions across all environments
+**Why the CDK exception?**
+
+AWS CDK is fundamentally Node.js-based and relies on Node's module resolution algorithm. Bun's module resolution, while compatible with most packages, creates different class instances for aws-cdk-lib constructs, breaking `instanceof` checks and peer dependency patterns. This causes errors like `TypeError: peer.canInlineRule is not a function` in security group rules.
+
+**Solution:** CDK commands use `npx cdk` (Node runtime) while everything else uses Bun. The `infra/cdk.json` app field uses `npx ts-node` to ensure CDK construct code runs under Node.
 
 **Examples:**
 ```bash
 # ✅ Correct
-bun install
-bun test
-bun run lint
-bunx cdk deploy --all
-bunx tsc --noEmit
+bun install                    # Package management
+bun test                       # Tests
+bun run lint                   # Linting
+bunx tsc --noEmit             # TypeScript
+npx cdk synth                  # CDK synthesis (Node required)
+npx cdk deploy --all           # CDK deployment (Node required)
 
 # ❌ Wrong
-npm install
-npm test
-npm run lint
-npx cdk deploy
-cdk deploy  # Assumes global install
+npm install                    # Use bun install
+bunx cdk deploy                # Use npx cdk (Bun breaks CDK)
+cdk deploy                     # Assumes global install
 ```
 
 ---
