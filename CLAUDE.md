@@ -91,6 +91,34 @@ bunx cdk deploy                # Use npx cdk (Bun breaks CDK)
 cdk deploy                     # Assumes global install
 ```
 
+### Best Practices (Learned Conventions)
+
+These conventions were discovered through production incidents:
+
+**Toolchain:**
+- TypeScript/JS: bun exclusively for packages and scripts
+- Python: uv with pyproject.toml (never pip/requirements.txt)
+- AWS CDK: npx cdk only (never bunx cdk)
+- CDK synthesis uses `npx ts-node --transpile-only` for speed
+- AWS SDK v3 clients: module-level singletons, not per-request instances
+
+**Infrastructure:**
+- CodeBuild YAML: avoid decorative echo commands, use POSIX-compliant shell
+- Docker in buildspec: add `|| true` for fault tolerance, but remove when downstream depends on image
+- KMS keys for CloudWatch Logs: must grant permissions via key policy, not just IAM
+- Step Functions Lambda tasks: always add retry with `errors: ['States.ALL']`
+- DLQ circuit breakers: CloudWatch alarms on `ApproximateNumberOfMessagesVisible`
+
+**Security:**
+- Cedar authorization tests: assert on specific policy reasons, not just allow/deny
+- GSI queries on multi-tenant tables: always add `FilterExpression='tenantId = :tid'`
+- Web UI: use `createElement/textContent`, never `innerHTML`
+
+**Development:**
+- Lead agents: read-only operations plus mail/mulch/seeds
+- Quality gates: `bun test && bun run lint && bun run typecheck` before merge
+- Mulch records: capture learnings before closing tasks
+
 ---
 
 ## Overstory Workflow
