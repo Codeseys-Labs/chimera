@@ -231,7 +231,7 @@ aws dynamodb scan \
 ```bash
 # Option A: Blue-green table swap (requires CDK stack update)
 # Update CDK context variable to point to restored table
-cdk deploy ChimeraDataStack --context tenantsTableName=chimera-tenants-restored-1234567890
+bunx cdk deploy ChimeraDataStack --context tenantsTableName=chimera-tenants-restored-1234567890
 
 # Option B: Data migration script (zero downtime)
 # Copy restored data back to production table
@@ -387,11 +387,11 @@ done
 
 ```bash
 # Tear down compromised infrastructure
-cdk destroy ChimeraDataStack ChimeraSecurityStack --force
+bunx cdk destroy ChimeraDataStack ChimeraSecurityStack --force
 
 # Rebuild from version-controlled CDK code
 git checkout tags/v1.2.3  # Last known-good release
-cdk deploy --all --require-approval never
+bunx cdk deploy --all --require-approval never
 
 # Restore data from PITR backups
 ./scripts/dr/restore-all-tables.sh
