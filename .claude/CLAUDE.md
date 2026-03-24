@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-hono-v2
-- **Task ID:** chimera-5acc
+- **Agent Name:** builder-fix-cdk-bun
+- **Task ID:** chimera-db2d
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-hono-v2/chimera-5acc
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-hono-v2
-- **Parent:** lead-hono-redo
+- **Branch:** overstory/builder-fix-cdk-bun/chimera-db2d
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun
+- **Parent:** lead-fix-cdk-bun
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,22 +181,26 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-hono-v2`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-hono-v2`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-hono-v2`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-No file scope restrictions
+- `infra/cdk.json`
+- `buildspec.yml`
+- `scripts/bootstrap.sh`
+- `CLAUDE.md`
+- `AGENTS.md`
 
 ## Expertise
 
@@ -208,26 +212,26 @@ No specific expertise domains configured
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-hono-v2**.
+Use `ov mail` for all communication. Your address is **builder-fix-cdk-bun**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-hono-v2
+ov mail check --agent builder-fix-cdk-bun
 
 # Send a status update to your parent
-ov mail send --to lead-hono-redo --subject "status" \
-  --body "Progress update here" --type status --agent builder-hono-v2
+ov mail send --to lead-fix-cdk-bun --subject "status" \
+  --body "Progress update here" --type status --agent builder-fix-cdk-bun
 
 # Ask a question
-ov mail send --to lead-hono-redo --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-hono-v2
+ov mail send --to lead-fix-cdk-bun --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-fix-cdk-bun
 
 # Report completion
-ov mail send --to lead-hono-redo --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-hono-v2
+ov mail send --to lead-fix-cdk-bun --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-fix-cdk-bun
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-hono-v2
+ov mail reply <message-id> --body "Your reply" --agent builder-fix-cdk-bun
 ```
 
 ## Spawning Sub-Workers
@@ -241,20 +245,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-hono-v2/chimera-5acc)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-hono-v2` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-hono-redo: `ov mail send --to lead-hono-redo --subject "Worker done: chimera-5acc" --body "Quality gates passed." --type worker_done --agent builder-hono-v2`
-7. **Close issue:** `sd close chimera-5acc --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-fix-cdk-bun/chimera-db2d)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-fix-cdk-bun` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-fix-cdk-bun: `ov mail send --to lead-fix-cdk-bun --subject "Worker done: chimera-db2d" --body "Quality gates passed." --type worker_done --agent builder-fix-cdk-bun`
+7. **Close issue:** `sd close chimera-db2d --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-hono-v2`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-hono-v2/chimera-5acc
+- Commit only to your branch: overstory/builder-fix-cdk-bun/chimera-db2d
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`

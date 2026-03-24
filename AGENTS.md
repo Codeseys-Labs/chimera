@@ -26,7 +26,7 @@
 
 ### Bun Package Manager
 
-**This project uses Bun exclusively.** All commands and examples use `bun` or `bunx`.
+**This project uses Bun exclusively, with ONE EXCEPTION: AWS CDK commands.**
 
 | Command | Usage | Notes |
 |---------|-------|-------|
@@ -34,18 +34,23 @@
 | `bun test` | Run tests | Never use `npm test` |
 | `bun run lint` | Run linter | Never use `npm run lint` |
 | `bun run typecheck` | TypeScript checks | Never use `npm run typecheck` |
-| `bunx <cmd>` | Execute package binary | Never use `npx <cmd>` or bare `<cmd>` |
+| `bunx <cmd>` | Execute package binary | For most tools (tsc, eslint, etc.) |
+| `npx cdk <cmd>` | **CDK commands ONLY** | **EXCEPTION: CDK requires Node runtime** |
 
-**Why bunx?**
-Dev tools (CDK, TypeScript, ESLint) are `devDependencies`, not global installs. Use `bunx cdk deploy`, not `cdk deploy`.
+**Why the CDK exception?**
+
+AWS CDK is Node.js-native and uses Node's module resolution. Bun's module resolution creates different class instances for aws-cdk-lib constructs, breaking `instanceof` checks. This causes `TypeError: peer.canInlineRule is not a function` in security groups and other construct errors.
+
+**Solution:** Use `npx cdk` (Node runtime) for CDK, `bunx` for everything else.
 
 **Examples:**
 ```bash
 # ✅ Correct
 bun install
 bun test
-bunx cdk synth
 bunx tsc --noEmit
+npx cdk synth                  # CDK uses npx (Node required)
+npx cdk deploy --all           # CDK uses npx (Node required)
 
 # ❌ Wrong
 npm install
