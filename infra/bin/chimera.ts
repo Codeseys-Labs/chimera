@@ -123,7 +123,7 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   tenantsTable: dataStack.tenantsTable,
   sessionsTable: dataStack.sessionsTable,
   skillsTable: dataStack.skillsTable,
-  ecrRepository: pipelineStack.ecrRepository,
+  ecrRepository: pipelineStack.chatGatewayEcrRepository,
 });
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
@@ -189,7 +189,7 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // Stack 3 (SecurityStack): user pool ID/ARN, WebACL ARN, KMS key ARN
 // Stack 4 (ObservabilityStack): alarm topic ARN, dashboard URL/name
 // Stack 5 (ApiStack): REST API ID/URL, authorizer ID, WebSocket API ID/URL
-// Stack 6 (PipelineStack): pipeline ARN/name, artifact bucket name, ECR repository ARN/URI, orchestration state machine ARN, alarm topic ARN
+// Stack 6 (PipelineStack): pipeline ARN/name, artifact bucket name, agent ECR repository ARN/URI, chat-gateway ECR repository ARN/URI, orchestration state machine ARN, alarm topic ARN
 // Stack 7 (SkillPipelineStack): state machine ARN/name
 // Stack 8 (ChatStack): ALB DNS/ARN, ECS cluster/service names, task definition ARN
 // Stack 9 (OrchestrationStack): event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN

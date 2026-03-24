@@ -49,7 +49,8 @@ export interface PipelineStackProps extends cdk.StackProps {
 export class PipelineStack extends cdk.Stack {
   public readonly pipeline: codepipeline.Pipeline;
   public readonly artifactBucket: s3.IBucket;
-  public readonly ecrRepository: ecr.Repository;
+  public readonly ecrRepository: ecr.Repository;  // Agent runtime ECR
+  public readonly chatGatewayEcrRepository: ecr.Repository;  // Chat gateway ECR
 
   constructor(scope: Construct, id: string, props: PipelineStackProps) {
     super(scope, id, props);
@@ -62,6 +63,31 @@ export class PipelineStack extends cdk.Stack {
 
     this.ecrRepository = new ecr.Repository(this, 'AgentRuntimeRepository', {
       repositoryName: `chimera-agent-runtime-${props.envName}`,
+      imageScanOnPush: true,
+      imageTagMutability: ecr.TagMutability.MUTABLE,
+      lifecycleRules: [
+        {
+          description: 'Remove untagged images after 7 days',
+          tagStatus: ecr.TagStatus.UNTAGGED,
+          maxImageAge: cdk.Duration.days(7),
+          rulePriority: 1,
+        },
+        {
+          description: 'Keep last 30 images',
+          maxImageCount: 30,
+          rulePriority: 2,
+        },
+      ],
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      emptyOnDelete: !isProd,
+    });
+
+    // ======================================================================
+    // ECR Repository for Chat Gateway Images
+    // ======================================================================
+
+    this.chatGatewayEcrRepository = new ecr.Repository(this, 'ChatGatewayRepository', {
+      repositoryName: `chimera-chat-gateway-${props.envName}`,
       imageScanOnPush: true,
       imageTagMutability: ecr.TagMutability.MUTABLE,
       lifecycleRules: [
@@ -136,8 +162,11 @@ export class PipelineStack extends cdk.Stack {
           ECR_REGISTRY: {
             value: `${this.account}.dkr.ecr.${this.region}.amazonaws.com`,
           },
-          ECR_REPOSITORY: {
+          ECR_REPOSITORY_AGENT: {
             value: this.ecrRepository.repositoryUri,
+          },
+          ECR_REPOSITORY_CHAT_GATEWAY: {
+            value: this.chatGatewayEcrRepository.repositoryUri,
           },
           ENV_NAME: {
             value: props.envName,
@@ -884,6 +913,18 @@ def handler(event, context):
       value: this.ecrRepository.repositoryUri,
       exportName: `${this.stackName}-EcrRepositoryUri`,
       description: 'ECR repository URI for agent runtime images',
+    });
+
+    new cdk.CfnOutput(this, 'ChatGatewayEcrRepositoryArn', {
+      value: this.chatGatewayEcrRepository.repositoryArn,
+      exportName: `${this.stackName}-ChatGatewayEcrRepositoryArn`,
+      description: 'ECR repository ARN for chat gateway images',
+    });
+
+    new cdk.CfnOutput(this, 'ChatGatewayEcrRepositoryUri', {
+      value: this.chatGatewayEcrRepository.repositoryUri,
+      exportName: `${this.stackName}-ChatGatewayEcrRepositoryUri`,
+      description: 'ECR repository URI for chat gateway images',
     });
   }
 }
