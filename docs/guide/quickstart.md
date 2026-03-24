@@ -25,9 +25,9 @@ curl https://mise.run | sh
 # AWS CLI v2 (for credential management)
 aws --version  # Should be 2.x
 
-# AWS CDK CLI (for infrastructure deployment)
-npm install -g aws-cdk
-cdk --version  # Should be 2.x
+# AWS CDK CLI is included as a dev dependency
+# Use bunx to run it (no global install needed)
+bunx cdk --version  # Should be 2.x
 ```
 
 ### AWS Account Setup
