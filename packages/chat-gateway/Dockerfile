@@ -9,7 +9,7 @@ FROM oven/bun:1.2-alpine AS builder
 WORKDIR /app
 
 # Copy monorepo root dependencies
-COPY package.json bun.lockb tsconfig.json ./
+COPY package.json bun.lock tsconfig.json ./
 
 # Copy workspace packages
 COPY packages/shared ./packages/shared
@@ -32,7 +32,7 @@ FROM oven/bun:1.2-alpine AS runtime
 WORKDIR /app
 
 # Copy only production dependencies and built artifacts
-COPY --from=builder /app/package.json /app/bun.lockb ./
+COPY --from=builder /app/package.json /app/bun.lock ./
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/core/package.json ./packages/core/
