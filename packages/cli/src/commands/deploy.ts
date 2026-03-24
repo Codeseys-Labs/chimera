@@ -16,6 +16,10 @@ import {
   GetBranchCommand,
   PutFileEntry,
 } from '@aws-sdk/client-codecommit';
+import {
+  CloudFormationClient,
+  DescribeStacksCommand,
+} from '@aws-sdk/client-cloudformation';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
 import {
   resolveSourcePath,
@@ -195,6 +199,33 @@ async function ensureCodeCommitRepo(
       const result = await client.send(createCommand);
       return result.repositoryMetadata?.cloneUrlHttp || '';
     }
+    throw error;
+  }
+}
+
+/**
+ * Check if Pipeline stack exists in CloudFormation
+ * Returns true if stack exists (in any state except DELETE_COMPLETE)
+ */
+async function pipelineStackExists(
+  client: CloudFormationClient,
+  environment: string,
+): Promise<boolean> {
+  try {
+    const stackName = `Chimera-${environment}-Pipeline`;
+    const command = new DescribeStacksCommand({ StackName: stackName });
+    const response = await client.send(command);
+
+    // Stack exists if we got a response with at least one stack
+    // (and status is not DELETE_COMPLETE)
+    const stack = response.Stacks?.[0];
+    return !!stack && stack.StackStatus !== 'DELETE_COMPLETE';
+  } catch (error: any) {
+    // Stack does not exist if we get ValidationError
+    if (error.name === 'ValidationError') {
+      return false;
+    }
+    // Re-throw unexpected errors
     throw error;
   }
 }
@@ -410,10 +441,30 @@ export function registerDeployCommands(program: Command): void {
         await pushToCodeCommit(codecommitClient, options.repoName, sourcePath, 'main');
         spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
 
-        // Step 6: Deploy CDK stacks
-        spinner.start('Deploying CDK stacks (this will take 15-30 minutes)...');
-        deployCdkStacks(sourcePath, options.region, options.env);
-        spinner.succeed(chalk.green('All CDK stacks deployed'));
+        // Step 6: Check if Pipeline stack exists
+        spinner.start('Checking Pipeline stack status...');
+        const cfnClient = new CloudFormationClient({ region: options.region });
+        const stackExists = await pipelineStackExists(cfnClient, options.env);
+
+        if (stackExists) {
+          // Pipeline stack exists - skip local CDK, CodePipeline will handle deployment
+          spinner.succeed(
+            chalk.green('Pipeline stack exists - CodePipeline will handle deployment'),
+          );
+          console.log(
+            chalk.gray(
+              '\nCodePipeline will automatically deploy infrastructure updates from the pushed code.',
+            ),
+          );
+          console.log(
+            chalk.gray('Monitor deployment progress in the AWS CodePipeline console.'),
+          );
+        } else {
+          // First-time deployment - run local CDK to bootstrap Pipeline stack
+          spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
+          deployCdkStacks(sourcePath, options.region, options.env);
+          spinner.succeed(chalk.green('Pipeline stack deployed - future pushes will auto-deploy'));
+        }
 
         // Step 7: Save deployment config
         const config = loadConfig();
