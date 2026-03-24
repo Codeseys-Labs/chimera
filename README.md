@@ -117,7 +117,7 @@ bun test
 
 # Synthesize CDK infrastructure
 cd infra
-npx cdk synth --quiet
+bunx cdk synth --quiet
 ```
 
 ## Project Structure

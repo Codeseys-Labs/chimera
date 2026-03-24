@@ -60,7 +60,7 @@ Install required tools:
 - **Node.js:** 20.x LTS ([install via mise](https://mise.jdx.dev/))
 - **Bun:** 1.0.30+ ([install guide](https://bun.sh/docs/installation))
 - **mise:** 2024.1+ ([install guide](https://mise.jdx.dev/getting-started.html))
-- **AWS CDK CLI:** 2.120+ (`npm install -g aws-cdk`)
+- **AWS CDK CLI:** 2.120+ (included as dev dependency, use `bunx cdk`)
 - **Docker:** 24+ (for CDK asset bundling)
 
 **Quick install:**
@@ -76,7 +76,7 @@ mise install
 # Verify installations
 node --version    # Should be 20.x
 bun --version     # Should be 1.0.30+
-cdk --version     # Should be 2.120+
+bunx cdk --version     # Should be 2.120+
 docker --version  # Should be 24+
 ```
 
@@ -138,18 +138,18 @@ First-time setup per account/region:
 
 ```bash
 # Bootstrap CDK in target account/region
-cdk bootstrap aws://${CDK_DEFAULT_ACCOUNT}/${CDK_DEFAULT_REGION}
+bunx cdk bootstrap aws://${CDK_DEFAULT_ACCOUNT}/${CDK_DEFAULT_REGION}
 
 # For multi-account pipeline (optional)
-cdk bootstrap aws://<dev-account>/us-west-2 \
+bunx cdk bootstrap aws://<dev-account>/us-west-2 \
   --trust <pipeline-account> \
   --cloudformation-execution-policies "arn:aws:iam::aws:policy/AdministratorAccess"
 
-cdk bootstrap aws://<staging-account>/us-west-2 \
+bunx cdk bootstrap aws://<staging-account>/us-west-2 \
   --trust <pipeline-account> \
   --cloudformation-execution-policies "arn:aws:iam::aws:policy/AdministratorAccess"
 
-cdk bootstrap aws://<prod-account>/us-west-2 \
+bunx cdk bootstrap aws://<prod-account>/us-west-2 \
   --trust <pipeline-account> \
   --cloudformation-execution-policies "arn:aws:iam::aws:policy/AdministratorAccess"
 ```
@@ -182,13 +182,13 @@ Chimera uses an **11-stack architecture** with explicit dependencies. Deploy in 
 
 ```bash
 # Synth to verify configuration
-cdk synth
+bunx cdk synth
 
 # Deploy all platform stacks
-cdk deploy --all --require-approval never
+bunx cdk deploy --all --require-approval never
 
 # Or deploy with confirmation prompts
-cdk deploy --all
+bunx cdk deploy --all
 ```
 
 **Expected duration:**
@@ -202,13 +202,13 @@ For targeted updates:
 
 ```bash
 # Deploy just the data layer
-cdk deploy Chimera-${ENVIRONMENT}-Data
+bunx cdk deploy Chimera-${ENVIRONMENT}-Data
 
 # Deploy API Gateway changes only
-cdk deploy Chimera-${ENVIRONMENT}-Api
+bunx cdk deploy Chimera-${ENVIRONMENT}-Api
 
 # Deploy tenant onboarding workflow
-cdk deploy Chimera-${ENVIRONMENT}-TenantOnboarding
+bunx cdk deploy Chimera-${ENVIRONMENT}-TenantOnboarding
 ```
 
 ### Stack Outputs
@@ -237,13 +237,13 @@ For multi-account deployments:
 
 ```bash
 # Deploy to dev (single command)
-ENVIRONMENT=dev cdk deploy --all
+ENVIRONMENT=dev bunx cdk deploy --all
 
 # Deploy to staging (after dev testing)
-ENVIRONMENT=staging cdk deploy --all
+ENVIRONMENT=staging bunx cdk deploy --all
 
 # Deploy to prod (requires manual approval in pipeline)
-ENVIRONMENT=prod cdk deploy --all --require-approval always
+ENVIRONMENT=prod bunx cdk deploy --all --require-approval always
 ```
 
 ---
@@ -546,8 +546,8 @@ cdk deploy --all
 
 ```bash
 # Delete stack completely and redeploy
-cdk destroy Chimera-${ENVIRONMENT}-Data
-cdk deploy Chimera-${ENVIRONMENT}-Data
+bunx cdk destroy Chimera-${ENVIRONMENT}-Data
+bunx cdk deploy Chimera-${ENVIRONMENT}-Data
 
 # Or delete table manually
 aws dynamodb delete-table --table-name chimera-tenants-${ENVIRONMENT}

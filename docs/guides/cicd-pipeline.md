@@ -36,7 +36,7 @@ The Chimera CI/CD pipeline implements a progressive deployment strategy with aut
   3. Type check (`bun run typecheck`)
   4. Unit tests with coverage (`bun test --coverage`)
   5. Contract tests (`bun test:contract`)
-  6. CDK synth and validation (`npx cdk synth --all`, `npx cdk-nag`)
+  6. CDK synth and validation (`bunx cdk synth --all`, `bunx cdk-nag`)
   7. Docker build and push to ECR
 - **Output**: Build artifact with `image-uri.txt`, CDK templates, agent code
 
@@ -124,13 +124,13 @@ Rollback restores both canary and production endpoints to the `:latest-stable` E
 cd infra
 
 # Deploy to staging
-npx cdk deploy Chimera-Pipeline-staging \
+bunx cdk deploy Chimera-Pipeline-staging \
   --context envName=staging \
   --context repository=your-org/chimera \
   --context branch=main
 
 # Deploy to production
-npx cdk deploy Chimera-Pipeline-production \
+bunx cdk deploy Chimera-Pipeline-production \
   --context envName=production \
   --context repository=your-org/chimera \
   --context branch=main
@@ -264,7 +264,7 @@ Subscribe to the SNS topic `chimera-pipeline-alarms-<env>` for:
 ### Before Merging to Main
 
 - Run full test suite locally: `bun test && bun test:integration`
-- Verify CDK synth works: `cd infra && npx cdk synth --all`
+- Verify CDK synth works: `cd infra && bunx cdk synth --all`
 - Check linting and types: `bun run lint && bun run typecheck`
 
 ### Emergency Deployments
