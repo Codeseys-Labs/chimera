@@ -17,6 +17,11 @@ import {
   PutFileEntry,
 } from '@aws-sdk/client-codecommit';
 import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
+import {
+  resolveSourcePath,
+  cleanupSource,
+  type SourceLocation,
+} from '../utils/source';
 
 // CodeCommit batch limits
 const BATCH_MAX_BYTES = 5 * 1024 * 1024; // 5MB per commit (leave 1MB buffer from 6MB limit)
@@ -155,9 +160,9 @@ async function getAccountId(): Promise<string> {
 
 /**
  * Find project root by walking up directory tree looking for package.json
- * Pure Node.js approach - no git binary required
+ * Returns null if not found (caller decides whether to error or use alternative source)
  */
-function findProjectRoot(): string {
+function findProjectRoot(): string | null {
   let dir = process.cwd();
   while (dir !== path.dirname(dir)) {
     if (fs.existsSync(path.join(dir, 'package.json'))) {
@@ -165,7 +170,7 @@ function findProjectRoot(): string {
     }
     dir = path.dirname(dir);
   }
-  throw new Error('Could not find project root (no package.json found). Run from within the project directory.');
+  return null;
 }
 
 /**
@@ -313,15 +318,29 @@ function deployCdkStacks(repoRoot: string, region: string, environment: string):
   );
 }
 
+/**
+ * Register all deployment-related commands
+ */
 export function registerDeployCommands(program: Command): void {
+  // Main deploy command
   program
     .command('deploy')
     .description('Deploy Chimera to AWS account (creates CodeCommit repo, pushes source, triggers pipeline)')
     .option('--region <region>', 'AWS region', 'us-east-1')
     .option('--env <environment>', 'Environment name', 'dev')
     .option('--repo-name <name>', 'CodeCommit repository name', 'chimera')
+    .option(
+      '--source <mode>',
+      'Source mode: auto (detect), local (current directory), or github (download release)',
+      'auto',
+    )
+    .option('--github-owner <owner>', 'GitHub repository owner', 'your-org')
+    .option('--github-repo <repo>', 'GitHub repository name', 'chimera')
+    .option('--github-tag <tag>', 'GitHub release tag (or "latest")', 'latest')
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
+      let sourceLocation: SourceLocation;
+      let sourcePath: string | null = null;
 
       try {
         // Step 1: Get AWS account ID
@@ -329,28 +348,74 @@ export function registerDeployCommands(program: Command): void {
         const accountId = await getAccountId();
         spinner.succeed(chalk.green(`AWS Account: ${accountId}`));
 
-        // Step 2: Create or get CodeCommit repository
+        // Step 2: Determine source location
+        spinner.start('Determining source location...');
+        if (options.source === 'auto') {
+          // Auto-detect: use local if in project directory, otherwise GitHub
+          const localRoot = findProjectRoot();
+          if (localRoot) {
+            sourceLocation = { type: 'local', path: localRoot };
+            spinner.succeed(chalk.green(`Source: Local project (${localRoot})`));
+          } else {
+            sourceLocation = {
+              type: 'github-release',
+              owner: options.githubOwner,
+              repo: options.githubRepo,
+              tag: options.githubTag,
+            };
+            spinner.succeed(
+              chalk.green(
+                `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
+              ),
+            );
+          }
+        } else if (options.source === 'local') {
+          const localRoot = findProjectRoot();
+          if (!localRoot) {
+            throw new Error(
+              'Could not find project root (no package.json found). Run from within the project directory or use --source github.',
+            );
+          }
+          sourceLocation = { type: 'local', path: localRoot };
+          spinner.succeed(chalk.green(`Source: Local project (${localRoot})`));
+        } else if (options.source === 'github') {
+          sourceLocation = {
+            type: 'github-release',
+            owner: options.githubOwner,
+            repo: options.githubRepo,
+            tag: options.githubTag,
+          };
+          spinner.succeed(
+            chalk.green(
+              `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
+            ),
+          );
+        } else {
+          throw new Error(`Invalid source mode: ${options.source}. Use auto, local, or github.`);
+        }
+
+        // Step 3: Resolve source to filesystem path
+        spinner.start('Preparing source code...');
+        sourcePath = await resolveSourcePath(sourceLocation);
+        spinner.succeed(chalk.green(`Source ready: ${sourcePath}`));
+
+        // Step 4: Create or get CodeCommit repository
         spinner.start('Setting up CodeCommit repository...');
         const codecommitClient = new CodeCommitClient({ region: options.region });
         await ensureCodeCommitRepo(codecommitClient, options.repoName);
         spinner.succeed(chalk.green(`CodeCommit repository ready: ${options.repoName}`));
 
-        // Step 3: Find project root
-        spinner.start('Locating project root...');
-        const repoRoot = findProjectRoot();
-        spinner.succeed(chalk.green(`Project root: ${repoRoot}`));
-
-        // Step 4: Push source to CodeCommit (using batched CreateCommit API)
+        // Step 5: Push source to CodeCommit (using batched CreateCommit API)
         spinner.start('Pushing source code to CodeCommit...');
-        await pushToCodeCommit(codecommitClient, options.repoName, repoRoot, 'main');
+        await pushToCodeCommit(codecommitClient, options.repoName, sourcePath, 'main');
         spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
 
-        // Step 5: Deploy CDK stacks
+        // Step 6: Deploy CDK stacks
         spinner.start('Deploying CDK stacks (this will take 15-30 minutes)...');
-        deployCdkStacks(repoRoot, options.region, options.env);
+        deployCdkStacks(sourcePath, options.region, options.env);
         spinner.succeed(chalk.green('All CDK stacks deployed'));
 
-        // Step 6: Save deployment config
+        // Step 7: Save deployment config
         const config = loadConfig();
         const deployment: DeploymentConfig = {
           accountId,
@@ -370,6 +435,11 @@ export function registerDeployCommands(program: Command): void {
         spinner.fail(chalk.red('Deployment failed'));
         console.error(chalk.red(error.message));
         process.exit(1);
+      } finally {
+        // Clean up temporary source directories
+        if (sourcePath && sourceLocation) {
+          cleanupSource(sourcePath, sourceLocation);
+        }
       }
     });
 }
