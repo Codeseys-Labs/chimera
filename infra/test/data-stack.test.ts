@@ -20,6 +20,7 @@ import { DataStack } from '../lib/data-stack';
 describe('DataStack', () => {
   let app: cdk.App;
   let vpc: ec2.Vpc;
+  let ecsSecurityGroup: ec2.SecurityGroup;
 
   beforeEach(() => {
     app = new cdk.App();
@@ -27,6 +28,10 @@ describe('DataStack', () => {
     // Create a minimal VPC for the DataStack
     const vpcStack = new cdk.Stack(app, 'VpcStack');
     vpc = new ec2.Vpc(vpcStack, 'TestVpc');
+    ecsSecurityGroup = new ec2.SecurityGroup(vpcStack, 'MockEcsSg', {
+      vpc,
+      description: 'Mock ECS security group for testing',
+    });
   });
 
   describe('Dev Environment', () => {
@@ -37,6 +42,7 @@ describe('DataStack', () => {
       stack = new DataStack(app, 'TestDataStack', {
         envName: 'dev',
         vpc,
+        ecsSecurityGroup,
       });
       template = Template.fromStack(stack);
     });
@@ -534,6 +540,7 @@ describe('DataStack', () => {
       stack = new DataStack(app, 'TestDataStackProd', {
         envName: 'prod',
         vpc,
+        ecsSecurityGroup,
       });
       template = Template.fromStack(stack);
     });

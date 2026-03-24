@@ -44,6 +44,7 @@ const dataStack = new DataStack(app, `${prefix}-Data`, {
   description: 'Chimera data layer: 6 DynamoDB tables, 3 S3 buckets',
   envName,
   vpc: networkStack.vpc,
+  ecsSecurityGroup: networkStack.ecsSecurityGroup,
 });
 dataStack.addDependency(networkStack);
 
