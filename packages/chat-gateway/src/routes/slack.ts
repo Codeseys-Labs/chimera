@@ -5,15 +5,15 @@
  * Routes Slack messages to the chat gateway using the Slack platform adapter.
  */
 
-import { Router, Request, Response } from 'express';
-import type { Router as ExpressRouter } from 'express';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import crypto from 'crypto';
 import { getAdapter } from '../adapters';
 import { createAgent, createDefaultSystemPrompt } from '@chimera/core';
 import { ErrorResponse } from '../types';
 import { resolveUser } from '../middleware/user-resolution';
 
-const router: ExpressRouter = Router();
+const router = new Hono();
 
 /**
  * Slack URL verification challenge

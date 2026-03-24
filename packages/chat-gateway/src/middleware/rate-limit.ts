@@ -5,8 +5,9 @@
  * Enforces per-tenant rate limits to prevent cross-tenant DoS attacks.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Context, Next } from 'hono';
 import { RateLimiter } from '@chimera/core';
+import { TenantContext } from '../types';
 
 // Local DynamoDBClient type (matches RateLimiter interface)
 interface DynamoDBClient {
@@ -66,20 +67,20 @@ const rateLimiter = new RateLimiter({
  * @param cost - Token cost for this operation (default 1)
  */
 export function rateLimitMiddleware(resource: string = 'api-requests', cost: number = 1) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     // Tenant context must be extracted first (by tenant middleware)
-    if (!req.tenantContext) {
-      res.status(500).json({
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
+      return c.json({
         error: {
           code: 'MISSING_TENANT_CONTEXT',
           message: 'Rate limiting requires tenant context',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
-    const { tenantId } = req.tenantContext;
+    const { tenantId } = tenantContext;
 
     try {
       // Check rate limit
@@ -90,7 +91,7 @@ export function rateLimitMiddleware(resource: string = 'api-requests', cost: num
       });
 
       if (!result.allowed) {
-        res.status(429).json({
+        return c.json({
           error: {
             code: 'RATE_LIMIT_EXCEEDED',
             message: 'Rate limit exceeded. Please try again later.',
@@ -101,26 +102,24 @@ export function rateLimitMiddleware(resource: string = 'api-requests', cost: num
             },
           },
           timestamp: new Date().toISOString(),
-        });
-        return;
+        }, 429);
       }
 
       // Rate limit check passed - attach remaining tokens to response headers
-      res.setHeader('X-RateLimit-Remaining', result.remainingTokens?.toString() || '0');
-      res.setHeader('X-RateLimit-Resource', resource);
+      c.header('X-RateLimit-Remaining', result.remainingTokens?.toString() || '0');
+      c.header('X-RateLimit-Resource', resource);
 
-      next();
+      await next();
     } catch (error) {
       // Fail closed: reject request on DDB error to prevent DoS attacks
       console.error('Rate limit check error:', error);
-      res.status(503).json({
+      return c.json({
         error: {
           code: 'RATE_LIMIT_SERVICE_UNAVAILABLE',
           message: 'Rate limiting service temporarily unavailable. Please try again.',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 503);
     }
   };
 }
@@ -132,21 +131,24 @@ export function rateLimitMiddleware(resource: string = 'api-requests', cost: num
  * Used for observability and burst detection.
  */
 export function recordMetricsMiddleware(tokenUsage: number = 1) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (!req.tenantContext) {
-      next();
+  return async (c: Context, next: Next): Promise<void> => {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
+      await next();
       return;
     }
 
-    const { tenantId } = req.tenantContext;
+    const { tenantId } = tenantContext;
+
+    // Get status code from response after next() completes
+    await next();
 
     // Record window metrics asynchronously (don't block response)
+    const statusCode = c.res.status;
     rateLimiter
-      .recordWindow(tenantId, tokenUsage, res.statusCode >= 400)
-      .catch((error) => {
+      .recordWindow(tenantId, tokenUsage, statusCode >= 400)
+      .catch((error: any) => {
         console.error('Failed to record metrics window:', error);
       });
-
-    next();
   };
 }
