@@ -472,6 +472,90 @@ describe('OrchestrationStack', () => {
         }),
       });
     });
+
+    it('should create GroupChatProvisioner role', () => {
+      template.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'chimera-groupchat-provisioner-dev',
+        Description: 'Allows Lambda to create SNS topics and SQS subscriptions for agent groupchat',
+        AssumeRolePolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Principal: {
+                Service: 'lambda.amazonaws.com',
+              },
+            }),
+          ]),
+        }),
+      });
+    });
+
+    it('should grant GroupChatProvisioner SNS permissions', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: [
+                'sns:CreateTopic',
+                'sns:SetTopicAttributes',
+                'sns:TagResource',
+                'sns:GetTopicAttributes',
+                'sns:Subscribe',
+                'sns:ListSubscriptionsByTopic',
+                'sns:Unsubscribe',
+                'sns:DeleteTopic',
+              ],
+              Effect: 'Allow',
+            }),
+          ]),
+        }),
+      });
+    });
+
+    it('should grant GroupChatProvisioner SQS permissions', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: [
+                'sqs:CreateQueue',
+                'sqs:SetQueueAttributes',
+                'sqs:TagQueue',
+                'sqs:GetQueueAttributes',
+                'sqs:GetQueueUrl',
+                'sqs:DeleteQueue',
+              ],
+              Effect: 'Allow',
+            }),
+          ]),
+        }),
+      });
+    });
+
+    it('should grant GroupChatProvisioner KMS permissions', () => {
+      // Find policies attached to the groupchat provisioner role
+      const policies = template.findResources('AWS::IAM::Policy');
+      interface PolicyResource {
+        Properties: {
+          Roles: Array<{ Ref?: string }>;
+          PolicyDocument: {
+            Statement: Array<{ Action: string | string[] }>;
+          };
+        };
+      }
+      const groupChatPolicy = Object.values(policies).find((policy) => {
+        const p = policy as PolicyResource;
+        return (
+          p.Properties.Roles.some((role) =>
+            role.Ref && role.Ref.includes('GroupChatProvisionerRole')
+          ) &&
+          p.Properties.PolicyDocument.Statement.some((stmt) => {
+            const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+            return actions.includes('kms:Decrypt') && actions.includes('kms:GenerateDataKey');
+          })
+        );
+      });
+      expect(groupChatPolicy).toBeDefined();
+    });
   });
 
   describe('Stack Outputs', () => {
@@ -554,6 +638,14 @@ describe('OrchestrationStack', () => {
         },
       });
     });
+
+    it('should export groupchat provisioner role ARN', () => {
+      template.hasOutput('GroupChatProvisionerRoleArn', {
+        Export: {
+          Name: 'TestOrchestrationStack-GroupChatProvisionerRoleArn',
+        },
+      });
+    });
   });
 
   describe('Production Configuration', () => {
@@ -624,6 +716,7 @@ describe('OrchestrationStack', () => {
       expect(Object.keys(outputs)).toContain('PipelineBuildStateMachineArn');
       expect(Object.keys(outputs)).toContain('DataAnalysisStateMachineArn');
       expect(Object.keys(outputs)).toContain('BackgroundTaskStateMachineArn');
+      expect(Object.keys(outputs)).toContain('GroupChatProvisionerRoleArn');
     });
 
     it('should expose public properties for same-app references', () => {

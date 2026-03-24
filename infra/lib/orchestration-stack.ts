@@ -332,6 +332,58 @@ export class OrchestrationStack extends cdk.Stack {
     );
 
     // ======================================================================
+    // GroupChat Provisioner: SNS Topic + SQS Subscription Creation
+    // Enables Lambda to create per-group SNS topics and per-agent SQS queues
+    // for multi-agent pub-sub communication (swarm groupchat pattern).
+    // Pattern: chimera-groupchat-{groupId}-{env} (SNS topic)
+    //          chimera-groupchat-{groupId}-{agentId}-{env} (SQS queue)
+    // ======================================================================
+
+    const groupChatProvisionerRole = new iam.Role(this, 'GroupChatProvisionerRole', {
+      roleName: `chimera-groupchat-provisioner-${props.envName}`,
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description: 'Allows Lambda to create SNS topics and SQS subscriptions for agent groupchat',
+    });
+
+    // SNS permissions: create topics, configure attributes, subscribe SQS queues
+    groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'sns:CreateTopic',
+        'sns:SetTopicAttributes',
+        'sns:TagResource',
+        'sns:GetTopicAttributes',
+        'sns:Subscribe',
+        'sns:ListSubscriptionsByTopic',
+        'sns:Unsubscribe',
+        'sns:DeleteTopic',
+      ],
+      resources: [`arn:aws:sns:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`],
+    }));
+
+    // SQS permissions: create queues for agent subscriptions
+    groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'sqs:CreateQueue',
+        'sqs:SetQueueAttributes',
+        'sqs:TagQueue',
+        'sqs:GetQueueAttributes',
+        'sqs:GetQueueUrl',
+        'sqs:DeleteQueue',
+      ],
+      resources: [`arn:aws:sqs:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`],
+    }));
+
+    // KMS permissions for encrypting SNS topics and SQS queues
+    groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:DescribeKey'],
+      resources: [props.platformKey.keyArn],
+    }));
+
+    groupChatProvisionerRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+    );
+
+    // ======================================================================
     // Lambda Functions for Workflow Steps
     // ======================================================================
 
@@ -777,6 +829,12 @@ def handler(event, context):
       value: queueProvisionerRole.roleArn,
       exportName: `${this.stackName}-QueueProvisionerRoleArn`,
       description: 'IAM role ARN for provisioning per-tenant FIFO queues',
+    });
+
+    new cdk.CfnOutput(this, 'GroupChatProvisionerRoleArn', {
+      value: groupChatProvisionerRole.roleArn,
+      exportName: `${this.stackName}-GroupChatProvisionerRoleArn`,
+      description: 'IAM role ARN for provisioning SNS topics and SQS subscriptions for agent groupchat',
     });
   }
 }
