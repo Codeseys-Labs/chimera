@@ -5,22 +5,12 @@
  * When a message arrives from Slack/Discord/Teams, this middleware:
  * 1. Extracts platform user ID from request
  * 2. Looks up user pairing in DynamoDB
- * 3. Attaches resolved Cognito user context to request
+ * 3. Attaches resolved Cognito user context to Hono context
  * 4. Falls back to platform user ID if no pairing exists (development mode)
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Context, Next } from 'hono';
 import { UserPairingService, type ResolvedUserContext } from '@chimera/core';
-
-// Augment Express Request to include user context
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      userContext?: ResolvedUserContext;
-    }
-  }
-}
 
 // Mock DynamoDB client for development
 interface DynamoDBClient {
@@ -58,7 +48,7 @@ const userPairingService = new UserPairingService({
 /**
  * Extract platform and user ID from Slack request
  */
-function extractSlackUser(req: Request): { platform: 'slack'; platformUserId: string } | null {
+function extractSlackUser(c: Context): { platform: 'slack'; platformUserId: string } | null {
   // Event callback (message events)
   if (req.body?.event?.user) {
     return {
@@ -81,7 +71,7 @@ function extractSlackUser(req: Request): { platform: 'slack'; platformUserId: st
 /**
  * Extract platform and user ID from Discord request
  */
-function extractDiscordUser(req: Request): { platform: 'discord'; platformUserId: string } | null {
+function extractDiscordUser(c: Context): { platform: 'discord'; platformUserId: string } | null {
   // Discord webhook
   if (req.body?.author?.id) {
     return {
@@ -96,7 +86,7 @@ function extractDiscordUser(req: Request): { platform: 'discord'; platformUserId
 /**
  * Extract platform and user ID from Teams request
  */
-function extractTeamsUser(req: Request): { platform: 'teams'; platformUserId: string } | null {
+function extractTeamsUser(c: Context): { platform: 'teams'; platformUserId: string } | null {
   // Teams webhook
   if (req.body?.from?.id) {
     return {
