@@ -1,0 +1,55 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - curl -fsSL https://bun.sh/install | bash
+      - export PATH="$HOME/.bun/bin:$PATH"
+      - bun --version
+
+  pre_build:
+    commands:
+      - bun install --frozen-lockfile
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+  build:
+    commands:
+      - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
+
+      # Build and push chat-gateway image (Bun + Hono)
+      - docker build -t $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG -t $ECR_REPOSITORY_CHAT_GATEWAY:latest -f packages/chat-gateway/Dockerfile .
+      - docker push $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG
+      - docker push $ECR_REPOSITORY_CHAT_GATEWAY:latest
+      - echo "$ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG" > chat-gateway-image-uri.txt
+      - export CHAT_GATEWAY_IMAGE_URI="$ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG"
+
+      # Build and push agent image (Python + uv)
+      - docker build -t $ECR_REPOSITORY_AGENT:$IMAGE_TAG -t $ECR_REPOSITORY_AGENT:latest -f packages/agents/Dockerfile packages/agents/
+      - docker push $ECR_REPOSITORY_AGENT:$IMAGE_TAG
+      - docker push $ECR_REPOSITORY_AGENT:latest
+      - echo "$ECR_REPOSITORY_AGENT:$IMAGE_TAG" > agent-image-uri.txt
+      - export AGENT_IMAGE_URI="$ECR_REPOSITORY_AGENT:$IMAGE_TAG"
+
+      # Backward compatibility: keep image-uri.txt pointing to agent image
+      - echo "$ECR_REPOSITORY_AGENT:$IMAGE_TAG" > image-uri.txt
+      - export IMAGE_URI="$ECR_REPOSITORY_AGENT:$IMAGE_TAG"
+
+artifacts:
+  files:
+    - image-uri.txt
+    - chat-gateway-image-uri.txt
+    - agent-image-uri.txt
+  name: ChimeraDockerOutput
+
+env:
+  exported-variables:
+    - IMAGE_URI
+    - CHAT_GATEWAY_IMAGE_URI
+    - AGENT_IMAGE_URI
+
+cache:
+  paths:
+    - $HOME/.bun/install/cache/**/*
+    - node_modules/**/*
