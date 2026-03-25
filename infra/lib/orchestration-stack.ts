@@ -643,6 +643,9 @@ def handler(event, context):
       error: 'BuildError',
     });
 
+    startBuildTask.addCatch(buildFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+    checkBuildTask.addCatch(buildFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+
     const checkBuildChoice = new stepfunctions.Choice(this, 'BuildComplete?')
       .when(stepfunctions.Condition.stringEquals('$.status', 'SUCCEEDED'), buildSucceeded)
       .when(stepfunctions.Condition.stringEquals('$.status', 'FAILED'), buildFailed)
@@ -704,6 +707,9 @@ def handler(event, context):
       error: 'QueryError',
     });
 
+    runQueryTask.addCatch(queryFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+    checkQueryTask.addCatch(queryFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+
     const checkQueryChoice = new stepfunctions.Choice(this, 'QueryComplete?')
       .when(stepfunctions.Condition.stringEquals('$.status', 'COMPLETED'), querySucceeded)
       .when(stepfunctions.Condition.stringEquals('$.status', 'FAILED'), queryFailed)
@@ -764,6 +770,9 @@ def handler(event, context):
       cause: 'Background task execution failed',
       error: 'BackgroundTaskError',
     });
+
+    executeTaskStep.addCatch(taskFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+    checkTaskStep.addCatch(taskFailed, { errors: ['States.ALL'], resultPath: '$.error' });
 
     const checkTaskChoice = new stepfunctions.Choice(this, 'BackgroundTaskComplete?')
       .when(stepfunctions.Condition.stringEquals('$.status', 'COMPLETED'), taskSucceeded)
