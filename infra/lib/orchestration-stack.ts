@@ -393,23 +393,34 @@ export class OrchestrationStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3, os
+cb = boto3.client('codebuild')
 def handler(event, context):
-    """
-    Start a CodeBuild/CodePipeline build job.
-
-    Input: { tenant_id, repository, branch, build_spec }
-    Output: { build_id, status, started_at }
-    """
-    # TODO: Implement actual CodeBuild integration
-    return {
-        'build_id': 'build-12345',
-        'status': 'IN_PROGRESS',
-        'started_at': '2026-03-21T00:00:00Z'
-    }
+    project = event.get('project_name', os.environ['CODEBUILD_PROJECT'])
+    params = {'projectName': project}
+    if event.get('branch'):
+        params['sourceVersion'] = event['branch']
+    if event.get('build_spec'):
+        params['buildspecOverride'] = event['build_spec']
+    envs = []
+    for k in ('tenant_id', 'repository'):
+        if event.get(k):
+            envs.append({'name': k.upper(), 'value': event[k], 'type': 'PLAINTEXT'})
+    if envs:
+        params['environmentVariablesOverride'] = envs
+    b = cb.start_build(**params)['build']
+    return {'build_id': b['id'], 'status': b['buildStatus'], 'started_at': b['startTime'].isoformat()}
 `),
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
+      environment: {
+        CODEBUILD_PROJECT: `chimera-build-${props.envName}`,
+      },
     });
+    startBuildFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['codebuild:StartBuild'],
+      resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
+    }));
 
     // Pipeline Build: Check build status
     const checkBuildStatusFunction = new lambda.Function(this, 'CheckBuildStatusFunction', {
@@ -417,24 +428,29 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3
+cb = boto3.client('codebuild')
 def handler(event, context):
-    """
-    Check status of a running build job.
-
-    Input: { build_id }
-    Output: { build_id, status, progress, logs_url }
-    """
-    # TODO: Implement actual build status check
-    return {
-        'build_id': event['build_id'],
-        'status': 'SUCCEEDED',
-        'progress': 100,
-        'logs_url': 'https://console.aws.amazon.com/codebuild/...'
-    }
+    build_id = event['build_id']
+    resp = cb.batch_get_builds(ids=[build_id])
+    if not resp['builds']:
+        raise Exception(f'Build not found: {build_id}')
+    b = resp['builds'][0]
+    phases = b.get('phases', [])
+    done = sum(1 for p in phases if p.get('phaseStatus') == 'SUCCEEDED')
+    total = max(len(phases), 1)
+    region = b['arn'].split(':')[3]
+    acct = b['arn'].split(':')[4]
+    logs_url = f'https://{region}.console.aws.amazon.com/codesuite/codebuild/{acct}/projects/{b["projectName"]}/build/{build_id}'
+    return {'build_id': build_id, 'status': b['buildStatus'], 'progress': int(done / total * 100), 'logs_url': logs_url}
 `),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
     });
+    checkBuildStatusFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['codebuild:BatchGetBuilds'],
+      resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
+    }));
 
     // Data Analysis: Run query
     const runDataQueryFunction = new lambda.Function(this, 'RunDataQueryFunction', {
@@ -442,23 +458,45 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3, os
+athena = boto3.client('athena')
 def handler(event, context):
-    """
-    Execute a data analysis query (Athena, Redshift, etc.).
-
-    Input: { tenant_id, query, data_source }
-    Output: { query_id, status, row_count }
-    """
-    # TODO: Implement actual query execution
-    return {
-        'query_id': 'query-67890',
-        'status': 'RUNNING',
-        'row_count': 0
+    query = event['query']
+    workgroup = event.get('workgroup', os.environ.get('ATHENA_WORKGROUP', 'primary'))
+    output_loc = os.environ.get('ATHENA_OUTPUT', f"s3://chimera-artifacts-{os.environ['ENV_NAME']}/athena-results/")
+    params = {
+        'QueryString': query,
+        'WorkGroup': workgroup,
+        'ResultConfiguration': {'OutputLocation': output_loc},
     }
+    if event.get('database'):
+        params['QueryExecutionContext'] = {'Database': event['database']}
+    resp = athena.start_query_execution(**params)
+    return {'query_id': resp['QueryExecutionId'], 'status': 'RUNNING', 'row_count': 0}
 `),
       timeout: cdk.Duration.seconds(60),
       memorySize: 512,
+      environment: {
+        ENV_NAME: props.envName,
+        ATHENA_WORKGROUP: `chimera-${props.envName}`,
+        ATHENA_OUTPUT: `s3://chimera-artifacts-${props.envName}/athena-results/`,
+      },
     });
+    runDataQueryFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['athena:StartQueryExecution', 'athena:GetQueryExecution'],
+      resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
+    }));
+    runDataQueryFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['s3:GetBucketLocation', 's3:GetObject', 's3:ListBucket', 's3:PutObject'],
+      resources: [
+        `arn:aws:s3:::chimera-artifacts-${props.envName}`,
+        `arn:aws:s3:::chimera-artifacts-${props.envName}/*`,
+      ],
+    }));
+    runDataQueryFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['glue:GetTable', 'glue:GetPartitions', 'glue:GetDatabase'],
+      resources: ['*'],
+    }));
 
     // Data Analysis: Check query status
     const checkQueryStatusFunction = new lambda.Function(this, 'CheckQueryStatusFunction', {
@@ -466,24 +504,27 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3
+athena = boto3.client('athena')
+STATE_MAP = {'QUEUED': 'RUNNING', 'RUNNING': 'RUNNING', 'SUCCEEDED': 'COMPLETED', 'FAILED': 'FAILED', 'CANCELLED': 'FAILED'}
 def handler(event, context):
-    """
-    Check status of a running data query.
-
-    Input: { query_id }
-    Output: { query_id, status, row_count, result_location }
-    """
-    # TODO: Implement actual query status check
-    return {
-        'query_id': event['query_id'],
-        'status': 'COMPLETED',
-        'row_count': 1523,
-        'result_location': 's3://results/query-67890.csv'
-    }
+    qid = event['query_id']
+    resp = athena.get_query_execution(QueryExecutionId=qid)
+    exe = resp['QueryExecution']
+    status = STATE_MAP.get(exe['Status']['State'], 'RUNNING')
+    result = {'query_id': qid, 'status': status, 'row_count': 0, 'result_location': ''}
+    if status == 'COMPLETED':
+        result['result_location'] = exe['ResultConfiguration']['OutputLocation']
+        result['row_count'] = exe.get('Statistics', {}).get('DataScannedInBytes', 0)
+    return result
 `),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
     });
+    checkQueryStatusFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['athena:GetQueryExecution', 'athena:GetQueryResults'],
+      resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
+    }));
 
     // Background Task: Execute generic background task
     const executeBackgroundTaskFunction = new lambda.Function(this, 'ExecuteBackgroundTaskFunction', {
@@ -491,27 +532,48 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3, os, json
+from datetime import datetime, timezone
+ddb = boto3.resource('dynamodb')
+eb = boto3.client('events')
 def handler(event, context):
-    """
-    Execute a generic background task.
-
-    Input: { task_id, tenant_id, instruction, context, target_agent_id }
-    Output: { task_id, status, result }
-    """
-    # TODO: Implement actual background task execution
-    # This would typically invoke the target agent via Bedrock Agent Runtime
-    return {
-        'task_id': event['task_id'],
-        'status': 'COMPLETED',
-        'result': {
-            'success': True,
-            'message': 'Background task completed'
-        }
-    }
+    table = ddb.Table(os.environ['SESSIONS_TABLE'])
+    task_id = event['task_id']
+    tenant_id = event.get('tenant_id', 'system')
+    now = datetime.now(timezone.utc).isoformat()
+    table.put_item(Item={
+        'PK': 'TASK#' + task_id, 'SK': 'META',
+        'tenantId': tenant_id, 'taskId': task_id,
+        'status': 'RUNNING', 'instruction': event.get('instruction', ''),
+        'targetAgentId': event.get('target_agent_id', ''),
+        'context': json.dumps(event.get('context', {})),
+        'startedAt': now, 'updatedAt': now,
+        'ttl': int(datetime.now(timezone.utc).timestamp()) + 86400,
+    })
+    eb.put_events(Entries=[{
+        'Source': 'chimera.agents',
+        'DetailType': 'Background Task Executing',
+        'Detail': json.dumps({'task_id': task_id, 'tenant_id': tenant_id, 'started_at': now}),
+        'EventBusName': os.environ['EVENT_BUS_NAME'],
+    }])
+    return {'task_id': task_id, 'status': 'RUNNING', 'result': {}}
 `),
       timeout: cdk.Duration.minutes(5),
       memorySize: 512,
+      environment: {
+        SESSIONS_TABLE: `chimera-sessions-${props.envName}`,
+        EVENT_BUS_NAME: `chimera-agents-${props.envName}`,
+        ENV_NAME: props.envName,
+      },
     });
+    executeBackgroundTaskFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
+      resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`],
+    }));
+    executeBackgroundTaskFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['events:PutEvents'],
+      resources: [this.eventBus.eventBusArn],
+    }));
 
     // Background Task: Check task status
     const checkBackgroundTaskStatusFunction = new lambda.Function(this, 'CheckBackgroundTaskStatusFunction', {
@@ -519,23 +581,30 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3, os, json
+ddb = boto3.resource('dynamodb')
 def handler(event, context):
-    """
-    Check status of a background task.
-
-    Input: { task_id }
-    Output: { task_id, status, result }
-    """
-    # TODO: Implement actual status check from DynamoDB
-    return {
-        'task_id': event['task_id'],
-        'status': 'COMPLETED',
-        'result': event.get('result', {})
-    }
+    table = ddb.Table(os.environ['SESSIONS_TABLE'])
+    task_id = event['task_id']
+    resp = table.get_item(Key={'PK': 'TASK#' + task_id, 'SK': 'META'})
+    item = resp.get('Item')
+    if not item:
+        raise Exception('Task not found: ' + task_id)
+    result = item.get('result', '{}')
+    if isinstance(result, str):
+        result = json.loads(result)
+    return {'task_id': task_id, 'status': item.get('status', 'RUNNING'), 'result': result}
 `),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      environment: {
+        SESSIONS_TABLE: `chimera-sessions-${props.envName}`,
+      },
     });
+    checkBackgroundTaskStatusFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem'],
+      resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`],
+    }));
 
     // ======================================================================
     // Step Functions: Pipeline Build Workflow
