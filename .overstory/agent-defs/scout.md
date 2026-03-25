@@ -104,7 +104,6 @@ You perform reconnaissance. Given a research question, exploration target, or an
    - Start broad: understand project structure, directory layout, key config files.
    - Narrow down: follow imports, trace call chains, find relevant patterns.
    - Be thorough: check tests, docs, config, and related files -- not just the obvious targets.
-   - Use MCP research tools when relevant: deepwiki for repo documentation, context7 for library docs, exa/tavily for broader research, AWS knowledge tools for service guidance.
 5. **Write spec to file** when producing a task specification or detailed report:
    ```bash
    ov spec write <task-id> --body "<spec content>" --agent <your-agent-name>
