@@ -52,6 +52,11 @@ Each ADR follows this structure:
 - [ADR-015](./ADR-015-bun-mise-toolchain.md) - Bun + Mise for Development Toolchain
 - [ADR-017](./ADR-017-multi-provider-llm.md) - Multi-Provider LLM Support
 - [ADR-018](./ADR-018-skill-md-v2.md) - SKILL.md v2 Format Specification
+- [ADR-019](./ADR-019-hono-over-express.md) - Hono over Express for HTTP Gateway
+- [ADR-020](./ADR-020-two-container-docker.md) - Two-Stage Docker Builds for Production Images
+- [ADR-021](./ADR-021-npx-for-cdk-commands.md) - npx for CDK Commands (Not bunx)
+- [ADR-022](./ADR-022-skipLibCheck-cdk-synth.md) - skipLibCheck for CDK Synthesis Performance
+- [ADR-023](./ADR-023-batched-createcommit-codecommit.md) - Batched CreateCommit for CodeCommit Deployments
 
 ## Supersession Chain
 
@@ -79,7 +84,7 @@ When adding a new ADR:
 
 ## Metadata
 
-- **Total ADRs**: 18
+- **Total ADRs**: 23
 - **Status**: All Accepted
-- **Last Updated**: 2026-03-20
+- **Last Updated**: 2026-03-24
 - **Authority**: This directory is the canonical source for architectural decisions
