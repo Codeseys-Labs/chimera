@@ -18,7 +18,12 @@ phases:
     commands:
       - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
 
-      # Build and push chat-gateway image (Bun + Hono)
+      # Pre-bundle chat-gateway at CodeBuild time (full monorepo available here)
+      # This resolves @chimera/shared, @chimera/core, @chimera/sse-bridge workspace deps
+      # so the Docker image needs no workspace resolution at all — just copies dist/server.js
+      - bun build packages/chat-gateway/src/server.ts --outdir packages/chat-gateway/dist --target bun
+
+      # Build and push chat-gateway image (pre-built bundle, no workspace resolution in Docker)
       - docker build -t $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG -t $ECR_REPOSITORY_CHAT_GATEWAY:latest -f packages/chat-gateway/Dockerfile .
       - docker push $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG
       - docker push $ECR_REPOSITORY_CHAT_GATEWAY:latest
