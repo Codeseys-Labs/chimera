@@ -139,7 +139,7 @@ export async function pushToCodeCommit(
   repoRoot: string,
   branchName: string = 'main',
   commitMessage?: string,
-): Promise<void> {
+): Promise<string | undefined> {
   console.log(chalk.gray('  Scanning repository files...'));
   const allFiles = collectFiles(repoRoot, repoRoot);
   console.log(chalk.gray(`  Found ${allFiles.length} files`));
@@ -207,6 +207,7 @@ export async function pushToCodeCommit(
   }
 
   console.log(chalk.gray('  All commits created successfully'));
+  return parentCommitId;
 }
 
 export interface CodeCommitFile {
