@@ -44,7 +44,8 @@
   "peerDependencies": {
     "@aws-sdk/client-codecommit": "^3.0.0",
     "@aws-sdk/client-codepipeline": "^3.0.0",
-    "@aws-sdk/client-cloudformation": "^3.0.0"
+    "@aws-sdk/client-cloudformation": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0"
   },
   "devDependencies": {
     "@types/chalk": "^2.2.4",
