@@ -143,12 +143,15 @@ export function registerDeployCommands(program: Command): void {
     .option('--repo-name <name>', 'CodeCommit repository name', 'chimera')
     .option(
       '--source <mode>',
-      'Source mode: auto (detect), local (current directory), or github (download release)',
+      'Source mode: auto (latest release), local (current directory), github (release archive), git (clone from --remote)',
       'auto',
     )
     .option('--github-owner <owner>', 'GitHub repository owner', 'your-org')
     .option('--github-repo <repo>', 'GitHub repository name', 'chimera')
     .option('--github-tag <tag>', 'GitHub release tag (or "latest")', 'latest')
+    .option('--remote <url>', 'Custom git remote URL to clone (implies --source git)')
+    .option('--branch <branch>', 'Branch to checkout when using --source git')
+    .option('--tag <tag>', 'Tag to checkout when using --source git')
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
       let sourceLocation: SourceLocation | undefined;
@@ -162,7 +165,19 @@ export function registerDeployCommands(program: Command): void {
 
         // Step 2: Determine source location
         spinner.start('Determining source location...');
-        if (options.source === 'auto') {
+        if (options.source === 'auto' && options.remote) {
+          // --remote provided with auto mode: switch to git-clone
+          sourceLocation = {
+            type: 'git-clone',
+            remote: options.remote,
+            branch: options.branch,
+            tag: options.tag,
+          };
+          const ref = options.branch ?? options.tag;
+          spinner.succeed(
+            chalk.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`),
+          );
+        } else if (options.source === 'auto') {
           // Default to GitHub release archive
           sourceLocation = {
             type: 'github-release',
@@ -174,6 +189,20 @@ export function registerDeployCommands(program: Command): void {
             chalk.green(
               `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
             ),
+          );
+        } else if (options.source === 'git') {
+          if (!options.remote) {
+            throw new Error('--source git requires --remote <url>');
+          }
+          sourceLocation = {
+            type: 'git-clone',
+            remote: options.remote,
+            branch: options.branch,
+            tag: options.tag,
+          };
+          const ref = options.branch ?? options.tag;
+          spinner.succeed(
+            chalk.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`),
           );
         } else if (options.source === 'local') {
           const localRoot = findProjectRoot();
@@ -197,7 +226,7 @@ export function registerDeployCommands(program: Command): void {
             ),
           );
         } else {
-          throw new Error(`Invalid source mode: ${options.source}. Use auto, local, or github.`);
+          throw new Error(`Invalid source mode: ${options.source}. Use auto, local, github, or git.`);
         }
 
         // Step 3: Resolve source to filesystem path

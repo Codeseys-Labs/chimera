@@ -5,15 +5,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import chalk from 'chalk';
 
 export interface SourceLocation {
-  type: 'local' | 'github-release';
+  type: 'local' | 'github-release' | 'git-clone';
   path?: string; // For local sources
   owner?: string; // For GitHub releases
   repo?: string; // For GitHub releases
-  tag?: string; // For GitHub releases (defaults to 'latest')
+  tag?: string; // For GitHub releases (defaults to 'latest') OR git-clone tag to checkout
+  remote?: string; // For git-clone: custom git remote URL
+  branch?: string; // For git-clone: specific branch to checkout
 }
 
 /**
@@ -179,9 +181,47 @@ export async function fetchGitHubRelease(
 }
 
 /**
+ * Clone a git remote at an optional branch or tag to a temporary directory
+ * Uses execFileSync to avoid shell injection from user-supplied remote/branch/tag
+ * Returns path to cloned directory
+ */
+export async function fetchGitClone(
+  remote: string,
+  branch?: string,
+  tag?: string,
+): Promise<string> {
+  const ref = branch ?? tag;
+  console.log(
+    chalk.gray(`  Cloning git remote: ${remote}${ref ? `@${ref}` : ''}`),
+  );
+
+  const tmpDir = fs.mkdtempSync(path.join('/tmp', 'chimera-deploy-'));
+  const cloneDir = path.join(tmpDir, 'source');
+
+  try {
+    const args = ['clone', '--depth', '1'];
+    if (ref) {
+      args.push('--branch', ref);
+    }
+    args.push(remote, cloneDir);
+
+    execFileSync('git', args, { stdio: 'inherit' });
+
+    console.log(chalk.gray(`  Cloned to: ${cloneDir}`));
+    return cloneDir;
+  } catch (error) {
+    if (fs.existsSync(tmpDir)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+    throw error;
+  }
+}
+
+/**
  * Resolve source location to local filesystem path
  * - For local sources: returns the provided path
  * - For GitHub releases: downloads and extracts, returns temp directory path
+ * - For git-clone: clones remote repo, returns temp directory path
  */
 export async function resolveSourcePath(source: SourceLocation): Promise<string> {
   if (source.type === 'local') {
@@ -197,8 +237,13 @@ export async function resolveSourcePath(source: SourceLocation): Promise<string>
       throw new Error('GitHub release source requires owner and repo');
     }
     return await fetchGitHubRelease(source.owner, source.repo, source.tag);
+  } else if (source.type === 'git-clone') {
+    if (!source.remote) {
+      throw new Error('git-clone source requires remote URL (--remote <url>)');
+    }
+    return await fetchGitClone(source.remote, source.branch, source.tag);
   } else {
-    throw new Error(`Unknown source type: ${source.type}`);
+    throw new Error(`Unknown source type: ${(source as SourceLocation).type}`);
   }
 }
 
@@ -206,7 +251,7 @@ export async function resolveSourcePath(source: SourceLocation): Promise<string>
  * Clean up temporary source directory (only for non-local sources)
  */
 export function cleanupSource(sourcePath: string, source: SourceLocation): void {
-  // Only clean up temp directories created by fetchGitHubRelease
+  // Only clean up temp directories created by fetchGitHubRelease or fetchGitClone
   if (source.type !== 'local' && sourcePath.startsWith('/tmp/chimera-deploy-')) {
     fs.rmSync(sourcePath, { recursive: true, force: true });
   }
