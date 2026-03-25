@@ -6,9 +6,10 @@
  */
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { getAdapter } from '../adapters';
 import { createAgent, createDefaultSystemPrompt } from '@chimera/core';
-import { ErrorResponse } from '../types';
+import { ErrorResponse, TenantContext } from '../types';
 import { resolveUser } from '../middleware/user-resolution';
 
 const router = new Hono();
@@ -49,7 +50,7 @@ interface BotFrameworkActivity {
  *
  * @see https://learn.microsoft.com/en-us/azure/bot-service/rest-api/bot-framework-rest-connector-authentication
  */
-function verifyTeamsToken(req: Request): boolean {
+function verifyTeamsToken(authHeader: string | undefined): boolean {
   const appPassword = process.env.MICROSOFT_APP_PASSWORD;
 
   // Fail hard if not configured in production
@@ -61,8 +62,6 @@ function verifyTeamsToken(req: Request): boolean {
     console.warn('MICROSOFT_APP_PASSWORD not set - skipping token verification (development only)');
     return true;
   }
-
-  const authHeader = req.headers['authorization'] as string;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return false;
@@ -122,10 +121,11 @@ function verifyTeamsToken(req: Request): boolean {
  * Receives all activity types from Azure Bot Service and routes message
  * activities to the Chimera agent.
  */
-router.post('/messages', resolveUser, async (req: Request, res: Response) => {
+router.post('/messages', resolveUser, async (c: Context) => {
   try {
     // Verify bearer token for all requests
-    if (!verifyTeamsToken(req)) {
+    const authHeader = c.req.header('authorization');
+    if (!verifyTeamsToken(authHeader)) {
       const error: ErrorResponse = {
         error: {
           code: 'INVALID_TOKEN',
@@ -133,21 +133,20 @@ router.post('/messages', resolveUser, async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(401).json(error);
-      return;
+      return c.json(error, 401);
     }
 
-    const body = req.body as BotFrameworkActivity;
+    const body = await c.req.json() as BotFrameworkActivity;
 
     // Non-message activities (conversationUpdate, typing, etc.) are acknowledged
     // but not processed — return 200 to prevent Bot Framework retries
     if (body.type !== 'message') {
-      res.status(200).json({ ok: true });
-      return;
+      return c.json({ ok: true });
     }
 
     // Validate tenant context
-    if (!req.tenantContext) {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
       const error: ErrorResponse = {
         error: {
           code: 'MISSING_TENANT_CONTEXT',
@@ -155,8 +154,7 @@ router.post('/messages', resolveUser, async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(500).json(error);
-      return;
+      return c.json(error, 500);
     }
 
     // Get Teams adapter
@@ -166,28 +164,27 @@ router.post('/messages', resolveUser, async (req: Request, res: Response) => {
     let messages;
     try {
       messages = adapter.parseIncoming(body);
-    } catch (error) {
-      console.error('Failed to parse Teams activity:', error);
-      res.status(200).json({ ok: true }); // Respond 200 to avoid Bot Framework retries
-      return;
+    } catch (parseError) {
+      console.error('Failed to parse Teams activity:', parseError);
+      return c.json({ ok: true }); // Respond 200 to avoid Bot Framework retries
     }
 
     if (messages.length === 0) {
-      res.status(200).json({ ok: true });
-      return;
+      return c.json({ ok: true });
     }
 
     // Create agent and invoke.
     // Prefer resolved Cognito identity; fall back to Azure AD object ID, then raw Teams user ID.
+    const userContext = c.get('userContext') as { cognitoSub?: string } | undefined;
     const userId =
-      req.userContext?.cognitoSub ||
+      userContext?.cognitoSub ||
       body.from.aadObjectId ||
       body.from.id ||
-      req.tenantContext.userId;
+      tenantContext.userId;
 
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
-      tenantId: req.tenantContext.tenantId,
+      tenantId: tenantContext.tenantId,
       userId,
       sessionId: `teams_${body.conversation.id}_${body.from.id}`,
     });
@@ -196,15 +193,14 @@ router.post('/messages', resolveUser, async (req: Request, res: Response) => {
     const result = await agent.invoke(messages[0].content);
 
     // Format and return Teams response
-    const teamsResponse = adapter.formatResponse(result.output, req.tenantContext);
+    const teamsResponse = adapter.formatResponse(result.output, tenantContext);
 
-    res.status(200).json(teamsResponse);
-    return;
+    return c.json(teamsResponse);
   } catch (error) {
     console.error('Teams webhook error:', error);
 
     // Always respond 200 to prevent Bot Framework retry storms
-    res.status(200).json({ ok: true });
+    return c.json({ ok: true });
   }
 });
 

@@ -10,7 +10,8 @@
  */
 
 import { Context, Next } from 'hono';
-import { UserPairingService, type ResolvedUserContext } from '@chimera/core';
+import { UserPairingService } from '@chimera/core';
+import { TenantContext } from '../types';
 
 // Mock DynamoDB client for development
 interface DynamoDBClient {
@@ -48,53 +49,54 @@ const userPairingService = new UserPairingService({
 /**
  * Extract platform and user ID from Slack request
  */
-function extractSlackUser(c: Context): { platform: 'slack'; platformUserId: string } | null {
-  // Event callback (message events)
-  if (req.body?.event?.user) {
-    return {
-      platform: 'slack',
-      platformUserId: req.body.event.user,
-    };
+async function extractSlackUser(
+  c: Context
+): Promise<{ platform: 'slack'; platformUserId: string } | null> {
+  try {
+    const body = await c.req.json();
+    if (body?.event?.user) {
+      return { platform: 'slack', platformUserId: body.event.user };
+    }
+    if (body?.user_id) {
+      return { platform: 'slack', platformUserId: body.user_id };
+    }
+  } catch {
+    // Body may not be JSON (e.g. form-urlencoded slash commands)
   }
-
-  // Slash command
-  if (req.body?.user_id) {
-    return {
-      platform: 'slack',
-      platformUserId: req.body.user_id,
-    };
-  }
-
   return null;
 }
 
 /**
  * Extract platform and user ID from Discord request
  */
-function extractDiscordUser(c: Context): { platform: 'discord'; platformUserId: string } | null {
-  // Discord webhook
-  if (req.body?.author?.id) {
-    return {
-      platform: 'discord',
-      platformUserId: req.body.author.id,
-    };
+async function extractDiscordUser(
+  c: Context
+): Promise<{ platform: 'discord'; platformUserId: string } | null> {
+  try {
+    const body = await c.req.json();
+    if (body?.author?.id) {
+      return { platform: 'discord', platformUserId: body.author.id };
+    }
+  } catch {
+    // ignore
   }
-
   return null;
 }
 
 /**
  * Extract platform and user ID from Teams request
  */
-function extractTeamsUser(c: Context): { platform: 'teams'; platformUserId: string } | null {
-  // Teams webhook
-  if (req.body?.from?.id) {
-    return {
-      platform: 'teams',
-      platformUserId: req.body.from.id,
-    };
+async function extractTeamsUser(
+  c: Context
+): Promise<{ platform: 'teams'; platformUserId: string } | null> {
+  try {
+    const body = await c.req.json();
+    if (body?.from?.id) {
+      return { platform: 'teams', platformUserId: body.from.id };
+    }
+  } catch {
+    // ignore
   }
-
   return null;
 }
 
@@ -105,31 +107,28 @@ function extractTeamsUser(c: Context): { platform: 'teams'; platformUserId: stri
  * If no pairing exists, falls back to platform user ID (for development).
  *
  * Usage:
- *   router.post('/slack/events', resolveUser, async (req, res) => {
- *     const userContext = req.userContext;
+ *   router.post('/slack/events', resolveUser, async (c: Context) => {
+ *     const userContext = c.get('userContext');
  *     // userContext.cognitoSub, userContext.email, etc.
  *   });
  */
-export async function resolveUser(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
+export async function resolveUser(c: Context, next: Next): Promise<void | Response> {
   try {
     // Extract platform user based on request path
     let platformUser: { platform: any; platformUserId: string } | null = null;
 
-    if (req.path.includes('/slack')) {
-      platformUser = extractSlackUser(req);
-    } else if (req.path.includes('/discord')) {
-      platformUser = extractDiscordUser(req);
-    } else if (req.path.includes('/teams')) {
-      platformUser = extractTeamsUser(req);
+    const path = c.req.path;
+    if (path.includes('/slack')) {
+      platformUser = await extractSlackUser(c);
+    } else if (path.includes('/discord')) {
+      platformUser = await extractDiscordUser(c);
+    } else if (path.includes('/teams')) {
+      platformUser = await extractTeamsUser(c);
     }
 
     // If we couldn't extract platform user, skip resolution
     if (!platformUser) {
-      next();
+      await next();
       return;
     }
 
@@ -141,7 +140,7 @@ export async function resolveUser(
 
     if (userContext) {
       // Pairing found - attach resolved context
-      req.userContext = userContext;
+      c.set('userContext', userContext);
 
       // Update last activity timestamp (fire and forget)
       userPairingService.updatePairing({
@@ -160,48 +159,47 @@ export async function resolveUser(
         );
 
         // Fallback context (requires tenantContext to be set by previous middleware)
-        if (req.tenantContext) {
-          req.userContext = {
-            tenantId: req.tenantContext.tenantId,
+        const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+        if (tenantContext) {
+          c.set('userContext', {
+            tenantId: tenantContext.tenantId,
             cognitoSub: `dev-${platformUser.platform}-${platformUser.platformUserId}`,
             cognitoUsername: `dev-${platformUser.platformUserId}`,
             email: `${platformUser.platformUserId}@dev.chimera.local`,
             platform: platformUser.platform,
             platformUserId: platformUser.platformUserId,
-          };
+          });
         }
       } else {
         // Production: return 401 if no pairing exists
-        res.status(401).json({
+        return c.json({
           error: {
             code: 'USER_NOT_PAIRED',
             message:
               'This platform user is not linked to a Chimera account. Please complete the authentication flow.',
           },
           timestamp: new Date().toISOString(),
-        });
-        return;
+        }, 401);
       }
     }
 
-    next();
+    await next();
   } catch (error) {
     console.error('User resolution error:', error);
 
     // Fail open in development, fail closed in production
     if (process.env.NODE_ENV === 'production') {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'USER_RESOLUTION_ERROR',
           message: 'Failed to resolve user identity',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     // Development: continue without user context
-    next();
+    await next();
   }
 }
 
@@ -212,25 +210,20 @@ export async function resolveUser(
  * Returns 401 if no user context is available.
  *
  * Usage:
- *   router.post('/slack/events', resolveUser, requireUserContext, async (req, res) => {
- *     // req.userContext is guaranteed to exist
+ *   router.post('/slack/events', resolveUser, requireUserContext, async (c: Context) => {
+ *     // c.get('userContext') is guaranteed to exist
  *   });
  */
-export function requireUserContext(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
-  if (!req.userContext) {
-    res.status(401).json({
+export async function requireUserContext(c: Context, next: Next): Promise<void | Response> {
+  if (!c.get('userContext')) {
+    return c.json({
       error: {
         code: 'USER_CONTEXT_REQUIRED',
         message: 'User authentication is required for this endpoint',
       },
       timestamp: new Date().toISOString(),
-    });
-    return;
+    }, 401);
   }
 
-  next();
+  await next();
 }
