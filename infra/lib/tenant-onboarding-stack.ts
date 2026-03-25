@@ -61,6 +61,8 @@ export class TenantOnboardingStack extends cdk.Stack {
   public readonly initializeS3PrefixFunction: lambda.Function;
   public readonly createCedarPoliciesFunction: lambda.Function;
   public readonly initializeCostTrackingFunction: lambda.Function;
+  /** Compensation Lambda — best-effort rollback on workflow failure */
+  public readonly compensateTenantFunction: lambda.Function;
 
   constructor(scope: Construct, id: string, props: TenantOnboardingStackProps) {
     super(scope, id, props);
@@ -494,8 +496,10 @@ forbid(
           \` : '';
 
           try {
+            const policyIds = [];
+
             // Create tenant isolation policy
-            await client.send(new CreatePolicyCommand({
+            const isolationResponse = await client.send(new CreatePolicyCommand({
               policyStoreId,
               definition: {
                 static: {
@@ -504,10 +508,11 @@ forbid(
                 },
               },
             }));
+            policyIds.push(isolationResponse.policy.policyId);
 
             // Create tier-specific tool policy (if applicable)
             if (toolInvocationPolicy) {
-              await client.send(new CreatePolicyCommand({
+              const toolResponse = await client.send(new CreatePolicyCommand({
                 policyStoreId,
                 definition: {
                   static: {
@@ -516,10 +521,11 @@ forbid(
                   },
                 },
               }));
+              policyIds.push(toolResponse.policy.policyId);
             }
 
             console.log(\`Created Cedar policies for tenant \${tenantId}\`);
-            return { success: true, policiesCreated: toolInvocationPolicy ? 2 : 1 };
+            return { success: true, policiesCreated: policyIds.length, policyIds };
           } catch (error) {
             console.error('Failed to create Cedar policies:', error);
             throw error;
@@ -689,27 +695,222 @@ forbid(
       interval: cdk.Duration.seconds(1),
     });
 
-    // Success notification
+    // ======================================================================
+    // Lambda: Compensate Tenant (Rollback)
+    // Best-effort cleanup of all resources created during a failed onboarding.
+    // Receives the full SFN execution state so it can inspect each step result
+    // to determine which resources exist and need to be removed.
+    // ======================================================================
+    this.compensateTenantFunction = new lambda.Function(this, 'CompensateTenant', {
+      functionName: `chimera-onboard-compensate-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { DynamoDBClient, BatchWriteItemCommand, DeleteItemCommand } = require('@aws-sdk/client-dynamodb');
+        const { IAMClient, DeleteRolePolicyCommand, DeleteRoleCommand } = require('@aws-sdk/client-iam');
+        const { CognitoIdentityProviderClient, DeleteGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+        const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+        const { VerifiedPermissionsClient, DeletePolicyCommand } = require('@aws-sdk/client-verifiedpermissions');
+
+        const ddbClient = new DynamoDBClient({});
+        const iamClient = new IAMClient({});
+        const cognitoClient = new CognitoIdentityProviderClient({});
+        const s3Client = new S3Client({});
+        const vpClient = new VerifiedPermissionsClient({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          // LambdaInvoke wraps responses under Payload
+          const roleResult = event.createRoleResult?.Payload;
+          const groupResult = event.createGroupResult?.Payload;
+          const cedarResult = event.createCedarResult?.Payload;
+          const errors = [];
+
+          // 1. Delete DDB tenant records — DeleteRequest is a no-op for missing items
+          try {
+            const skList = [
+              'PROFILE', 'CONFIG#features', 'CONFIG#models',
+              'BILLING#current', 'QUOTA#api-requests', 'QUOTA#agent-sessions',
+            ];
+            await ddbClient.send(new BatchWriteItemCommand({
+              RequestItems: {
+                [process.env.TENANTS_TABLE_NAME]: skList.map(sk => ({
+                  DeleteRequest: { Key: { PK: { S: \`TENANT#\${tenantId}\` }, SK: { S: sk } } },
+                })),
+              },
+            }));
+            console.log(\`Deleted DDB tenant records for \${tenantId}\`);
+          } catch (err) {
+            console.error('Failed to delete DDB tenant records:', err);
+            errors.push({ step: 'ddb_records', error: err.message });
+          }
+
+          // 2. Delete cost tracking record (best-effort; missing item is silent)
+          try {
+            const now = new Date();
+            const period = \`\${now.getFullYear()}-\${String(now.getMonth() + 1).padStart(2, '0')}\`;
+            await ddbClient.send(new DeleteItemCommand({
+              TableName: process.env.COST_TRACKING_TABLE_NAME,
+              Key: { PK: { S: \`TENANT#\${tenantId}\` }, SK: { S: \`PERIOD#\${period}\` } },
+            }));
+            console.log(\`Deleted cost tracking record for \${tenantId}\`);
+          } catch (err) {
+            console.error('Failed to delete cost tracking record:', err);
+            errors.push({ step: 'cost_tracking', error: err.message });
+          }
+
+          // 3. Delete IAM role — skip if role pre-existed before this workflow
+          if (roleResult?.roleArn && !roleResult?.alreadyExists) {
+            const roleName = \`chimera-tenant-\${tenantId}-\${process.env.ENV_NAME}\`;
+            try {
+              await iamClient.send(new DeleteRolePolicyCommand({ RoleName: roleName, PolicyName: 'TenantScopedPolicy' }));
+            } catch (err) {
+              if (!err.name?.includes('NoSuchEntity')) {
+                errors.push({ step: 'iam_policy', error: err.message });
+              }
+            }
+            try {
+              await iamClient.send(new DeleteRoleCommand({ RoleName: roleName }));
+              console.log(\`Deleted IAM role \${roleName}\`);
+            } catch (err) {
+              if (!err.name?.includes('NoSuchEntity')) {
+                console.error('Failed to delete IAM role:', err);
+                errors.push({ step: 'iam_role', error: err.message });
+              }
+            }
+          }
+
+          // 4. Delete Cognito group — skip if group pre-existed
+          if (groupResult?.groupName && !groupResult?.alreadyExists) {
+            try {
+              await cognitoClient.send(new DeleteGroupCommand({
+                GroupName: groupResult.groupName,
+                UserPoolId: process.env.USER_POOL_ID,
+              }));
+              console.log(\`Deleted Cognito group \${groupResult.groupName}\`);
+            } catch (err) {
+              if (!err.name?.includes('ResourceNotFound')) {
+                console.error('Failed to delete Cognito group:', err);
+                errors.push({ step: 'cognito_group', error: err.message });
+              }
+            }
+          }
+
+          // 5. Delete S3 tenant metadata object (present only if initS3Task ran)
+          if (event.initS3Result) {
+            try {
+              await s3Client.send(new DeleteObjectCommand({
+                Bucket: process.env.TENANT_BUCKET_NAME,
+                Key: \`tenants/\${tenantId}/.tenant-metadata\`,
+              }));
+              console.log(\`Deleted S3 metadata for \${tenantId}\`);
+            } catch (err) {
+              console.error('Failed to delete S3 object:', err);
+              errors.push({ step: 's3_metadata', error: err.message });
+            }
+          }
+
+          // 6. Delete Cedar policies by ID (IDs returned by createCedarPoliciesFunction)
+          if (cedarResult?.policyIds?.length > 0) {
+            for (const policyId of cedarResult.policyIds) {
+              try {
+                await vpClient.send(new DeletePolicyCommand({
+                  policyStoreId: process.env.POLICY_STORE_ID,
+                  policyId,
+                }));
+                console.log(\`Deleted Cedar policy \${policyId}\`);
+              } catch (err) {
+                if (!err.name?.includes('ResourceNotFound')) {
+                  console.error(\`Failed to delete Cedar policy \${policyId}:\`, err);
+                  errors.push({ step: 'cedar_policy', policyId, error: err.message });
+                }
+              }
+            }
+          }
+
+          console.log(\`Compensation complete for \${tenantId}. Errors: \${errors.length}\`);
+          return { compensated: true, tenantId, errors };
+        };
+      `),
+      environment: {
+        TENANTS_TABLE_NAME: props.tenantsTable.tableName,
+        COST_TRACKING_TABLE_NAME: props.costTrackingTable.tableName,
+        USER_POOL_ID: props.userPool.userPoolId,
+        TENANT_BUCKET_NAME: props.tenantBucket.bucketName,
+        POLICY_STORE_ID: this.cedarPolicy.policyStore.attrPolicyStoreId,
+        ENV_NAME: envName,
+      },
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 512,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    props.tenantsTable.grantWriteData(this.compensateTenantFunction);
+    props.costTrackingTable.grantWriteData(this.compensateTenantFunction);
+    props.tenantBucket.grantDelete(this.compensateTenantFunction, 'tenants/*/.tenant-metadata');
+    this.compensateTenantFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['iam:DeleteRolePolicy', 'iam:DeleteRole'],
+      resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
+    }));
+    this.compensateTenantFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cognito-idp:DeleteGroup'],
+      resources: [props.userPool.userPoolArn],
+    }));
+    this.compensateTenantFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['verifiedpermissions:DeletePolicy'],
+      resources: [this.cedarPolicy.policyStore.attrArn],
+    }));
+
+    // ======================================================================
+    // Step Functions: Onboarding Workflow
+    // Orchestrates all Lambda functions with error handling, retries, and
+    // compensation (saga pattern) — any failure triggers best-effort rollback.
+    // ======================================================================
+
+    // Compensation task — routes to failState after attempting rollback
+    const compensateTask = new tasks.LambdaInvoke(this, 'CompensateTenantTask', {
+      lambdaFunction: this.compensateTenantFunction,
+      resultPath: '$.compensateResult',
+    });
+    compensateTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 2,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(2),
+    });
+
+    // Success state
     const successState = new sfn.Succeed(this, 'OnboardingComplete', {
       comment: 'Tenant onboarding completed successfully',
     });
 
-    // Error handling
+    // Fail state — terminal; always reached via compensateTask
     const failState = new sfn.Fail(this, 'OnboardingFailed', {
       cause: 'Tenant onboarding workflow failed',
       error: 'OnboardingError',
     });
 
+    // compensateTask always ends in failState (compensation is best-effort)
+    compensateTask.addCatch(failState, { resultPath: '$.compensationError' });
+    compensateTask.next(failState);
+
+    // Wire catch handlers: every main-chain task routes failures to compensation
+    createTenantTask.addCatch(compensateTask, { resultPath: '$.error' });
+    createRoleTask.addCatch(compensateTask, { resultPath: '$.error' });
+    createGroupTask.addCatch(compensateTask, { resultPath: '$.error' });
+    updateStatusTask.addCatch(compensateTask, { resultPath: '$.error' });
+
+    // Extract parallel state so addCatch can be attached to it
+    const parallelInit = new sfn.Parallel(this, 'ParallelInitialization')
+      .branch(initS3Task)
+      .branch(createCedarTask)
+      .branch(initCostTask);
+    parallelInit.addCatch(compensateTask, { resultPath: '$.error' });
+
     // Chain workflow steps
     const definition = createTenantTask
       .next(createRoleTask)
       .next(createGroupTask)
-      .next(
-        new sfn.Parallel(this, 'ParallelInitialization')
-          .branch(initS3Task)
-          .branch(createCedarTask)
-          .branch(initCostTask)
-      )
+      .next(parallelInit)
       .next(updateStatusTask)
       .next(successState);
 
