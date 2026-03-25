@@ -12,7 +12,6 @@ phases:
   pre_build:
     commands:
       - bun install --frozen-lockfile
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
   build:
     commands:
@@ -20,46 +19,12 @@ phases:
       - bun run typecheck || true
       - bun test --coverage || true
       - cd infra && npx cdk synth --all && cd ..
-      - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
-
-      # Build and push chat-gateway image (Bun + Hono)
-      - echo "Building chat-gateway image..."
-      - docker build -t $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG -t $ECR_REPOSITORY_CHAT_GATEWAY:latest -f packages/chat-gateway/Dockerfile .
-      - docker push $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG
-      - docker push $ECR_REPOSITORY_CHAT_GATEWAY:latest
-      - echo "$ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG" > chat-gateway-image-uri.txt
-      - export CHAT_GATEWAY_IMAGE_URI="$ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG"
-
-      # Build and push agent image (Python + uv)
-      - echo "Building agent image..."
-      - docker build -t $ECR_REPOSITORY_AGENT:$IMAGE_TAG -t $ECR_REPOSITORY_AGENT:latest -f packages/agents/Dockerfile packages/agents/
-      - docker push $ECR_REPOSITORY_AGENT:$IMAGE_TAG
-      - docker push $ECR_REPOSITORY_AGENT:latest
-      - echo "$ECR_REPOSITORY_AGENT:$IMAGE_TAG" > agent-image-uri.txt
-      - export AGENT_IMAGE_URI="$ECR_REPOSITORY_AGENT:$IMAGE_TAG"
-
-      # Backward compatibility: keep image-uri.txt pointing to agent image
-      - echo "$ECR_REPOSITORY_AGENT:$IMAGE_TAG" > image-uri.txt
-      - export IMAGE_URI="$ECR_REPOSITORY_AGENT:$IMAGE_TAG"
-
-  post_build:
-    commands:
-      - cd infra && npx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..
 
 artifacts:
   files:
-    - image-uri.txt
-    - chat-gateway-image-uri.txt
-    - agent-image-uri.txt
     - infra/**/*
     - packages/**/*
-  name: ChimeraBuildArtifacts
-
-env:
-  exported-variables:
-    - IMAGE_URI
-    - CHAT_GATEWAY_IMAGE_URI
-    - AGENT_IMAGE_URI
+  name: ChimeraBuildOutput
 
 cache:
   paths:
