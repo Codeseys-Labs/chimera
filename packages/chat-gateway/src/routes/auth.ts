@@ -7,6 +7,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { authenticateJWT } from '../middleware/auth';
+import type { AuthContext } from '../middleware/auth';
 import {
   CognitoIdentityProviderClient,
   SignUpCommand,
@@ -128,7 +129,7 @@ router.post('/exchange', async (c: Context) => {
           details: errorData,
         },
         timestamp: new Date().toISOString(),
-      }, tokenResponse.status);
+      }, tokenResponse.status as any);
     }
 
     const tokens = await tokenResponse.json();
@@ -151,15 +152,15 @@ router.post('/exchange', async (c: Context) => {
  * Returns authenticated user info from JWT claims.
  * Requires valid access token.
  */
-router.get('/user', authenticateJWT, (req: Request, res: Response) => {
-  const authReq = req as AuthenticatedRequest;
+router.get('/user', authenticateJWT, (c: Context) => {
+  const auth = c.get('auth') as AuthContext;
 
-  res.json({
-    sub: authReq.auth!.sub,
-    email: authReq.auth!.email,
-    tenantId: authReq.auth!.tenantId,
-    tenantTier: authReq.auth!.tenantTier,
-    groups: authReq.auth!.groups || [],
+  return c.json({
+    sub: auth.sub,
+    email: auth.email,
+    tenantId: auth.tenantId,
+    tenantTier: auth.tenantTier,
+    groups: auth.groups || [],
   });
 });
 
@@ -171,30 +172,29 @@ router.get('/user', authenticateJWT, (req: Request, res: Response) => {
  * Body: { refreshToken: string }
  * Returns: { access_token, id_token, expires_in }
  */
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/refresh', async (c: Context) => {
   try {
-    const { refreshToken } = req.body;
+    const body = await c.req.json();
+    const { refreshToken } = body as { refreshToken?: string };
 
     if (!refreshToken) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REQUEST',
           message: 'Missing refreshToken',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'OAuth not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const tokenUrl = `https://${COGNITO_DOMAIN}.auth.${COGNITO_REGION}.amazoncognito.com/oauth2/token`;
@@ -216,28 +216,27 @@ router.post('/refresh', async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorData = await tokenResponse.json().catch(() => ({})) as { error_description?: string };
       console.error('Token refresh failed:', errorData);
-      res.status(tokenResponse.status).json({
+      return c.json({
         error: {
           code: 'TOKEN_REFRESH_FAILED',
           message: errorData.error_description || 'Failed to refresh token',
           details: errorData,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, tokenResponse.status as any);
     }
 
     const tokens = await tokenResponse.json();
-    res.json(tokens);
+    return c.json(tokens);
   } catch (error) {
     console.error('Token refresh error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Token refresh failed',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -250,30 +249,29 @@ router.post('/refresh', async (req: Request, res: Response) => {
  * Body: { name: string, email: string, password: string }
  * Returns: { userSub: string, codeDeliveryDetails: {...} }
  */
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', async (c: Context) => {
   try {
-    const { name, email, password } = req.body;
+    const body = await c.req.json();
+    const { name, email, password } = body as { name?: string; email?: string; password?: string };
 
     if (!name || !email || !password) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REQUEST',
           message: 'Missing required fields: name, email, password',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (!COGNITO_CLIENT_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     // Register user with Cognito
@@ -293,56 +291,53 @@ router.post('/register', async (req: Request, res: Response) => {
 
     const response = await cognitoClient.send(command);
 
-    res.status(201).json({
+    return c.json({
       userSub: response.UserSub,
       userConfirmed: response.UserConfirmed,
       codeDeliveryDetails: response.CodeDeliveryDetails,
       message: 'Registration successful. Please check your email for confirmation code.',
-    });
+    }, 201);
   } catch (error: any) {
     console.error('Registration error:', error);
 
     // Handle Cognito-specific errors
     if (error.name === 'UsernameExistsException') {
-      res.status(409).json({
+      return c.json({
         error: {
           code: 'USER_EXISTS',
           message: 'User with this email already exists',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 409);
     }
 
     if (error.name === 'InvalidPasswordException') {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_PASSWORD',
           message: error.message || 'Password does not meet requirements',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (error.name === 'InvalidParameterException') {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_PARAMETER',
           message: error.message || 'Invalid registration parameters',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'REGISTRATION_FAILED',
         message: 'Registration failed',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -354,30 +349,29 @@ router.post('/register', async (req: Request, res: Response) => {
  * Body: { email: string, code: string }
  * Returns: { success: true }
  */
-router.post('/confirm-signup', async (req: Request, res: Response) => {
+router.post('/confirm-signup', async (c: Context) => {
   try {
-    const { email, code } = req.body;
+    const body = await c.req.json();
+    const { email, code } = body as { email?: string; code?: string };
 
     if (!email || !code) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REQUEST',
           message: 'Missing email or code',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (!COGNITO_CLIENT_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const command = new ConfirmSignUpCommand({
@@ -388,7 +382,7 @@ router.post('/confirm-signup', async (req: Request, res: Response) => {
 
     await cognitoClient.send(command);
 
-    res.json({
+    return c.json({
       success: true,
       message: 'Email confirmed successfully. You can now log in.',
     });
@@ -396,45 +390,42 @@ router.post('/confirm-signup', async (req: Request, res: Response) => {
     console.error('Confirmation error:', error);
 
     if (error.name === 'CodeMismatchException') {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_CODE',
           message: 'Invalid confirmation code',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (error.name === 'ExpiredCodeException') {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'EXPIRED_CODE',
           message: 'Confirmation code has expired. Request a new code.',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (error.name === 'UserNotFoundException') {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'USER_NOT_FOUND',
           message: 'User not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'CONFIRMATION_FAILED',
         message: 'Confirmation failed',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -446,30 +437,29 @@ router.post('/confirm-signup', async (req: Request, res: Response) => {
  * Body: { email: string }
  * Returns: { codeDeliveryDetails: {...} }
  */
-router.post('/resend-code', async (req: Request, res: Response) => {
+router.post('/resend-code', async (c: Context) => {
   try {
-    const { email } = req.body;
+    const body = await c.req.json();
+    const { email } = body as { email?: string };
 
     if (!email) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REQUEST',
           message: 'Missing email',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (!COGNITO_CLIENT_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const command = new ResendConfirmationCodeCommand({
@@ -479,7 +469,7 @@ router.post('/resend-code', async (req: Request, res: Response) => {
 
     const response = await cognitoClient.send(command);
 
-    res.json({
+    return c.json({
       codeDeliveryDetails: response.CodeDeliveryDetails,
       message: 'Confirmation code resent successfully.',
     });
@@ -487,34 +477,32 @@ router.post('/resend-code', async (req: Request, res: Response) => {
     console.error('Resend code error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'USER_NOT_FOUND',
           message: 'User not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
     if (error.name === 'InvalidParameterException') {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_PARAMETER',
           message: 'User is already confirmed',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'RESEND_FAILED',
         message: 'Failed to resend confirmation code',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -524,31 +512,29 @@ router.post('/resend-code', async (req: Request, res: Response) => {
  * List all users in the Cognito user pool.
  * Requires admin authentication.
  */
-router.get('/admin/users', authenticateJWT, async (req: Request, res: Response) => {
+router.get('/admin/users', authenticateJWT, async (c: Context) => {
   try {
-    const authReq = req as AuthenticatedRequest;
+    const auth = c.get('auth') as AuthContext;
 
     // Check if user is admin
-    if (!authReq.auth?.groups?.includes('admin')) {
-      res.status(403).json({
+    if (!auth?.groups?.includes('admin')) {
+      return c.json({
         error: {
           code: 'FORBIDDEN',
           message: 'Admin access required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const command = new ListUsersCommand({
@@ -558,7 +544,7 @@ router.get('/admin/users', authenticateJWT, async (req: Request, res: Response) 
 
     const response = await cognitoClient.send(command);
 
-    res.json({
+    return c.json({
       users: response.Users?.map((user: any) => ({
         username: user.Username,
         email: user.Attributes?.find((attr: any) => attr.Name === 'email')?.Value,
@@ -574,13 +560,13 @@ router.get('/admin/users', authenticateJWT, async (req: Request, res: Response) 
     });
   } catch (error: any) {
     console.error('List users error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'LIST_USERS_FAILED',
         message: 'Failed to list users',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -590,32 +576,30 @@ router.get('/admin/users', authenticateJWT, async (req: Request, res: Response) 
  * Disable a user account.
  * Requires admin authentication.
  */
-router.post('/admin/users/:username/disable', authenticateJWT, async (req: Request, res: Response) => {
+router.post('/admin/users/:username/disable', authenticateJWT, async (c: Context) => {
   try {
-    const authReq = req as AuthenticatedRequest;
-    const { username } = req.params;
+    const auth = c.get('auth') as AuthContext;
+    const username = c.req.param('username');
 
     // Check if user is admin
-    if (!authReq.auth?.groups?.includes('admin')) {
-      res.status(403).json({
+    if (!auth?.groups?.includes('admin')) {
+      return c.json({
         error: {
           code: 'FORBIDDEN',
           message: 'Admin access required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const command = new AdminDisableUserCommand({
@@ -625,7 +609,7 @@ router.post('/admin/users/:username/disable', authenticateJWT, async (req: Reque
 
     await cognitoClient.send(command);
 
-    res.json({
+    return c.json({
       success: true,
       message: `User ${username} has been disabled`,
     });
@@ -633,23 +617,22 @@ router.post('/admin/users/:username/disable', authenticateJWT, async (req: Reque
     console.error('Disable user error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'USER_NOT_FOUND',
           message: 'User not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'DISABLE_USER_FAILED',
         message: 'Failed to disable user',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -659,32 +642,30 @@ router.post('/admin/users/:username/disable', authenticateJWT, async (req: Reque
  * Enable a previously disabled user account.
  * Requires admin authentication.
  */
-router.post('/admin/users/:username/enable', authenticateJWT, async (req: Request, res: Response) => {
+router.post('/admin/users/:username/enable', authenticateJWT, async (c: Context) => {
   try {
-    const authReq = req as AuthenticatedRequest;
-    const { username } = req.params;
+    const auth = c.get('auth') as AuthContext;
+    const username = c.req.param('username');
 
     // Check if user is admin
-    if (!authReq.auth?.groups?.includes('admin')) {
-      res.status(403).json({
+    if (!auth?.groups?.includes('admin')) {
+      return c.json({
         error: {
           code: 'FORBIDDEN',
           message: 'Admin access required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const command = new AdminEnableUserCommand({
@@ -694,7 +675,7 @@ router.post('/admin/users/:username/enable', authenticateJWT, async (req: Reques
 
     await cognitoClient.send(command);
 
-    res.json({
+    return c.json({
       success: true,
       message: `User ${username} has been enabled`,
     });
@@ -702,23 +683,22 @@ router.post('/admin/users/:username/enable', authenticateJWT, async (req: Reques
     console.error('Enable user error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'USER_NOT_FOUND',
           message: 'User not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'ENABLE_USER_FAILED',
         message: 'Failed to enable user',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -730,44 +710,42 @@ router.post('/admin/users/:username/enable', authenticateJWT, async (req: Reques
  *
  * Body: { tenantId: string, tenantTier?: string }
  */
-router.patch('/admin/users/:username/tenant', authenticateJWT, async (req: Request, res: Response) => {
+router.patch('/admin/users/:username/tenant', authenticateJWT, async (c: Context) => {
   try {
-    const authReq = req as AuthenticatedRequest;
-    const { username } = req.params;
-    const { tenantId, tenantTier } = req.body;
+    const auth = c.get('auth') as AuthContext;
+    const username = c.req.param('username');
+    const body = await c.req.json();
+    const { tenantId, tenantTier } = body as { tenantId?: string; tenantTier?: string };
 
     // Check if user is admin
-    if (!authReq.auth?.groups?.includes('admin')) {
-      res.status(403).json({
+    if (!auth?.groups?.includes('admin')) {
+      return c.json({
         error: {
           code: 'FORBIDDEN',
           message: 'Admin access required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     if (!tenantId) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REQUEST',
           message: 'Missing tenantId',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'AUTH_NOT_CONFIGURED',
           message: 'Cognito not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     const attributes = [
@@ -786,7 +764,7 @@ router.patch('/admin/users/:username/tenant', authenticateJWT, async (req: Reque
 
     await cognitoClient.send(command);
 
-    res.json({
+    return c.json({
       success: true,
       message: `User ${username} tenant updated`,
       tenantId,
@@ -796,23 +774,22 @@ router.patch('/admin/users/:username/tenant', authenticateJWT, async (req: Reque
     console.error('Update tenant error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'USER_NOT_FOUND',
           message: 'User not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'UPDATE_TENANT_FAILED',
         message: 'Failed to update user tenant',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 

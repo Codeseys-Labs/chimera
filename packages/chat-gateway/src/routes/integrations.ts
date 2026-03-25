@@ -11,6 +11,7 @@
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import type { AuthContext } from '../middleware/auth';
 import crypto from 'crypto';
 
 const router = new Hono();
@@ -76,20 +77,22 @@ interface UserPairing {
 /**
  * Authorization helper: Check if request is from platform admin
  */
-function isPlatformAdmin(req: Request): boolean {
+function isPlatformAdmin(c: Context): boolean {
   const adminTenantId = process.env.PLATFORM_ADMIN_TENANT_ID || 'chimera-platform';
-  return req.tenantContext?.tenantId === adminTenantId;
+  const auth = c.get('auth') as AuthContext | undefined;
+  return auth?.tenantId === adminTenantId;
 }
 
 /**
  * Authorization helper: Check if user can manage integrations for tenant
  */
-function canManageIntegrations(req: Request, targetTenantId: string): boolean {
-  if (isPlatformAdmin(req)) {
+function canManageIntegrations(c: Context, targetTenantId: string): boolean {
+  if (isPlatformAdmin(c)) {
     return true;
   }
   // In production, check if user has admin role for their tenant
-  return req.tenantContext?.tenantId === targetTenantId;
+  const auth = c.get('auth') as AuthContext | undefined;
+  return auth?.tenantId === targetTenantId;
 }
 
 /**
@@ -97,20 +100,19 @@ function canManageIntegrations(req: Request, targetTenantId: string): boolean {
  *
  * List all chat platform integrations for a tenant
  */
-router.get('/:tenantId', async (req: Request, res: Response) => {
+router.get('/:tenantId', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = c.req.param('tenantId')!;
 
     // Authorization: Can only access own tenant integrations or if platform admin
-    if (!canManageIntegrations(req, tenantId)) {
-      res.status(403).json({
+    if (!canManageIntegrations(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only access your own tenant integrations',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Query integrations from DynamoDB
@@ -129,7 +131,7 @@ router.get('/:tenantId', async (req: Request, res: Response) => {
       },
     ];
 
-    res.status(200).json({
+    return c.json({
       integrations: mockIntegrations.map((i) => ({
         ...i,
         accessToken: undefined, // Never expose token in list view
@@ -139,13 +141,13 @@ router.get('/:tenantId', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('List integrations error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to list integrations',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -164,45 +166,43 @@ router.get('/:tenantId', async (req: Request, res: Response) => {
  *   "authUrl": "https://slack.com/oauth/v2/authorize?client_id=...&state=..."
  * }
  */
-router.post('/:tenantId/slack', async (req: Request, res: Response) => {
+router.post('/:tenantId/slack', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
-    const { redirectUri } = req.body;
+    const tenantId = c.req.param('tenantId')!;
+    const body = await c.req.json();
+    const { redirectUri } = body as { redirectUri?: string };
 
     // Authorization
-    if (!canManageIntegrations(req, tenantId)) {
-      res.status(403).json({
+    if (!canManageIntegrations(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only manage your own tenant integrations',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Validate redirect URI
     if (!redirectUri || typeof redirectUri !== 'string') {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_REDIRECT_URI',
           message: 'redirectUri is required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     const clientId = process.env.SLACK_CLIENT_ID;
     if (!clientId) {
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'CONFIGURATION_ERROR',
           message: 'Slack OAuth not configured',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 500);
     }
 
     // Generate OAuth state parameter (CSRF protection)
@@ -226,20 +226,20 @@ router.post('/:tenantId/slack', async (req: Request, res: Response) => {
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('state', state);
 
-    res.status(200).json({
+    return c.json({
       authUrl: authUrl.toString(),
       state,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Slack OAuth init error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to initiate Slack OAuth',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -254,33 +254,33 @@ router.post('/:tenantId/slack', async (req: Request, res: Response) => {
  *   "state": "state_from_init"
  * }
  */
-router.post('/:tenantId/slack/callback', async (req: Request, res: Response) => {
+router.post('/:tenantId/slack/callback', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
-    const { code, state } = req.body;
+    const tenantId = c.req.param('tenantId')!;
+    const body = await c.req.json();
+    const { code, state } = body as { code?: string; state?: string };
+    const auth = c.get('auth') as AuthContext | undefined;
 
     // Authorization
-    if (!canManageIntegrations(req, tenantId)) {
-      res.status(403).json({
+    if (!canManageIntegrations(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only manage your own tenant integrations',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Validate inputs
     if (!code || !state) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'MISSING_OAUTH_PARAMS',
           message: 'code and state are required',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     // Verify state parameter against stored value
@@ -314,28 +314,28 @@ router.post('/:tenantId/slack/callback', async (req: Request, res: Response) => 
       accessToken: mockTokenResponse.access_token, // Encrypt before storing
       botUserId: mockTokenResponse.authed_user.id,
       installedAt: new Date().toISOString(),
-      installedBy: req.tenantContext?.userId || 'unknown',
+      installedBy: auth?.sub || 'unknown',
       status: 'active',
     };
 
     // In production: mockDynamoDBClient.put({ TableName: 'clawcore-skills', Item: { ... } });
 
-    res.status(201).json({
+    return c.json({
       integration: {
         ...integration,
         accessToken: undefined, // Never expose token in response
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 201);
   } catch (error) {
     console.error('Slack OAuth callback error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to complete Slack OAuth',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -344,26 +344,26 @@ router.post('/:tenantId/slack/callback', async (req: Request, res: Response) => 
  *
  * Remove Slack integration
  */
-router.delete('/:tenantId/slack/:workspaceId', async (req: Request, res: Response) => {
+router.delete('/:tenantId/slack/:workspaceId', async (c: Context) => {
   try {
-    const { tenantId, workspaceId } = req.params;
+    const tenantId = c.req.param('tenantId')!;
+    const workspaceId = c.req.param('workspaceId')!;
 
     // Authorization
-    if (!canManageIntegrations(req, tenantId)) {
-      res.status(403).json({
+    if (!canManageIntegrations(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only manage your own tenant integrations',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Delete from DynamoDB
     // In production: mockDynamoDBClient.delete({ TableName: 'clawcore-skills', Key: { PK: `TENANT#${tenantId}`, SK: `INTEGRATION#slack#${workspaceId}` } });
 
-    res.status(200).json({
+    return c.json({
       message: 'Integration removed',
       tenantId,
       workspaceId,
@@ -371,13 +371,13 @@ router.delete('/:tenantId/slack/:workspaceId', async (req: Request, res: Respons
     });
   } catch (error) {
     console.error('Delete integration error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to delete integration',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -386,21 +386,20 @@ router.delete('/:tenantId/slack/:workspaceId', async (req: Request, res: Respons
  *
  * List platform user → Cognito user pairings
  */
-router.get('/:tenantId/users', async (req: Request, res: Response) => {
+router.get('/:tenantId/users', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
-    const { platform } = req.query;
+    const tenantId = c.req.param('tenantId')!;
+    const platform = c.req.query('platform');
 
     // Authorization
-    if (!canManageIntegrations(req, tenantId)) {
-      res.status(403).json({
+    if (!canManageIntegrations(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only access your own tenant user pairings',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Query user pairings from DynamoDB
@@ -420,20 +419,20 @@ router.get('/:tenantId/users', async (req: Request, res: Response) => {
       ? mockPairings.filter((p) => p.platform === platform)
       : mockPairings;
 
-    res.status(200).json({
+    return c.json({
       pairings: filtered,
       count: filtered.length,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('List user pairings error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to list user pairings',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -449,46 +448,48 @@ router.get('/:tenantId/users', async (req: Request, res: Response) => {
  *   "cognitoSub": "abc-123-cognito-sub"
  * }
  */
-router.post('/:tenantId/users', async (req: Request, res: Response) => {
+router.post('/:tenantId/users', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
-    const { platform, platformUserId, cognitoSub } = req.body;
+    const tenantId = c.req.param('tenantId')!;
+    const body = await c.req.json();
+    const { platform, platformUserId, cognitoSub } = body as {
+      platform?: string;
+      platformUserId?: string;
+      cognitoSub?: string;
+    };
 
     // Authorization
-    if (!canManageIntegrations(req, tenantId)) {
-      res.status(403).json({
+    if (!canManageIntegrations(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only manage your own tenant user pairings',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Validate inputs
     if (!platform || !platformUserId || !cognitoSub) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'MISSING_REQUIRED_FIELDS',
           message: 'Required fields: platform, platformUserId, cognitoSub',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     // Validate platform
     const validPlatforms = ['slack', 'discord', 'teams'];
     if (!validPlatforms.includes(platform)) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_PLATFORM',
           message: `Platform must be one of: ${validPlatforms.join(', ')}`,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     // Check if pairing already exists
@@ -496,7 +497,7 @@ router.post('/:tenantId/users', async (req: Request, res: Response) => {
 
     const pairing: UserPairing = {
       tenantId,
-      platform,
+      platform: platform as UserPairing['platform'],
       platformUserId,
       cognitoSub,
       pairedAt: new Date().toISOString(),
@@ -506,19 +507,19 @@ router.post('/:tenantId/users', async (req: Request, res: Response) => {
     // PK: TENANT#{tenantId}, SK: USER_PAIRING#{platform}#{platformUserId}
     // In production: mockDynamoDBClient.put({ TableName: 'clawcore-skills', Item: { ... } });
 
-    res.status(201).json({
+    return c.json({
       pairing,
       timestamp: new Date().toISOString(),
-    });
+    }, 201);
   } catch (error) {
     console.error('Create user pairing error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to create user pairing',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -529,26 +530,27 @@ router.post('/:tenantId/users', async (req: Request, res: Response) => {
  */
 router.delete(
   '/:tenantId/users/:platform/:platformUserId',
-  async (req: Request, res: Response) => {
+  async (c: Context) => {
     try {
-      const { tenantId, platform, platformUserId } = req.params;
+      const tenantId = c.req.param('tenantId')!;
+      const platform = c.req.param('platform')!;
+      const platformUserId = c.req.param('platformUserId')!;
 
       // Authorization
-      if (!canManageIntegrations(req, tenantId)) {
-        res.status(403).json({
+      if (!canManageIntegrations(c, tenantId)) {
+        return c.json({
           error: {
             code: 'INSUFFICIENT_PERMISSIONS',
             message: 'You can only manage your own tenant user pairings',
           },
           timestamp: new Date().toISOString(),
-        });
-        return;
+        }, 403);
       }
 
       // Delete from DynamoDB
       // In production: mockDynamoDBClient.delete({ TableName: 'clawcore-skills', Key: { PK: `TENANT#${tenantId}`, SK: `USER_PAIRING#${platform}#${platformUserId}` } });
 
-      res.status(200).json({
+      return c.json({
         message: 'User pairing removed',
         tenantId,
         platform,
@@ -557,13 +559,13 @@ router.delete(
       });
     } catch (error) {
       console.error('Delete user pairing error:', error);
-      res.status(500).json({
+      return c.json({
         error: {
           code: 'INTERNAL_ERROR',
           message: error instanceof Error ? error.message : 'Failed to delete user pairing',
         },
         timestamp: new Date().toISOString(),
-      });
+      }, 500);
     }
   }
 );
@@ -589,20 +591,24 @@ router.delete(
  *   "found": true
  * }
  */
-router.post('/resolve-user', async (req: Request, res: Response) => {
+router.post('/resolve-user', async (c: Context) => {
   try {
-    const { tenantId, platform, platformUserId } = req.body;
+    const body = await c.req.json();
+    const { tenantId, platform, platformUserId } = body as {
+      tenantId?: string;
+      platform?: string;
+      platformUserId?: string;
+    };
 
     // Validate inputs
     if (!tenantId || !platform || !platformUserId) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'MISSING_REQUIRED_FIELDS',
           message: 'Required fields: tenantId, platform, platformUserId',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     // Query DynamoDB for user pairing
@@ -611,34 +617,33 @@ router.post('/resolve-user', async (req: Request, res: Response) => {
     // Mock response
     const mockPairing: UserPairing | null = {
       tenantId,
-      platform,
+      platform: platform as UserPairing['platform'],
       platformUserId,
       cognitoSub: 'abc-123-cognito-sub',
       pairedAt: '2026-03-15T11:00:00Z',
     };
 
     if (!mockPairing) {
-      res.status(200).json({
+      return c.json({
         found: false,
         timestamp: new Date().toISOString(),
       });
-      return;
     }
 
-    res.status(200).json({
+    return c.json({
       cognitoSub: mockPairing.cognitoSub,
       found: true,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Resolve user error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to resolve user',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
