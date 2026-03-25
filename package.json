@@ -48,7 +48,8 @@
     "seed": "cd seed-data && bun run seed.ts",
     "seed:tables": "cd seed-data && bun run seed.ts --create-tables",
     "seed:data": "cd seed-data && bun run seed.ts --seed-data",
-    "seed:reset": "cd seed-data && bun run seed.ts --delete-tables && bun run seed.ts"
+    "seed:reset": "cd seed-data && bun run seed.ts --delete-tables && bun run seed.ts",
+    "release": "bun scripts/release.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-athena": "^3.1016.0",
