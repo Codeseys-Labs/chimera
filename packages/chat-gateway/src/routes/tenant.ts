@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { TenantService } from '@chimera/core';
 import { TenantTier, TenantStatus } from '@chimera/shared';
+import { TenantContext } from '../types';
 
 const router = new Hono();
 
@@ -58,9 +59,10 @@ const tenantService = new TenantService({
  * Platform admins have special tenant ID or admin role.
  * In production, this would check JWT claims or IAM roles.
  */
-function isPlatformAdmin(req: Request): boolean {
+function isPlatformAdmin(c: Context): boolean {
   const adminTenantId = process.env.PLATFORM_ADMIN_TENANT_ID || 'chimera-platform';
-  return req.tenantContext?.tenantId === adminTenantId;
+  const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+  return tenantContext?.tenantId === adminTenantId;
 }
 
 /**
@@ -68,11 +70,12 @@ function isPlatformAdmin(req: Request): boolean {
  *
  * Users can access their own tenant or if they are platform admin.
  */
-function canAccessTenant(req: Request, targetTenantId: string): boolean {
-  if (isPlatformAdmin(req)) {
+function canAccessTenant(c: Context, targetTenantId: string): boolean {
+  if (isPlatformAdmin(c)) {
     return true;
   }
-  return req.tenantContext?.tenantId === targetTenantId;
+  const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+  return tenantContext?.tenantId === targetTenantId;
 }
 
 /**
@@ -89,58 +92,54 @@ function canAccessTenant(req: Request, targetTenantId: string): boolean {
  *   "dataRegion": "us-east-1"
  * }
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (c: Context) => {
   try {
     // Authorization: Only platform admins can create tenants
-    if (!isPlatformAdmin(req)) {
-      res.status(403).json({
+    if (!isPlatformAdmin(c)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'Only platform administrators can create tenants',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    const { tenantId, name, tier, adminEmail, dataRegion, features, models, billing } = req.body;
+    const { tenantId, name, tier, adminEmail, dataRegion, features, models, billing } = await c.req.json();
 
     // Validate required fields
     if (!tenantId || !name || !tier || !adminEmail || !dataRegion) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'MISSING_REQUIRED_FIELDS',
           message: 'Required fields: tenantId, name, tier, adminEmail, dataRegion',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     // Validate tier
     const validTiers: TenantTier[] = ['basic', 'advanced', 'enterprise', 'dedicated'];
     if (!validTiers.includes(tier)) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_TIER',
           message: `Tier must be one of: ${validTiers.join(', ')}`,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     // Check if tenant already exists
     const existing = await tenantService.getTenantProfile(tenantId);
     if (existing) {
-      res.status(409).json({
+      return c.json({
         error: {
           code: 'TENANT_EXISTS',
           message: 'Tenant already exists',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 409);
     }
 
     // Create tenant
@@ -158,19 +157,19 @@ router.post('/', async (req: Request, res: Response) => {
     // Fetch created tenant
     const profile = await tenantService.getTenantProfile(tenantId);
 
-    res.status(201).json({
+    return c.json({
       tenant: profile,
       timestamp: new Date().toISOString(),
-    });
+    }, 201);
   } catch (error) {
     console.error('Create tenant error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to create tenant',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -179,48 +178,46 @@ router.post('/', async (req: Request, res: Response) => {
  *
  * Get tenant profile
  */
-router.get('/:tenantId', async (req: Request, res: Response) => {
+router.get('/:tenantId', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = c.req.param('tenantId')!;
 
     // Authorization: Can only access own tenant or if platform admin
-    if (!canAccessTenant(req, tenantId)) {
-      res.status(403).json({
+    if (!canAccessTenant(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only access your own tenant profile',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     const profile = await tenantService.getTenantProfile(tenantId);
 
     if (!profile) {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'TENANT_NOT_FOUND',
           message: 'Tenant not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
-    res.status(200).json({
+    return c.json({
       tenant: profile,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Get tenant error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to get tenant',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -231,35 +228,33 @@ router.get('/:tenantId', async (req: Request, res: Response) => {
  *
  * Request body: Partial<TenantProfile>
  */
-router.patch('/:tenantId', async (req: Request, res: Response) => {
+router.patch('/:tenantId', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = c.req.param('tenantId')!;
 
     // Authorization: Can only update own tenant or if platform admin
-    if (!canAccessTenant(req, tenantId)) {
-      res.status(403).json({
+    if (!canAccessTenant(c, tenantId)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'You can only update your own tenant profile',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    const updates = req.body;
+    const updates = await c.req.json();
 
     // Check if tenant exists
     const existing = await tenantService.getTenantProfile(tenantId);
     if (!existing) {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'TENANT_NOT_FOUND',
           message: 'Tenant not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
     // Update profile
@@ -268,19 +263,19 @@ router.patch('/:tenantId', async (req: Request, res: Response) => {
     // Fetch updated tenant
     const profile = await tenantService.getTenantProfile(tenantId);
 
-    res.status(200).json({
+    return c.json({
       tenant: profile,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Update tenant error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to update tenant',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -289,54 +284,52 @@ router.patch('/:tenantId', async (req: Request, res: Response) => {
  *
  * Suspend tenant
  */
-router.post('/:tenantId/suspend', async (req: Request, res: Response) => {
+router.post('/:tenantId/suspend', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = c.req.param('tenantId')!;
 
     // Authorization: Only platform admins can suspend tenants
-    if (!isPlatformAdmin(req)) {
-      res.status(403).json({
+    if (!isPlatformAdmin(c)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'Only platform administrators can suspend tenants',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    const { reason } = req.body;
+    const { reason } = await c.req.json();
 
     // Check if tenant exists
     const existing = await tenantService.getTenantProfile(tenantId);
     if (!existing) {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'TENANT_NOT_FOUND',
           message: 'Tenant not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
     // Suspend tenant
     await tenantService.suspendTenant(tenantId, reason);
 
-    res.status(200).json({
+    return c.json({
       message: 'Tenant suspended',
       tenantId,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Suspend tenant error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to suspend tenant',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -345,52 +338,50 @@ router.post('/:tenantId/suspend', async (req: Request, res: Response) => {
  *
  * Activate tenant (from TRIAL or SUSPENDED)
  */
-router.post('/:tenantId/activate', async (req: Request, res: Response) => {
+router.post('/:tenantId/activate', async (c: Context) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = c.req.param('tenantId')!;
 
     // Authorization: Only platform admins can activate tenants
-    if (!isPlatformAdmin(req)) {
-      res.status(403).json({
+    if (!isPlatformAdmin(c)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'Only platform administrators can activate tenants',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
     // Check if tenant exists
     const existing = await tenantService.getTenantProfile(tenantId);
     if (!existing) {
-      res.status(404).json({
+      return c.json({
         error: {
           code: 'TENANT_NOT_FOUND',
           message: 'Tenant not found',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 404);
     }
 
     // Activate tenant
     await tenantService.activateTenant(tenantId);
 
-    res.status(200).json({
+    return c.json({
       message: 'Tenant activated',
       tenantId,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Activate tenant error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to activate tenant',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -399,34 +390,32 @@ router.post('/:tenantId/activate', async (req: Request, res: Response) => {
  *
  * Query tenants by tier
  */
-router.get('/query/tier/:tier', async (req: Request, res: Response) => {
+router.get('/query/tier/:tier', async (c: Context) => {
   try {
     // Authorization: Only platform admins can query all tenants
-    if (!isPlatformAdmin(req)) {
-      res.status(403).json({
+    if (!isPlatformAdmin(c)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'Only platform administrators can query tenants',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    const { tier } = req.params;
-    const { status } = req.query;
+    const tier = c.req.param('tier')!;
+    const status = c.req.query('status');
 
     // Validate tier
     const validTiers: TenantTier[] = ['basic', 'advanced', 'enterprise', 'dedicated'];
     if (!validTiers.includes(tier as TenantTier)) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_TIER',
           message: `Tier must be one of: ${validTiers.join(', ')}`,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     const tenants = await tenantService.getTenantsByTier(
@@ -434,20 +423,20 @@ router.get('/query/tier/:tier', async (req: Request, res: Response) => {
       status as TenantStatus | undefined
     );
 
-    res.status(200).json({
+    return c.json({
       tenants,
       count: tenants.length,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Query tenants error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to query tenants',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 
@@ -456,51 +445,49 @@ router.get('/query/tier/:tier', async (req: Request, res: Response) => {
  *
  * Query tenants by status
  */
-router.get('/query/status/:status', async (req: Request, res: Response) => {
+router.get('/query/status/:status', async (c: Context) => {
   try {
     // Authorization: Only platform admins can query all tenants
-    if (!isPlatformAdmin(req)) {
-      res.status(403).json({
+    if (!isPlatformAdmin(c)) {
+      return c.json({
         error: {
           code: 'INSUFFICIENT_PERMISSIONS',
           message: 'Only platform administrators can query tenants',
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 403);
     }
 
-    const { status } = req.params;
+    const status = c.req.param('status')!;
 
     // Validate status
     const validStatuses: TenantStatus[] = ['TRIAL', 'ACTIVE', 'SUSPENDED'];
     if (!validStatuses.includes(status as TenantStatus)) {
-      res.status(400).json({
+      return c.json({
         error: {
           code: 'INVALID_STATUS',
           message: `Status must be one of: ${validStatuses.join(', ')}`,
         },
         timestamp: new Date().toISOString(),
-      });
-      return;
+      }, 400);
     }
 
     const tenants = await tenantService.getTenantsByStatus(status as TenantStatus);
 
-    res.status(200).json({
+    return c.json({
       tenants,
       count: tenants.length,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Query tenants error:', error);
-    res.status(500).json({
+    return c.json({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Failed to query tenants',
       },
       timestamp: new Date().toISOString(),
-    });
+    }, 500);
   }
 });
 

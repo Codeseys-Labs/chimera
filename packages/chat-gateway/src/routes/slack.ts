@@ -10,7 +10,7 @@ import type { Context } from 'hono';
 import crypto from 'crypto';
 import { getAdapter } from '../adapters';
 import { createAgent, createDefaultSystemPrompt } from '@chimera/core';
-import { ErrorResponse } from '../types';
+import { ErrorResponse, TenantContext } from '../types';
 import { resolveUser } from '../middleware/user-resolution';
 
 const router = new Hono();
@@ -52,7 +52,11 @@ interface SlackEventCallback {
  *
  * @see https://api.slack.com/authentication/verifying-requests-from-slack
  */
-function verifySlackSignature(req: Request): boolean {
+function verifySlackSignature(
+  signature: string | undefined,
+  timestamp: string | undefined,
+  rawBody: string
+): boolean {
   const slackSigningSecret = process.env.SLACK_SIGNING_SECRET;
 
   // Fail hard if secret not configured in production
@@ -65,10 +69,7 @@ function verifySlackSignature(req: Request): boolean {
     return true;
   }
 
-  const slackSignature = req.headers['x-slack-signature'] as string;
-  const timestamp = req.headers['x-slack-request-timestamp'] as string;
-
-  if (!slackSignature || !timestamp) {
+  if (!signature || !timestamp) {
     return false;
   }
 
@@ -80,7 +81,6 @@ function verifySlackSignature(req: Request): boolean {
   }
 
   // Compute signature
-  const rawBody = JSON.stringify(req.body);
   const sigBasestring = `v0:${timestamp}:${rawBody}`;
   const hmac = crypto.createHmac('sha256', slackSigningSecret);
   const computedSignature = `v0=${hmac.update(sigBasestring).digest('hex')}`;
@@ -88,7 +88,7 @@ function verifySlackSignature(req: Request): boolean {
   // Constant-time comparison to prevent timing attacks
   return crypto.timingSafeEqual(
     Buffer.from(computedSignature, 'utf8'),
-    Buffer.from(slackSignature, 'utf8')
+    Buffer.from(signature, 'utf8')
   );
 }
 
@@ -98,19 +98,26 @@ function verifySlackSignature(req: Request): boolean {
  * Slack Events API endpoint.
  * Handles URL verification challenge and incoming message events.
  */
-router.post('/events', resolveUser, async (req: Request, res: Response) => {
+router.post('/events', resolveUser, async (c: Context) => {
   try {
-    // Handle URL verification challenge
-    const body = req.body as SlackChallenge | SlackEventCallback;
+    const rawBody = await c.req.text();
 
+    let body: SlackChallenge | SlackEventCallback;
+    try {
+      body = JSON.parse(rawBody) as SlackChallenge | SlackEventCallback;
+    } catch {
+      return c.json({ ok: true });
+    }
+
+    // Handle URL verification challenge
     if (body.type === 'url_verification') {
-      const challenge = (body as SlackChallenge).challenge;
-      res.status(200).json({ challenge });
-      return;
+      return c.json({ challenge: (body as SlackChallenge).challenge });
     }
 
     // Verify signature for all non-challenge requests
-    if (!verifySlackSignature(req)) {
+    const signature = c.req.header('x-slack-signature');
+    const timestamp = c.req.header('x-slack-request-timestamp');
+    if (!verifySlackSignature(signature, timestamp, rawBody)) {
       const error: ErrorResponse = {
         error: {
           code: 'INVALID_SIGNATURE',
@@ -118,8 +125,7 @@ router.post('/events', resolveUser, async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(401).json(error);
-      return;
+      return c.json(error, 401);
     }
 
     // Handle event callbacks
@@ -129,18 +135,17 @@ router.post('/events', resolveUser, async (req: Request, res: Response) => {
 
       // Ignore bot messages to prevent infinite loops
       if (event.type === 'message' && 'bot_id' in event) {
-        res.status(200).json({ ok: true });
-        return;
+        return c.json({ ok: true });
       }
 
       // Only process message events
       if (event.type !== 'message') {
-        res.status(200).json({ ok: true });
-        return;
+        return c.json({ ok: true });
       }
 
       // Validate tenant context
-      if (!req.tenantContext) {
+      const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+      if (!tenantContext) {
         const error: ErrorResponse = {
           error: {
             code: 'MISSING_TENANT_CONTEXT',
@@ -148,8 +153,7 @@ router.post('/events', resolveUser, async (req: Request, res: Response) => {
           },
           timestamp: new Date().toISOString(),
         };
-        res.status(500).json(error);
-        return;
+        return c.json(error, 500);
       }
 
       // Get Slack adapter
@@ -159,23 +163,22 @@ router.post('/events', resolveUser, async (req: Request, res: Response) => {
       let messages;
       try {
         messages = adapter.parseIncoming({ event });
-      } catch (error) {
-        console.error('Failed to parse Slack message:', error);
-        res.status(200).json({ ok: true }); // Respond 200 to avoid retries
-        return;
+      } catch (parseError) {
+        console.error('Failed to parse Slack message:', parseError);
+        return c.json({ ok: true }); // Respond 200 to avoid retries
       }
 
       if (messages.length === 0) {
-        res.status(200).json({ ok: true });
-        return;
+        return c.json({ ok: true });
       }
 
       // Create agent and invoke
       // Use resolved Cognito user context if available, otherwise fall back to platform user
-      const userId = req.userContext?.cognitoSub || event.user || req.tenantContext.userId;
+      const userContext = c.get('userContext') as { cognitoSub?: string } | undefined;
+      const userId = userContext?.cognitoSub || event.user || tenantContext.userId;
       const agent = createAgent({
         systemPrompt: createDefaultSystemPrompt(),
-        tenantId: req.tenantContext.tenantId,
+        tenantId: tenantContext.tenantId,
         userId,
         sessionId: `slack_${event.channel}_${event.user}`,
       });
@@ -184,21 +187,20 @@ router.post('/events', resolveUser, async (req: Request, res: Response) => {
       const result = await agent.invoke(messages[0].content);
 
       // Format response for Slack
-      const slackResponse = adapter.formatResponse(result.output, req.tenantContext);
+      const slackResponse = adapter.formatResponse(result.output, tenantContext);
 
       // In production, you would post this to Slack's response_url or chat.postMessage API
       // For now, we acknowledge receipt
-      res.status(200).json(slackResponse);
-      return;
+      return c.json(slackResponse);
     }
 
     // Unknown event type
-    res.status(200).json({ ok: true });
+    return c.json({ ok: true });
   } catch (error) {
     console.error('Slack webhook error:', error);
 
     // Always respond 200 to Slack to prevent retries
-    res.status(200).json({ ok: true });
+    return c.json({ ok: true });
   }
 });
 
@@ -209,10 +211,14 @@ router.post('/events', resolveUser, async (req: Request, res: Response) => {
  * Slash commands require a response within 3 seconds, so we immediately acknowledge
  * and process the command asynchronously if needed.
  */
-router.post('/slash', resolveUser, async (req: Request, res: Response) => {
+router.post('/slash', resolveUser, async (c: Context) => {
   try {
+    const rawBody = await c.req.text();
+    const signature = c.req.header('x-slack-signature');
+    const timestamp = c.req.header('x-slack-request-timestamp');
+
     // Verify signature
-    if (!verifySlackSignature(req)) {
+    if (!verifySlackSignature(signature, timestamp, rawBody)) {
       const error: ErrorResponse = {
         error: {
           code: 'INVALID_SIGNATURE',
@@ -220,49 +226,59 @@ router.post('/slash', resolveUser, async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      res.status(401).json(error);
-      return;
+      return c.json(error, 401);
     }
 
     // Validate tenant context
-    if (!req.tenantContext) {
-      res.status(200).json({
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
+      return c.json({
         response_type: 'ephemeral',
         text: 'Authentication error. Please contact your administrator.',
       });
-      return;
     }
 
     // Get Slack adapter
     const adapter = getAdapter('slack');
 
-    // Parse slash command
-    let messages;
+    // Parse slash command body (URL-encoded form data)
+    let slashBody: Record<string, string>;
     try {
-      messages = adapter.parseIncoming(req.body);
+      // Slack slash commands send application/x-www-form-urlencoded
+      const formData = await c.req.parseBody();
+      slashBody = formData as Record<string, string>;
     } catch {
-      res.status(200).json({
+      return c.json({
         response_type: 'ephemeral',
         text: 'Invalid command format. Usage: /ai <your question>',
       });
-      return;
+    }
+
+    // Parse slash command
+    let messages;
+    try {
+      messages = adapter.parseIncoming(slashBody);
+    } catch {
+      return c.json({
+        response_type: 'ephemeral',
+        text: 'Invalid command format. Usage: /ai <your question>',
+      });
     }
 
     if (messages.length === 0 || !messages[0].content) {
-      res.status(200).json({
+      return c.json({
         response_type: 'ephemeral',
         text: 'Please provide a message. Usage: /ai <your question>',
       });
-      return;
     }
 
     // Create agent
     // Use resolved Cognito user context if available, otherwise fall back to platform user
-    const slashBody = req.body as { user_id?: string; channel_id?: string };
-    const userId = req.userContext?.cognitoSub || slashBody.user_id || req.tenantContext.userId;
+    const userContext = c.get('userContext') as { cognitoSub?: string } | undefined;
+    const userId = userContext?.cognitoSub || slashBody.user_id || tenantContext.userId;
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
-      tenantId: req.tenantContext.tenantId,
+      tenantId: tenantContext.tenantId,
       userId,
       sessionId: `slack_slash_${slashBody.channel_id}_${slashBody.user_id}`,
     });
@@ -271,11 +287,11 @@ router.post('/slash', resolveUser, async (req: Request, res: Response) => {
     const result = await agent.invoke(messages[0].content);
 
     // Format and return response
-    const slackResponse = adapter.formatResponse(result.output, req.tenantContext);
-    res.status(200).json(slackResponse);
+    const slackResponse = adapter.formatResponse(result.output, tenantContext);
+    return c.json(slackResponse);
   } catch (error) {
     console.error('Slash command error:', error);
-    res.status(200).json({
+    return c.json({
       response_type: 'ephemeral',
       text: 'Sorry, something went wrong processing your request.',
     });
