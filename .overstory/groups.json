@@ -353,5 +353,17 @@
 		"status": "active",
 		"createdAt": "2026-03-25T17:32:11.324Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-50930807",
+		"name": "email-agent-batch",
+		"memberIssueIds": [
+			"chimera-13e5",
+			"chimera-0f23",
+			"chimera-863a"
+		],
+		"status": "active",
+		"createdAt": "2026-03-25T18:56:36.681Z",
+		"completedAt": null
 	}
 ]
