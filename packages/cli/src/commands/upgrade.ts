@@ -1,5 +1,6 @@
 /**
  * Upgrade commands - apply upstream GitHub changes to CodeCommit while preserving agent edits
+ * Pure AWS SDK for CodeCommit operations - no git remote credential helper or pip dependencies
  */
 
 import { Command } from 'commander';
@@ -7,8 +8,10 @@ import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
+import { CodeCommitClient } from '@aws-sdk/client-codecommit';
 import { loadConfig } from '../utils/config';
+import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit';
 
 /**
  * Find project root by walking up directory tree looking for package.json
@@ -21,17 +24,25 @@ function findProjectRoot(): string {
     }
     dir = path.dirname(dir);
   }
-  throw new Error('Could not find project root (no package.json found). Run from within the project directory.');
+  throw new Error(
+    'Could not find project root (no package.json found). Run from within the project directory.',
+  );
 }
 
 /**
- * Get CodeCommit HTTPS URL with credential helper
+ * Run a git command using spawnSync (safe: arguments are passed as array, no shell injection)
+ * Throws on non-zero exit code unless ignoreError is true
  */
-function getCodeCommitUrl(region: string, repoName: string): string {
-  // Sanitize inputs to prevent injection
-  const safeRegion = region.replace(/[^a-z0-9-]/g, '');
-  const safeRepoName = repoName.replace(/[^a-zA-Z0-9_-]/g, '');
-  return `codecommit::${safeRegion}://${safeRepoName}`;
+function git(cwd: string, args: string[], ignoreError = false): string {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  if (!ignoreError && result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `git ${args[0]} failed`);
+  }
+  return (result.stdout || '').trim();
 }
 
 /**
@@ -39,12 +50,8 @@ function getCodeCommitUrl(region: string, repoName: string): string {
  */
 function hasUncommittedChanges(cwd: string): boolean {
   try {
-    const status = execSync('git status --porcelain', {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return status.trim().length > 0;
+    const output = git(cwd, ['status', '--porcelain']);
+    return output.length > 0;
   } catch {
     return false;
   }
@@ -65,7 +72,7 @@ function getGitHubUrl(repoRoot: string): string {
   }
 
   // Convert git+https://github.com/user/repo.git to https://github.com/user/repo
-  let url = packageJson.repository.url;
+  let url = packageJson.repository.url as string;
   url = url.replace(/^git\+/, '');
   url = url.replace(/\.git$/, '');
   return url;
@@ -76,11 +83,14 @@ function getGitHubUrl(repoRoot: string): string {
  *
  * Flow:
  * 1. Verify local repo is clean (no uncommitted changes)
- * 2. Configure git remotes (origin=GitHub, codecommit=CodeCommit)
- * 3. Fetch latest from both remotes
- * 4. Create upgrade branch from CodeCommit main (preserves agent edits)
+ * 2. Fetch CodeCommit state via SDK (no git remote needed)
+ * 3. Fetch GitHub upstream via standard git (no credential helper needed for GitHub)
+ * 4. Create upgrade branch, apply CodeCommit state, commit
  * 5. Merge upstream GitHub changes into upgrade branch
- * 6. Push merged result to CodeCommit
+ * 6. Push merged result to CodeCommit via CreateCommit API (no git remote needed)
+ * 7. Return to original branch and clean up
+ *
+ * Pure AWS SDK for CodeCommit - no git-remote-codecommit or pip dependencies
  */
 async function upgradeFromGitHub(
   repoRoot: string,
@@ -92,147 +102,98 @@ async function upgradeFromGitHub(
   if (hasUncommittedChanges(repoRoot)) {
     throw new Error(
       'You have uncommitted changes. Please commit or stash them before upgrading:\n' +
-      '  git add .\n' +
-      '  git commit -m "your message"'
+        '  git add .\n' +
+        '  git commit -m "your message"',
     );
   }
 
-  // Step 2: Configure git credential helper for CodeCommit
-  console.log(chalk.gray('  Configuring CodeCommit credential helper...'));
-  execSync('git config credential.helper "!aws codecommit credential-helper $@"', {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  execSync('git config credential.UseHttpPath true', {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const client = new CodeCommitClient({ region });
 
-  // Step 3: Add or update GitHub remote (origin)
+  // Step 2: Fetch CodeCommit state via SDK (replaces: git fetch codecommit main)
+  console.log(chalk.gray('  Fetching CodeCommit state via SDK...'));
+  const ccFiles = await getFilesFromCodeCommit(client, repoName, 'main');
+  console.log(chalk.gray(`  Received ${ccFiles.length} files from CodeCommit`));
+
+  // Step 3: Set up GitHub remote and fetch (standard git, no credential helper needed)
   try {
-    execSync('git remote get-url origin', {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    execSync(`git remote set-url origin ${githubUrl}`, {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    git(repoRoot, ['remote', 'get-url', 'origin']);
+    git(repoRoot, ['remote', 'set-url', 'origin', githubUrl]);
     console.log(chalk.gray('  Updated GitHub remote (origin)'));
   } catch {
-    execSync(`git remote add origin ${githubUrl}`, {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    git(repoRoot, ['remote', 'add', 'origin', githubUrl]);
     console.log(chalk.gray('  Added GitHub remote (origin)'));
   }
 
-  // Step 4: Add or update CodeCommit remote
-  const codecommitUrl = getCodeCommitUrl(region, repoName);
-  try {
-    execSync('git remote get-url codecommit', {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    execSync(`git remote set-url codecommit ${codecommitUrl}`, {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    console.log(chalk.gray('  Updated CodeCommit remote'));
-  } catch {
-    execSync(`git remote add codecommit ${codecommitUrl}`, {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    console.log(chalk.gray('  Added CodeCommit remote'));
-  }
-
-  // Step 5: Fetch from both remotes
   console.log(chalk.gray('  Fetching from GitHub...'));
-  execSync('git fetch origin main', {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  git(repoRoot, ['fetch', 'origin', 'main']);
 
-  console.log(chalk.gray('  Fetching from CodeCommit...'));
-  execSync('git fetch codecommit main', {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  // Step 6: Get current branch and stash its name
-  const originalBranch = execSync('git branch --show-current', {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-
-  // Step 7: Create upgrade branch from CodeCommit main (starts with agent edits)
+  // Step 4: Record current branch, create upgrade branch
+  const originalBranch = git(repoRoot, ['branch', '--show-current']);
   const upgradeBranch = `upgrade-${Date.now()}`;
   console.log(chalk.gray(`  Creating upgrade branch: ${upgradeBranch}`));
+  git(repoRoot, ['checkout', '-b', upgradeBranch]);
 
   try {
-    // Start from codecommit/main to preserve agent edits
-    execSync(`git checkout -b ${upgradeBranch} codecommit/main`, {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch (error: any) {
-    throw new Error(`Failed to create upgrade branch: ${error.message}`);
-  }
-
-  // Step 8: Merge upstream GitHub changes into upgrade branch
-  console.log(chalk.gray('  Merging upstream GitHub changes...'));
-  try {
-    execSync('git merge origin/main --no-edit -m "Upgrade: merge upstream GitHub changes"', {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    console.log(chalk.gray('  Merge successful (no conflicts)'));
-  } catch (error: any) {
-    // Check if merge conflict occurred
-    const status = execSync('git status', {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    if (status.includes('Unmerged paths') || status.includes('both modified')) {
-      console.error(chalk.yellow('\nMerge conflicts detected during upgrade.'));
-      console.error(chalk.gray('To resolve:'));
-      console.error(chalk.gray('  1. Review conflicts: git status'));
-      console.error(chalk.gray('  2. Edit conflicted files to resolve'));
-      console.error(chalk.gray('  3. Stage resolved files: git add <files>'));
-      console.error(chalk.gray('  4. Complete merge: git commit'));
-      console.error(chalk.gray(`  5. Push to CodeCommit: git push codecommit ${upgradeBranch}:main`));
-      console.error(chalk.gray(`  6. Return to original branch: git checkout ${originalBranch}`));
-      throw new Error('Merge conflicts require manual resolution');
+    // Step 5: Write CodeCommit files to disk (CodeCommit state with agent edits)
+    console.log(chalk.gray('  Applying CodeCommit state to upgrade branch...'));
+    for (const file of ccFiles) {
+      const localPath = path.join(repoRoot, file.path);
+      const localDir = path.dirname(localPath);
+      if (!fs.existsSync(localDir)) {
+        fs.mkdirSync(localDir, { recursive: true });
+      }
+      fs.writeFileSync(localPath, file.content);
     }
 
-    // Re-throw if not a merge conflict
-    throw error;
+    // Commit CC state so git can merge it with GitHub changes
+    git(repoRoot, ['add', '-A']);
+    try {
+      git(repoRoot, ['commit', '-m', 'CodeCommit state (agent edits)']);
+    } catch {
+      // Nothing to commit — CC and local are already identical
+      console.log(chalk.gray('  No changes from CodeCommit (already up to date)'));
+    }
+
+    // Step 6: Merge upstream GitHub changes
+    console.log(chalk.gray('  Merging upstream GitHub changes...'));
+    try {
+      git(repoRoot, ['merge', 'origin/main', '--no-edit', '-m', 'Upgrade: merge upstream GitHub changes']);
+      console.log(chalk.gray('  Merge successful (no conflicts)'));
+    } catch (error: any) {
+      // Check if merge conflict occurred
+      const status = git(repoRoot, ['status'], true);
+
+      if (status.includes('Unmerged paths') || status.includes('both modified')) {
+        console.error(chalk.yellow('\nMerge conflicts detected during upgrade.'));
+        console.error(chalk.gray('To resolve:'));
+        console.error(chalk.gray('  1. Review conflicts: git status'));
+        console.error(chalk.gray('  2. Edit conflicted files to resolve'));
+        console.error(chalk.gray('  3. Stage resolved files: git add <files>'));
+        console.error(chalk.gray('  4. Complete merge: git commit'));
+        console.error(chalk.gray(`  5. Push to CodeCommit: chimera sync`));
+        console.error(chalk.gray(`  6. Return to original branch: git checkout ${originalBranch}`));
+        throw new Error('Merge conflicts require manual resolution');
+      }
+
+      throw error;
+    }
+
+    // Step 7: Push merged result to CodeCommit via SDK (replaces: git push codecommit)
+    console.log(chalk.gray('  Pushing merged result to CodeCommit...'));
+    await pushToCodeCommit(
+      client,
+      repoName,
+      repoRoot,
+      'main',
+      'Upgrade: merge upstream GitHub changes',
+    );
+    console.log(chalk.gray('  Push successful'));
+  } finally {
+    // Step 8: Return to original branch and clean up upgrade branch
+    console.log(chalk.gray(`  Returning to original branch: ${originalBranch}`));
+    git(repoRoot, ['checkout', originalBranch], true);
+    git(repoRoot, ['branch', '-D', upgradeBranch], true);
   }
-
-  // Step 9: Push merged result to CodeCommit
-  console.log(chalk.gray('  Pushing to CodeCommit...'));
-  execSync(`git push codecommit ${upgradeBranch}:main`, {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  console.log(chalk.gray('  Push successful'));
-
-  // Step 10: Return to original branch and clean up
-  console.log(chalk.gray(`  Returning to original branch: ${originalBranch}`));
-  execSync(`git checkout ${originalBranch}`, {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  // Delete upgrade branch (local only)
-  execSync(`git branch -D ${upgradeBranch}`, {
-    cwd: repoRoot,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
 }
 
 export function registerUpgradeCommand(program: Command): void {
