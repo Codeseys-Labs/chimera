@@ -33,6 +33,16 @@ export function formatSSEDone(): string {
 }
 
 /**
+ * Format an SSE keepalive comment.
+ *
+ * SSE comments (lines starting with ':') are sent to prevent proxy/load-balancer
+ * timeouts on long-running streams. They are ignored by browsers and Vercel AI SDK.
+ */
+export function formatSSEKeepalive(): string {
+  return ': keepalive\n\n';
+}
+
+/**
  * SSE Stream Writer
  *
  * Wraps a WritableStream or Node.js response object to write SSE events.
