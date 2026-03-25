@@ -93,31 +93,63 @@ cdk deploy                     # Assumes global install
 
 ### Best Practices (Learned Conventions)
 
-These conventions were discovered through production incidents:
+These conventions were discovered through production incidents and are documented in ADRs. See [SESSION-RETROSPECTIVE.md](docs/SESSION-RETROSPECTIVE.md) for detailed session learnings.
 
-**Toolchain:**
-- TypeScript/JS: bun exclusively for packages and scripts
-- Python: uv with pyproject.toml (never pip/requirements.txt)
-- AWS CDK: npx cdk only (never bunx cdk)
-- CDK synthesis uses `npx ts-node --transpile-only` for speed
-- AWS SDK v3 clients: module-level singletons, not per-request instances
+#### Toolchain (ADR-019, ADR-020)
 
-**Infrastructure:**
-- CodeBuild YAML: avoid decorative echo commands, use POSIX-compliant shell
-- Docker in buildspec: add `|| true` for fault tolerance, but remove when downstream depends on image
-- KMS keys for CloudWatch Logs: must grant permissions via key policy, not just IAM
-- Step Functions Lambda tasks: always add retry with `errors: ['States.ALL']`
-- DLQ circuit breakers: CloudWatch alarms on `ApproximateNumberOfMessagesVisible`
+| Technology | Tool | Why | Never Use |
+|------------|------|-----|-----------|
+| **JavaScript/TypeScript** | `bun` | 2-5x faster installs, native TypeScript | `npm`, `yarn`, `pnpm` |
+| **Python** | `uv` + `pyproject.toml` | Deterministic resolution, fast | `pip`, `requirements.txt` |
+| **AWS CDK** | `npx cdk` | Node runtime required (Bun breaks instanceof) | `bunx cdk`, global `cdk` |
+| **CDK Synthesis** | `npx ts-node --transpile-only` | 3x faster than regular ts-node | `ts-node` without flag |
+| **AWS SDK v3** | Module-level singletons | Reuse clients, connection pooling | Per-request client creation |
 
-**Security:**
-- Cedar authorization tests: assert on specific policy reasons, not just allow/deny
-- GSI queries on multi-tenant tables: always add `FilterExpression='tenantId = :tid'`
-- Web UI: use `createElement/textContent`, never `innerHTML`
+**Critical:** CDK **must** use `npx cdk` not `bunx cdk`. Bun's module resolution creates different class instances for aws-cdk-lib constructs, breaking instanceof checks causing `TypeError: peer.canInlineRule is not a function`.
 
-**Development:**
-- Lead agents: read-only operations plus mail/mulch/seeds
-- Quality gates: `bun test && bun run lint && bun run typecheck` before merge
-- Mulch records: capture learnings before closing tasks
+#### Infrastructure (ADR-021, ADR-022, ADR-023)
+
+**CodeBuild YAML:** Avoid decorative echo commands (breaks parser), use POSIX-compliant shell (no `${VAR:0:8}` substring syntax)
+
+**Docker in Buildspec:** Add `|| true` for fault tolerance, BUT remove when downstream stack depends on image (must fail loudly if build breaks)
+
+**KMS for CloudWatch Logs:** Must grant permissions via key policy (not just IAM) — CloudWatch Logs can ONLY access KMS keys via key policy
+
+**Step Functions Lambda Tasks:** Always add retry with `errors: ['States.ALL']` to prevent transient cold start failures
+
+**DLQ Circuit Breakers:** CloudWatch alarms on `ApproximateNumberOfMessagesVisible` > 5 messages
+
+**Cross-Stack Dependencies:** When Stack B depends on Stack A resources (e.g., ChatStack using PipelineStack's ECR repo), Stack A failures must propagate
+
+**ECS ALB Target Groups:** Must be referenced by at least one ApplicationListener or deployment fails
+
+**Docker 2-Container Pattern:** Build container (install deps, build artifacts) + Runtime container (copy artifacts, run app) reduces image size 60-80%
+
+#### Security
+
+**Cedar Authorization Tests:** Assert on specific policy reasons, not just allow/deny (ensures correct policy applied)
+
+**GSI Cross-Tenant Leakage:** ALWAYS add `FilterExpression='tenantId = :tid'` to all GSI queries on multi-tenant tables — GSI keys don't enforce partition isolation
+
+**Web UI XSS Prevention:** Use `createElement` + `textContent` for user content (never set innerHTML directly)
+
+**Secrets Manager:** Never use `Secret.secretValue.unsafeUnwrap()` — embeds plaintext in CloudFormation template
+
+#### Development
+
+**Lead Agent Constraints:** Read-only file operations plus mail/mulch/seeds commands (cannot write files or run destructive git commands)
+
+**Quality Gates:** `bun test && bun run lint && bun run typecheck` required before merge
+
+**Mulch Expertise:** Record learnings before closing tasks with `--outcome-status success --outcome-agent <name>`, classify as `foundational` (confirmed) or `tactical` (session-specific)
+
+**Python Agents:** Use `uv` with `pyproject.toml` + `uv.lock`, replace deprecated `[tool.uv] dev-dependencies` with `[dependency-groups] dev`
+
+**CLI Deploy:** Uses `findProjectRoot()` to locate package.json, detects binary files, skips files > 5MB, batched CodeCommit CreateCommit API with 5MB batches
+
+**Token Budget:** Pre-flight check uses `estimateMessageTokens()` with `Math.ceil(estimate * 1.1)` safety margin
+
+**TSConfig for CDK:** `infra/tsconfig.json` needs `skipLibCheck: true` because `ts-node --transpile-only` skips type checking
 
 ---
 
