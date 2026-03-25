@@ -31,7 +31,7 @@ Use **two-stage Docker builds** with separate `builder` and `runtime` stages for
 **Pattern:**
 ```dockerfile
 # Stage 1: Build stage (includes dev tools, TypeScript compiler, source code)
-FROM oven/bun:1.2-alpine AS builder
+FROM oven/bun:1.3-alpine AS builder
 WORKDIR /app
 COPY package.json bun.lockb tsconfig.json ./
 COPY packages/ ./packages/
@@ -40,7 +40,7 @@ RUN cd packages/shared && bun run build
 RUN cd packages/chat-gateway && bun run build
 
 # Stage 2: Runtime stage (production deps + compiled artifacts only)
-FROM oven/bun:1.2-alpine AS runtime
+FROM oven/bun:1.3-alpine AS runtime
 WORKDIR /app
 COPY --from=builder /app/package.json /app/bun.lockb ./
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
@@ -145,7 +145,7 @@ Use Google's distroless images (no shell, no package manager).
 
 ## Related Decisions
 
-- **ADR-015** (Bun toolchain): Two-stage pattern uses `oven/bun:1.2-alpine` base
+- **ADR-015** (Bun toolchain): Two-stage pattern uses `oven/bun:1.3-alpine` base
 - **ADR-019** (Hono framework): Smaller framework (50KB) contributes to smaller runtime image
 - **ADR-013** (CodePipeline): CodeBuild builds Docker images, pushes to ECR
 - **ADR-005** (AWS CDK): ECS task definitions reference ECR images built via this pattern
