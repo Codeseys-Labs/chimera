@@ -4,7 +4,7 @@
 # Uses Bun as the runtime for optimal performance.
 
 # Stage 1: Build
-FROM oven/bun:1.2-alpine AS builder
+FROM oven/bun:1.3-alpine AS builder
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ RUN cd packages/sse-bridge && bun run build
 RUN cd packages/chat-gateway && bun run build
 
 # Stage 2: Production runtime
-FROM oven/bun:1.2-alpine AS runtime
+FROM oven/bun:1.3-alpine AS runtime
 
 WORKDIR /app
 
