@@ -64,6 +64,18 @@ export class TenantOnboardingStack extends cdk.Stack {
   /** Compensation Lambda — best-effort rollback on workflow failure */
   public readonly compensateTenantFunction: lambda.Function;
 
+  /** Step Functions state machine for offboarding workflow */
+  public readonly offboardingStateMachine: sfn.StateMachine;
+
+  /** Lambda functions for offboarding workflow */
+  public readonly offboardTenantFunction: lambda.Function;
+  public readonly cleanupIamRoleFunction: lambda.Function;
+  public readonly cleanupCognitoGroupFunction: lambda.Function;
+  public readonly cleanupS3PrefixFunction: lambda.Function;
+  public readonly cleanupCedarPoliciesFunction: lambda.Function;
+  public readonly cleanupDdbItemsFunction: lambda.Function;
+  public readonly finalizeTenantOffboardingFunction: lambda.Function;
+
   constructor(scope: Construct, id: string, props: TenantOnboardingStackProps) {
     super(scope, id, props);
 
@@ -932,6 +944,534 @@ forbid(
       value: this.cedarPolicy.policyStore.attrPolicyStoreId,
       description: 'Cedar policy store ID',
       exportName: `Chimera-${envName}-CedarPolicyStoreId`,
+    });
+
+    // ======================================================================
+    // Lambda: Offboard Tenant (Start)
+    // Validates tenant is in an offboardable state and sets status to
+    // OFFBOARDING. Returns current tenant config for downstream cleanup steps.
+    // ======================================================================
+    this.offboardTenantFunction = new lambda.Function(this, 'OffboardTenant', {
+      functionName: `chimera-offboard-start-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { DynamoDBClient, GetItemCommand, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
+        const client = new DynamoDBClient({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const tableName = process.env.TENANTS_TABLE_NAME;
+
+          const getResult = await client.send(new GetItemCommand({
+            TableName: tableName,
+            Key: {
+              PK: { S: \`TENANT#\${tenantId}\` },
+              SK: { S: 'PROFILE' },
+            },
+          }));
+
+          if (!getResult.Item) {
+            throw new Error(\`Tenant \${tenantId} not found\`);
+          }
+
+          const status = getResult.Item.status?.S;
+          const tier = getResult.Item.tier?.S;
+          const name = getResult.Item.name?.S;
+
+          if (status === 'PROVISIONING' || status === 'CHURNED') {
+            throw new Error(\`Cannot offboard tenant \${tenantId} with status \${status}\`);
+          }
+
+          await client.send(new UpdateItemCommand({
+            TableName: tableName,
+            Key: {
+              PK: { S: \`TENANT#\${tenantId}\` },
+              SK: { S: 'PROFILE' },
+            },
+            UpdateExpression: 'SET #status = :status, updatedAt = :now',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: {
+              ':status': { S: 'OFFBOARDING' },
+              ':now': { S: new Date().toISOString() },
+            },
+          }));
+
+          console.log(\`Set tenant \${tenantId} status to OFFBOARDING\`);
+          return { tenantId, tier, name, previousStatus: status };
+        };
+      `),
+      environment: {
+        TENANTS_TABLE_NAME: props.tenantsTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    props.tenantsTable.grantReadWriteData(this.offboardTenantFunction);
+
+    // ======================================================================
+    // Lambda: Cleanup IAM Role
+    // Lists all inline policies, deletes them, then deletes the tenant IAM
+    // role. Handles NoSuchEntity gracefully (idempotent).
+    // ======================================================================
+    this.cleanupIamRoleFunction = new lambda.Function(this, 'CleanupIamRole', {
+      functionName: `chimera-offboard-iam-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { IAMClient, ListRolePoliciesCommand, DeleteRolePolicyCommand, DeleteRoleCommand } = require('@aws-sdk/client-iam');
+        const client = new IAMClient({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const roleName = \`chimera-tenant-\${tenantId}-\${process.env.ENV_NAME}\`;
+
+          try {
+            const policiesResult = await client.send(new ListRolePoliciesCommand({ RoleName: roleName }));
+            for (const policyName of (policiesResult.PolicyNames || [])) {
+              await client.send(new DeleteRolePolicyCommand({ RoleName: roleName, PolicyName: policyName }));
+              console.log(\`Deleted inline policy \${policyName} from \${roleName}\`);
+            }
+          } catch (err) {
+            if (!err.name?.includes('NoSuchEntity')) throw err;
+            console.log(\`Role \${roleName} not found, skipping inline policy deletion\`);
+            return { success: true, roleName, alreadyDeleted: true };
+          }
+
+          try {
+            await client.send(new DeleteRoleCommand({ RoleName: roleName }));
+            console.log(\`Deleted IAM role \${roleName}\`);
+          } catch (err) {
+            if (!err.name?.includes('NoSuchEntity')) throw err;
+            console.log(\`Role \${roleName} not found, skipping deletion\`);
+          }
+
+          return { success: true, roleName };
+        };
+      `),
+      environment: {
+        ENV_NAME: envName,
+      },
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    this.cleanupIamRoleFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['iam:ListRolePolicies', 'iam:DeleteRolePolicy', 'iam:DeleteRole'],
+      resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
+    }));
+
+    // ======================================================================
+    // Lambda: Cleanup Cognito Group
+    // Removes all users from the tenant's Cognito group, then deletes it.
+    // Handles ResourceNotFoundException gracefully (idempotent).
+    // ======================================================================
+    this.cleanupCognitoGroupFunction = new lambda.Function(this, 'CleanupCognitoGroup', {
+      functionName: `chimera-offboard-cognito-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { CognitoIdentityProviderClient, ListUsersInGroupCommand, AdminRemoveUserFromGroupCommand, DeleteGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+        const client = new CognitoIdentityProviderClient({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const groupName = \`tenant-\${tenantId}\`;
+          const userPoolId = process.env.USER_POOL_ID;
+
+          try {
+            let nextToken;
+            let removedCount = 0;
+            do {
+              const listResult = await client.send(new ListUsersInGroupCommand({
+                GroupName: groupName,
+                UserPoolId: userPoolId,
+                NextToken: nextToken,
+              }));
+              for (const user of (listResult.Users || [])) {
+                await client.send(new AdminRemoveUserFromGroupCommand({
+                  UserPoolId: userPoolId,
+                  Username: user.Username,
+                  GroupName: groupName,
+                }));
+                removedCount++;
+              }
+              nextToken = listResult.NextToken;
+            } while (nextToken);
+
+            console.log(\`Removed \${removedCount} users from group \${groupName}\`);
+
+            await client.send(new DeleteGroupCommand({
+              GroupName: groupName,
+              UserPoolId: userPoolId,
+            }));
+            console.log(\`Deleted Cognito group \${groupName}\`);
+          } catch (err) {
+            if (err.name?.includes('ResourceNotFoundException')) {
+              console.log(\`Cognito group \${groupName} not found, skipping\`);
+              return { success: true, groupName, alreadyDeleted: true };
+            }
+            throw err;
+          }
+
+          return { success: true, groupName };
+        };
+      `),
+      environment: {
+        USER_POOL_ID: props.userPool.userPoolId,
+      },
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    this.cleanupCognitoGroupFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cognito-idp:ListUsersInGroup', 'cognito-idp:AdminRemoveUserFromGroup', 'cognito-idp:DeleteGroup'],
+      resources: [props.userPool.userPoolArn],
+    }));
+
+    // ======================================================================
+    // Lambda: Cleanup S3 Prefix
+    // Paginates through tenants/{tenantId}/ and batch-deletes all objects.
+    // ======================================================================
+    this.cleanupS3PrefixFunction = new lambda.Function(this, 'CleanupS3Prefix', {
+      functionName: `chimera-offboard-s3-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { S3Client, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
+        const client = new S3Client({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const bucketName = process.env.TENANT_BUCKET_NAME;
+          const prefix = \`tenants/\${tenantId}/\`;
+          let deletedCount = 0;
+          let continuationToken;
+
+          do {
+            const listResult = await client.send(new ListObjectsV2Command({
+              Bucket: bucketName,
+              Prefix: prefix,
+              ContinuationToken: continuationToken,
+            }));
+
+            const objects = listResult.Contents || [];
+            if (objects.length > 0) {
+              await client.send(new DeleteObjectsCommand({
+                Bucket: bucketName,
+                Delete: {
+                  Objects: objects.map(o => ({ Key: o.Key })),
+                  Quiet: true,
+                },
+              }));
+              deletedCount += objects.length;
+              console.log(\`Deleted \${objects.length} objects from \${prefix}\`);
+            }
+
+            continuationToken = listResult.IsTruncated ? listResult.NextContinuationToken : undefined;
+          } while (continuationToken);
+
+          console.log(\`S3 cleanup complete for \${tenantId}: \${deletedCount} objects deleted\`);
+          return { success: true, prefix, deletedCount };
+        };
+      `),
+      environment: {
+        TENANT_BUCKET_NAME: props.tenantBucket.bucketName,
+      },
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    props.tenantBucket.grantReadWrite(this.cleanupS3PrefixFunction, 'tenants/*');
+
+    // ======================================================================
+    // Lambda: Cleanup Cedar Policies
+    // Paginates through the policy store, finds policies matching the tenant
+    // by description, and deletes them. Handles ResourceNotFound gracefully.
+    // ======================================================================
+    this.cleanupCedarPoliciesFunction = new lambda.Function(this, 'CleanupCedarPolicies', {
+      functionName: `chimera-offboard-cedar-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { VerifiedPermissionsClient, ListPoliciesCommand, DeletePolicyCommand } = require('@aws-sdk/client-verifiedpermissions');
+        const client = new VerifiedPermissionsClient({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const policyStoreId = process.env.POLICY_STORE_ID;
+          const deletedPolicies = [];
+          let nextToken;
+
+          do {
+            const listResult = await client.send(new ListPoliciesCommand({
+              policyStoreId,
+              nextToken,
+            }));
+
+            for (const policy of (listResult.policies || [])) {
+              const desc = policy.definition?.static?.description || '';
+              if (desc.includes(tenantId)) {
+                try {
+                  await client.send(new DeletePolicyCommand({
+                    policyStoreId,
+                    policyId: policy.policyId,
+                  }));
+                  deletedPolicies.push(policy.policyId);
+                  console.log(\`Deleted Cedar policy \${policy.policyId} for tenant \${tenantId}\`);
+                } catch (err) {
+                  if (!err.name?.includes('ResourceNotFoundException')) throw err;
+                  console.log(\`Cedar policy \${policy.policyId} already deleted, skipping\`);
+                }
+              }
+            }
+
+            nextToken = listResult.nextToken;
+          } while (nextToken);
+
+          console.log(\`Deleted \${deletedPolicies.length} Cedar policies for tenant \${tenantId}\`);
+          return { success: true, deletedCount: deletedPolicies.length, policyIds: deletedPolicies };
+        };
+      `),
+      environment: {
+        POLICY_STORE_ID: this.cedarPolicy.policyStore.attrPolicyStoreId,
+      },
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    this.cleanupCedarPoliciesFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['verifiedpermissions:ListPolicies', 'verifiedpermissions:DeletePolicy'],
+      resources: [this.cedarPolicy.policyStore.attrArn],
+    }));
+
+    // ======================================================================
+    // Lambda: Cleanup DDB Items
+    // Queries PK=TENANT#{tenantId} on all 6 tables and batch-deletes all
+    // matching items. Handles pagination for large result sets.
+    // ======================================================================
+    this.cleanupDdbItemsFunction = new lambda.Function(this, 'CleanupDdbItems', {
+      functionName: `chimera-offboard-ddb-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { DynamoDBClient, QueryCommand, BatchWriteItemCommand } = require('@aws-sdk/client-dynamodb');
+        const client = new DynamoDBClient({});
+
+        async function deleteAllItemsForTenant(tableName, tenantId) {
+          let lastEvaluatedKey;
+          let deletedCount = 0;
+          do {
+            const queryResult = await client.send(new QueryCommand({
+              TableName: tableName,
+              KeyConditionExpression: 'PK = :pk',
+              ExpressionAttributeValues: { ':pk': { S: \`TENANT#\${tenantId}\` } },
+              ExclusiveStartKey: lastEvaluatedKey,
+            }));
+
+            const items = queryResult.Items || [];
+            // BatchWriteItem limit: 25 items per request
+            for (let i = 0; i < items.length; i += 25) {
+              const chunk = items.slice(i, i + 25);
+              await client.send(new BatchWriteItemCommand({
+                RequestItems: {
+                  [tableName]: chunk.map(item => ({
+                    DeleteRequest: { Key: { PK: item.PK, SK: item.SK } },
+                  })),
+                },
+              }));
+              deletedCount += chunk.length;
+            }
+
+            lastEvaluatedKey = queryResult.LastEvaluatedKey;
+          } while (lastEvaluatedKey);
+          return deletedCount;
+        }
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const tables = [
+            process.env.TENANTS_TABLE_NAME,
+            process.env.SESSIONS_TABLE_NAME,
+            process.env.SKILLS_TABLE_NAME,
+            process.env.RATE_LIMITS_TABLE_NAME,
+            process.env.COST_TRACKING_TABLE_NAME,
+            process.env.AUDIT_TABLE_NAME,
+          ].filter(Boolean);
+
+          const deletedByTable = {};
+          for (const tableName of tables) {
+            deletedByTable[tableName] = await deleteAllItemsForTenant(tableName, tenantId);
+            console.log(\`Deleted \${deletedByTable[tableName]} items from \${tableName} for \${tenantId}\`);
+          }
+
+          return { success: true, tenantId, deletedByTable };
+        };
+      `),
+      environment: {
+        TENANTS_TABLE_NAME: props.tenantsTable.tableName,
+        SESSIONS_TABLE_NAME: props.sessionsTable.tableName,
+        SKILLS_TABLE_NAME: props.skillsTable.tableName,
+        RATE_LIMITS_TABLE_NAME: props.rateLimitsTable.tableName,
+        COST_TRACKING_TABLE_NAME: props.costTrackingTable.tableName,
+        AUDIT_TABLE_NAME: props.auditTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 512,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    props.tenantsTable.grantReadWriteData(this.cleanupDdbItemsFunction);
+    props.sessionsTable.grantReadWriteData(this.cleanupDdbItemsFunction);
+    props.skillsTable.grantReadWriteData(this.cleanupDdbItemsFunction);
+    props.rateLimitsTable.grantReadWriteData(this.cleanupDdbItemsFunction);
+    props.costTrackingTable.grantReadWriteData(this.cleanupDdbItemsFunction);
+    props.auditTable.grantReadWriteData(this.cleanupDdbItemsFunction);
+
+    // ======================================================================
+    // Lambda: Finalize Tenant Offboarding
+    // Writes a CHURNED tombstone PROFILE record (PutItem: upsert) to preserve
+    // the audit trail. All other items were deleted by cleanupDdbItems.
+    // ======================================================================
+    this.finalizeTenantOffboardingFunction = new lambda.Function(this, 'FinalizeTenantOffboarding', {
+      functionName: `chimera-offboard-finalize-${envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const { DynamoDBClient, PutItemCommand } = require('@aws-sdk/client-dynamodb');
+        const client = new DynamoDBClient({});
+
+        exports.handler = async (event) => {
+          const { tenantId } = event;
+          const offboardResult = event.offboardResult?.Payload || {};
+          const tableName = process.env.TENANTS_TABLE_NAME;
+          const now = new Date().toISOString();
+
+          // Write a sparse CHURNED tombstone so audit trail is preserved
+          await client.send(new PutItemCommand({
+            TableName: tableName,
+            Item: {
+              PK: { S: \`TENANT#\${tenantId}\` },
+              SK: { S: 'PROFILE' },
+              tenantId: { S: tenantId },
+              status: { S: 'CHURNED' },
+              ...(offboardResult.tier ? { tier: { S: offboardResult.tier } } : {}),
+              ...(offboardResult.name ? { name: { S: offboardResult.name } } : {}),
+              offboardedAt: { S: now },
+              updatedAt: { S: now },
+            },
+          }));
+
+          console.log(\`Tenant \${tenantId} offboarding finalized, status CHURNED\`);
+          return { success: true, tenantId, status: 'CHURNED', offboardedAt: now };
+        };
+      `),
+      environment: {
+        TENANTS_TABLE_NAME: props.tenantsTable.tableName,
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+    });
+    props.tenantsTable.grantWriteData(this.finalizeTenantOffboardingFunction);
+
+    // ======================================================================
+    // Step Functions: Offboarding Workflow
+    // offboardTenant
+    //   -> parallel(cleanupIamRole | cleanupCognitoGroup | cleanupS3Prefix | cleanupCedarPolicies)
+    //   -> cleanupDdbItems
+    //   -> finalizeTenantOffboarding
+    //   -> Success
+    //
+    // Errors route to a Fail state (no auto-compensation — offboarding is
+    // intentional and each step is idempotent; re-run is the recovery path).
+    // ======================================================================
+
+    const offboardingFailState = new sfn.Fail(this, 'OffboardingFailed', {
+      cause: 'Tenant offboarding workflow failed',
+      error: 'OffboardingError',
+    });
+
+    // Step 1: Validate tenant and mark OFFBOARDING
+    const offboardTenantTask = new tasks.LambdaInvoke(this, 'OffboardTenantTask', {
+      lambdaFunction: this.offboardTenantFunction,
+      resultPath: '$.offboardResult',
+    });
+    offboardTenantTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    offboardTenantTask.addCatch(offboardingFailState, { resultPath: '$.error' });
+
+    // Step 2 (parallel branches): IAM, Cognito, S3, Cedar cleanup
+    const cleanupIamRoleTask = new tasks.LambdaInvoke(this, 'CleanupIamRoleTask', {
+      lambdaFunction: this.cleanupIamRoleFunction,
+      resultPath: '$.cleanupIamResult',
+    });
+    cleanupIamRoleTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+
+    const cleanupCognitoGroupTask = new tasks.LambdaInvoke(this, 'CleanupCognitoGroupTask', {
+      lambdaFunction: this.cleanupCognitoGroupFunction,
+      resultPath: '$.cleanupCognitoResult',
+    });
+    cleanupCognitoGroupTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+
+    const cleanupS3PrefixTask = new tasks.LambdaInvoke(this, 'CleanupS3PrefixTask', {
+      lambdaFunction: this.cleanupS3PrefixFunction,
+      resultPath: '$.cleanupS3Result',
+    });
+    cleanupS3PrefixTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+
+    const cleanupCedarPoliciesTask = new tasks.LambdaInvoke(this, 'CleanupCedarPoliciesTask', {
+      lambdaFunction: this.cleanupCedarPoliciesFunction,
+      resultPath: '$.cleanupCedarResult',
+    });
+    cleanupCedarPoliciesTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+
+    // resultPath preserves $.tenantId / $.offboardResult for downstream steps
+    const parallelCleanup = new sfn.Parallel(this, 'ParallelCleanup', {
+      resultPath: '$.parallelCleanupResult',
+    })
+      .branch(cleanupIamRoleTask)
+      .branch(cleanupCognitoGroupTask)
+      .branch(cleanupS3PrefixTask)
+      .branch(cleanupCedarPoliciesTask);
+    parallelCleanup.addCatch(offboardingFailState, { resultPath: '$.error' });
+
+    // Step 3: Delete all DDB items across all 6 tables
+    const cleanupDdbItemsTask = new tasks.LambdaInvoke(this, 'CleanupDdbItemsTask', {
+      lambdaFunction: this.cleanupDdbItemsFunction,
+      resultPath: '$.cleanupDdbResult',
+    });
+    cleanupDdbItemsTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    cleanupDdbItemsTask.addCatch(offboardingFailState, { resultPath: '$.error' });
+
+    // Step 4: Write CHURNED tombstone record
+    const finalizeTenantOffboardingTask = new tasks.LambdaInvoke(this, 'FinalizeTenantOffboardingTask', {
+      lambdaFunction: this.finalizeTenantOffboardingFunction,
+      resultPath: '$.finalizeResult',
+    });
+    finalizeTenantOffboardingTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    finalizeTenantOffboardingTask.addCatch(offboardingFailState, { resultPath: '$.error' });
+
+    const offboardingSuccessState = new sfn.Succeed(this, 'OffboardingComplete', {
+      comment: 'Tenant offboarding completed successfully',
+    });
+
+    const offboardingDefinition = offboardTenantTask
+      .next(parallelCleanup)
+      .next(cleanupDdbItemsTask)
+      .next(finalizeTenantOffboardingTask)
+      .next(offboardingSuccessState);
+
+    this.offboardingStateMachine = new sfn.StateMachine(this, 'OffboardingStateMachine', {
+      stateMachineName: `chimera-tenant-offboarding-${envName}`,
+      definitionBody: sfn.DefinitionBody.fromChainable(offboardingDefinition),
+      timeout: cdk.Duration.minutes(15),
+      tracingEnabled: true,
+    });
+
+    new cdk.CfnOutput(this, 'OffboardingStateMachineArn', {
+      value: this.offboardingStateMachine.stateMachineArn,
+      description: 'Step Functions state machine ARN for tenant offboarding',
+      exportName: `Chimera-${envName}-OffboardingStateMachineArn`,
     });
   }
 }
