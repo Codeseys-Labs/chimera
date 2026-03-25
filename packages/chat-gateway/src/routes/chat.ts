@@ -5,14 +5,26 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { createAgent, createDefaultSystemPrompt, StreamEvent, createBedrockModel } from '@chimera/core';
-import { streamStrandsToDSP } from '@chimera/sse-bridge';
+import {
+  StrandsToDSPBridge,
+  VERCEL_DSP_HEADERS,
+  formatSSEData,
+  formatSSEDone,
+  formatSSEKeepalive,
+} from '@chimera/sse-bridge';
 import { StrandsStreamEvent } from '@chimera/sse-bridge';
+import type { VercelDSPStreamPart } from '@chimera/sse-bridge';
+import { StreamTee } from '@chimera/sse-bridge';
 import { ChatRequest, ChatResponse, ErrorResponse, TenantContext } from '../types';
 import { getAdapter } from '../adapters';
 import { getConfig } from '../config';
+import { streamManager } from '../stream-manager';
 
 const router = new Hono();
 const config = getConfig();
+
+/** Keepalive ping interval (15 s) — prevents proxy/ALB idle-connection timeouts */
+const KEEPALIVE_INTERVAL_MS = 15_000;
 
 /**
  * Map ChimeraAgent StreamEvent to StrandsStreamEvent
@@ -93,10 +105,110 @@ async function* mapAgentStreamToStrands(
 }
 
 /**
+ * Build a ReadableStream<Uint8Array> that replays a StreamTee's buffer then
+ * follows the live tail, emitting keepalive pings at regular intervals.
+ *
+ * The register-then-replay pattern is race-free in JavaScript because
+ * no await occurs between addListener() and the buffer replay loop —
+ * the background consumer cannot advance during that synchronous window.
+ */
+function createTeeSSEStream(
+  tee: StreamTee<VercelDSPStreamPart>
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+
+      function enqueue(text: string): void {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          closed = true;
+          clearInterval(keepaliveTimer);
+        }
+      }
+
+      function close(): void {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepaliveTimer);
+        removeListener();
+        removeComplete();
+        removeError();
+        try {
+          controller.close();
+        } catch {
+          // ignore if already closed
+        }
+      }
+
+      // Subscribe to future parts BEFORE replaying the buffer.
+      // Safe: JS single-threaded event loop means the background consumer
+      // cannot run between addListener() and the for-loop below.
+      const removeListener = tee.addListener((part) => enqueue(formatSSEData(part)));
+      const removeComplete = tee.onComplete(() => {
+        enqueue(formatSSEDone());
+        close();
+      });
+      const removeError = tee.onError((err) => {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepaliveTimer);
+        removeListener();
+        removeComplete();
+        removeError();
+        controller.error(err);
+      });
+
+      // Replay all parts already in the buffer
+      for (const part of tee.buffer) {
+        enqueue(formatSSEData(part));
+      }
+
+      // Handle terminal states that occurred before we subscribed
+      if (tee.done) {
+        enqueue(formatSSEDone());
+        close();
+        return;
+      }
+
+      if (tee.error) {
+        closed = true;
+        clearInterval(keepaliveTimer);
+        removeListener();
+        removeComplete();
+        removeError();
+        controller.error(tee.error);
+        return;
+      }
+
+      // Start keepalive pings to prevent idle-connection timeouts
+      keepaliveTimer = setInterval(
+        () => enqueue(formatSSEKeepalive()),
+        KEEPALIVE_INTERVAL_MS
+      );
+    },
+
+    cancel() {
+      // HTTP client disconnected. The background StreamTee.consume() continues
+      // buffering so a reconnecting client can replay missed content.
+      clearInterval(keepaliveTimer);
+    },
+  });
+}
+
+/**
  * POST /chat/stream
  *
  * Streaming chat endpoint using Server-Sent Events (SSE).
  * Accepts Vercel AI SDK chat requests, routes to tenant agent, streams via SSE bridge.
+ *
+ * Returns X-Message-Id header so the client can reconnect via GET /chat/stream/:id.
+ * Agent generation continues even if the client disconnects (consumeStream pattern).
  */
 router.post('/stream', async (c: Context) => {
   try {
@@ -134,7 +246,7 @@ router.post('/stream', async (c: Context) => {
       return c.json(error, 400);
     }
 
-    // Parse request body
+    // Parse messages
     let messages;
     try {
       messages = adapter.parseIncoming(body);
@@ -173,6 +285,9 @@ router.post('/stream', async (c: Context) => {
       return c.json(error, 400);
     }
 
+    // Generate a stable message ID used for the SSE stream and reconnection
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     // Create agent instance with Bedrock model if enabled
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
@@ -187,14 +302,87 @@ router.post('/stream', async (c: Context) => {
       }) : undefined,
     });
 
-    // Stream agent response through SSE bridge
+    // Build DSP part stream from agent
     const agentStream = agent.stream(lastMessage.content);
     const strandsStream = mapAgentStreamToStrands(agentStream);
+    const bridge = new StrandsToDSPBridge(messageId);
+    const dspStream = bridge.convertStream(strandsStream);
 
-    // Hono Context provides Response-compatible interface
-    // streamStrandsToDSP expects a Response-like object with setHeader and write methods
-    // We need to create a custom streaming response
-    return c.body(null as any); // Temporary placeholder - will be handled by SSE bridge
+    // Register with StreamManager — starts consuming in background.
+    // The tee continues buffering even after the HTTP connection closes.
+    const tee = streamManager.create(messageId, tenantContext.tenantId, dspStream);
+
+    // Return SSE response: replays any immediately-buffered parts + follows live tail
+    const responseBody = createTeeSSEStream(tee);
+
+    return new Response(responseBody, {
+      status: 200,
+      headers: {
+        ...VERCEL_DSP_HEADERS,
+        'X-Message-Id': messageId,
+      },
+    });
+  } catch (error) {
+    const errorResponse: ErrorResponse = {
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        details: error,
+      },
+      timestamp: new Date().toISOString(),
+    };
+    return c.json(errorResponse, 500);
+  }
+});
+
+/**
+ * GET /chat/stream/:messageId
+ *
+ * Reconnection endpoint for interrupted SSE streams.
+ * Replays all buffered DSP parts from the named stream, then follows the live tail
+ * if the agent is still generating. Returns 404 if the stream has expired or belongs
+ * to a different tenant.
+ *
+ * The Vercel AI SDK useChat hook can reconnect automatically with resume: true.
+ */
+router.get('/stream/:messageId', async (c: Context) => {
+  try {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'MISSING_TENANT_CONTEXT',
+          message: 'Tenant context not found. Ensure tenant middleware is active.',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 500);
+    }
+
+    const messageId = c.req.param('messageId');
+    const record = streamManager.getForTenant(messageId, tenantContext.tenantId);
+
+    if (!record) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'STREAM_NOT_FOUND',
+          message: `No active stream found for messageId: ${messageId}`,
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 404);
+    }
+
+    // Replay buffered content + follow live tail using the same helper as POST
+    const responseBody = createTeeSSEStream(record.tee);
+
+    return new Response(responseBody, {
+      status: 200,
+      headers: {
+        ...VERCEL_DSP_HEADERS,
+        'X-Message-Id': messageId,
+      },
+    });
   } catch (error) {
     const errorResponse: ErrorResponse = {
       error: {
