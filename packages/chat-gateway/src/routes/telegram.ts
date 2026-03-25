@@ -5,14 +5,15 @@
  * Routes Telegram messages to the chat gateway using the Telegram platform adapter.
  */
 
-import { Router } from 'express';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import crypto from 'crypto';
 import { getAdapter } from '../adapters';
 import { createAgent, createDefaultSystemPrompt } from '@chimera/core';
-import { ErrorResponse } from '../types';
+import { ErrorResponse, TenantContext } from '../types';
 import { resolveUser } from '../middleware/user-resolution';
 
-const router = Router();
+const router = new Hono();
 
 /**
  * Telegram webhook Update payload
@@ -44,7 +45,7 @@ interface TelegramUpdate {
  *
  * @see https://core.telegram.org/bots/api#setwebhook
  */
-function verifyTelegramSecret(req: Request): boolean {
+function verifyTelegramSecret(providedToken: string | undefined): boolean {
   const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
 
   // In production, secret must be configured
@@ -56,8 +57,6 @@ function verifyTelegramSecret(req: Request): boolean {
     console.warn('TELEGRAM_WEBHOOK_SECRET not set - skipping token verification (development only)');
     return true;
   }
-
-  const providedToken = (req.headers as any)['x-telegram-bot-api-secret-token'] as string | undefined;
 
   if (!providedToken) {
     return false;
@@ -84,10 +83,11 @@ function verifyTelegramSecret(req: Request): boolean {
  * Main Telegram webhook handler.
  * Receives updates from Telegram and routes text messages to the agent.
  */
-router.post('/webhook', resolveUser, async (req: Request, res: Response) => {
+router.post('/webhook', resolveUser, async (c: Context) => {
   try {
     // Verify secret token
-    if (!verifyTelegramSecret(req)) {
+    const providedToken = c.req.header('x-telegram-bot-api-secret-token');
+    if (!verifyTelegramSecret(providedToken)) {
       const error: ErrorResponse = {
         error: {
           code: 'INVALID_TOKEN',
@@ -95,16 +95,14 @@ router.post('/webhook', resolveUser, async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      (res as any).status(401).json(error);
-      return;
+      return c.json(error, 401);
     }
 
-    const update = (req as any).body as TelegramUpdate;
+    const update = await c.req.json() as TelegramUpdate;
 
     // Ignore bot messages to prevent infinite loops
     if (update.message?.from?.is_bot) {
-      (res as any).status(200).json({ ok: true });
-      return;
+      return c.json({ ok: true });
     }
 
     // Get Telegram adapter
@@ -116,18 +114,17 @@ router.post('/webhook', resolveUser, async (req: Request, res: Response) => {
       messages = adapter.parseIncoming(update);
     } catch (parseError) {
       console.error('Failed to parse Telegram update:', parseError);
-      (res as any).status(200).json({ ok: true }); // Respond 200 to avoid Telegram retries
-      return;
+      return c.json({ ok: true }); // Respond 200 to avoid Telegram retries
     }
 
     // Non-text update (sticker, photo, etc.) — acknowledge and ignore
     if (messages.length === 0) {
-      (res as any).status(200).json({ ok: true });
-      return;
+      return c.json({ ok: true });
     }
 
     // Validate tenant context
-    if (!(req as any).tenantContext) {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
       const error: ErrorResponse = {
         error: {
           code: 'MISSING_TENANT_CONTEXT',
@@ -135,17 +132,16 @@ router.post('/webhook', resolveUser, async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      (res as any).status(500).json(error);
-      return;
+      return c.json(error, 500);
     }
 
-    const tenantContext = (req as any).tenantContext;
     const fromId = update.message?.from?.id;
     const chatId = update.message?.chat.id;
 
     // Create agent and invoke
     // Use resolved Cognito user context if available, otherwise fall back to platform user
-    const userId = (req as any).userContext?.cognitoSub || String(fromId) || tenantContext.userId;
+    const userContext = c.get('userContext') as { cognitoSub?: string } | undefined;
+    const userId = userContext?.cognitoSub || String(fromId) || tenantContext.userId;
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
@@ -156,17 +152,17 @@ router.post('/webhook', resolveUser, async (req: Request, res: Response) => {
     const result = await agent.invoke(messages[0].content);
 
     // Format response for Telegram and include chat_id from incoming update
-    const formatted = adapter.formatResponse(result.output, tenantContext);
+    const formatted = adapter.formatResponse(result.output, tenantContext) as Record<string, unknown>;
     const telegramResponse = {
       ...formatted,
       chat_id: chatId,
     };
 
-    (res as any).status(200).json(telegramResponse);
+    return c.json(telegramResponse);
   } catch (error) {
     console.error('Telegram webhook error:', error);
     // Always respond 200 to Telegram to prevent retries
-    (res as any).status(200).json({ ok: true });
+    return c.json({ ok: true });
   }
 });
 
@@ -176,10 +172,11 @@ router.post('/webhook', resolveUser, async (req: Request, res: Response) => {
  * Admin endpoint to register or update the webhook URL with Telegram.
  * In production, this would call the Telegram Bot API setWebhook method.
  */
-router.post('/set-webhook', async (req: Request, res: Response) => {
+router.post('/set-webhook', async (c: Context) => {
   try {
     // Validate tenant context
-    if (!(req as any).tenantContext) {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
       const error: ErrorResponse = {
         error: {
           code: 'MISSING_TENANT_CONTEXT',
@@ -187,11 +184,10 @@ router.post('/set-webhook', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      (res as any).status(500).json(error);
-      return;
+      return c.json(error, 500);
     }
 
-    const body = (req as any).body as { url?: string; secretToken?: string };
+    const body = await c.req.json() as { url?: string; secretToken?: string };
 
     if (!body.url) {
       const error: ErrorResponse = {
@@ -201,8 +197,7 @@ router.post('/set-webhook', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      (res as any).status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     if (!body.secretToken) {
@@ -213,13 +208,12 @@ router.post('/set-webhook', async (req: Request, res: Response) => {
         },
         timestamp: new Date().toISOString(),
       };
-      (res as any).status(400).json(error);
-      return;
+      return c.json(error, 400);
     }
 
     // In production, would call: https://api.telegram.org/bot{token}/setWebhook
     // For now, return mock success
-    (res as any).status(200).json({
+    return c.json({
       ok: true,
       result: true,
       description: 'Webhook was set',
@@ -235,7 +229,7 @@ router.post('/set-webhook', async (req: Request, res: Response) => {
       },
       timestamp: new Date().toISOString(),
     };
-    (res as any).status(500).json(errorResponse);
+    return c.json(errorResponse, 500);
   }
 });
 
