@@ -341,5 +341,17 @@
 		"status": "active",
 		"createdAt": "2026-03-25T16:39:31.713Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-d949fd38",
+		"name": "toml-workspace-batch",
+		"memberIssueIds": [
+			"chimera-9852",
+			"chimera-5771",
+			"chimera-0b38"
+		],
+		"status": "active",
+		"createdAt": "2026-03-25T17:32:11.324Z",
+		"completedAt": null
 	}
 ]
