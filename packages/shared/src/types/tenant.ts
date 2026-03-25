@@ -12,7 +12,7 @@ export type TenantTier = 'basic' | 'advanced' | 'enterprise' | 'dedicated';
 /**
  * Tenant lifecycle status
  */
-export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'TRIAL' | 'CHURNED';
+export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'TRIAL' | 'CHURNED' | 'PROVISIONING' | 'DEPROVISIONED';
 
 /**
  * Tenant profile (SK=PROFILE)
