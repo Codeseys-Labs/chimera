@@ -199,6 +199,7 @@ jobs:
             scripts/ \
             docs/ \
             buildspec.yml \
+            buildspec-docker.yml \
             SOUL.md \
             AGENTS.md \
             CLAUDE.md \
