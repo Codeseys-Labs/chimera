@@ -310,8 +310,22 @@
 			"chimera-9677",
 			"chimera-1756"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-25T06:27:54.659Z",
+		"completedAt": "2026-03-25T07:07:17.286Z"
+	},
+	{
+		"id": "group-db4387cd",
+		"name": "deploy-lifecycle-batch",
+		"memberIssueIds": [
+			"chimera-ae89",
+			"chimera-74f6",
+			"chimera-5841",
+			"chimera-69f8",
+			"chimera-7f25"
+		],
+		"status": "active",
+		"createdAt": "2026-03-25T07:36:27.324Z",
 		"completedAt": null
 	}
 ]
