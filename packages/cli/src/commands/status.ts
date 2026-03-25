@@ -15,7 +15,7 @@ import {
   CodePipelineClient,
   GetPipelineStateCommand,
 } from '@aws-sdk/client-codepipeline';
-import { loadConfig } from '../utils/config';
+import { loadWorkspaceConfig } from '../utils/workspace';
 
 interface StackInfo {
   name: string;
@@ -122,30 +122,32 @@ export function registerStatusCommand(program: Command): void {
   program
     .command('status')
     .description('Check Chimera deployment health and status')
-    .option('--region <region>', 'AWS region', 'us-east-1')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
     .option('--pipeline', 'Show pipeline execution status')
     .action(async (options) => {
       const spinner = ora('Checking deployment status').start();
 
       try {
-        const config = loadConfig();
+        const wsConfig = loadWorkspaceConfig();
+        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 
-        if (!config.deployment) {
-          spinner.warn(chalk.yellow('No deployment configuration found'));
-          console.log(chalk.gray('Run "chimera deploy" to deploy Chimera'));
+        if (!wsConfig?.aws?.region && !options.region) {
+          spinner.warn(chalk.yellow('No workspace configuration found'));
           return;
         }
 
-        const client = new CloudFormationClient({ region: options.region });
+        const client = new CloudFormationClient({ region });
 
         // Get stack statuses
         spinner.text = 'Fetching CloudFormation stack status...';
-        const stacks = await getChimeraStacks(client, options.env);
+        const stacks = await getChimeraStacks(client, env);
 
         if (stacks.length === 0) {
           spinner.warn(chalk.yellow('No stacks found'));
-          console.log(chalk.gray(`No Chimera stacks found in ${options.region}`));
+          console.log(chalk.gray(`No Chimera stacks found in ${region}`));
           console.log(chalk.gray('Run "chimera deploy" to deploy infrastructure'));
           return;
         }
@@ -167,8 +169,8 @@ export function registerStatusCommand(program: Command): void {
         // Get pipeline status if requested
         if (options.pipeline) {
           spinner.start('Checking pipeline status...');
-          const pipelineClient = new CodePipelineClient({ region: options.region });
-          const pipelineName = `Chimera-${options.env}-Pipeline`;
+          const pipelineClient = new CodePipelineClient({ region });
+          const pipelineName = `Chimera-${env}-Pipeline`;
           const pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
           spinner.succeed(chalk.green('Pipeline status retrieved'));
 
@@ -190,11 +192,11 @@ export function registerStatusCommand(program: Command): void {
           console.log(chalk.yellow(`  ⋯ ${stacks.filter((s) => s.status.includes('PROGRESS')).length} stack(s) in progress`));
         }
 
-        if (config.deployment.apiUrl) {
-          console.log(chalk.gray(`\n  API Endpoint: ${config.deployment.apiUrl}`));
+        if (wsConfig?.endpoints?.api_url) {
+          console.log(chalk.gray(`\n  API Endpoint: ${wsConfig.endpoints.api_url}`));
         }
-        if (config.deployment.webSocketUrl) {
-          console.log(chalk.gray(`  WebSocket:    ${config.deployment.webSocketUrl}`));
+        if (wsConfig?.endpoints?.websocket_url) {
+          console.log(chalk.gray(`  WebSocket:    ${wsConfig.endpoints.websocket_url}`));
         }
       } catch (error: any) {
         spinner.fail(chalk.red('Status check failed'));

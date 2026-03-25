@@ -7,7 +7,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import {
   CodeCommitClient,
   CreateRepositoryCommand,
@@ -17,7 +17,7 @@ import {
   CloudFormationClient,
   DescribeStacksCommand,
 } from '@aws-sdk/client-cloudformation';
-import { loadConfig, saveConfig, type DeploymentConfig } from '../utils/config';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace';
 import {
   resolveSourcePath,
   cleanupSource,
@@ -138,9 +138,9 @@ export function registerDeployCommands(program: Command): void {
   program
     .command('deploy')
     .description('Deploy Chimera to AWS account (creates CodeCommit repo, pushes source, triggers pipeline)')
-    .option('--region <region>', 'AWS region', 'us-east-1')
-    .option('--env <environment>', 'Environment name', 'dev')
-    .option('--repo-name <name>', 'CodeCommit repository name', 'chimera')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
+    .option('--repo-name <name>', 'CodeCommit repository name')
     .option(
       '--source <mode>',
       'Source mode: auto (latest release), local (current directory), github (release archive), git (clone from --remote)',
@@ -158,6 +158,12 @@ export function registerDeployCommands(program: Command): void {
       let sourcePath: string | null = null;
 
       try {
+        const wsConfig = loadWorkspaceConfig();
+        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+        const repoName = options.repoName ?? wsConfig?.workspace?.repository ?? 'chimera';
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+
         // Step 1: Get AWS account ID
         spinner.text = 'Verifying AWS credentials...';
         const accountId = await getAccountId();
@@ -234,21 +240,27 @@ export function registerDeployCommands(program: Command): void {
         sourcePath = await resolveSourcePath(sourceLocation);
         spinner.succeed(chalk.green(`Source ready: ${sourcePath}`));
 
+        let sourceCommitSha: string | undefined;
+        try {
+          const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: sourcePath!, encoding: 'utf8' });
+          if (gitResult.status === 0) sourceCommitSha = (gitResult.stdout as string).trim();
+        } catch {}
+
         // Step 4: Create or get CodeCommit repository
         spinner.start('Setting up CodeCommit repository...');
-        const codecommitClient = new CodeCommitClient({ region: options.region });
-        await ensureCodeCommitRepo(codecommitClient, options.repoName);
-        spinner.succeed(chalk.green(`CodeCommit repository ready: ${options.repoName}`));
+        const codecommitClient = new CodeCommitClient({ region });
+        await ensureCodeCommitRepo(codecommitClient, repoName);
+        spinner.succeed(chalk.green(`CodeCommit repository ready: ${repoName}`));
 
         // Step 5: Push source to CodeCommit (using batched CreateCommit API)
         spinner.start('Pushing source code to CodeCommit...');
-        await pushToCodeCommit(codecommitClient, options.repoName, sourcePath, 'main');
+        const codecommitCommitId = await pushToCodeCommit(codecommitClient, repoName, sourcePath, 'main');
         spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
 
         // Step 6: Check if Pipeline stack exists
         spinner.start('Checking Pipeline stack status...');
-        const cfnClient = new CloudFormationClient({ region: options.region });
-        const stackExists = await pipelineStackExists(cfnClient, options.env);
+        const cfnClient = new CloudFormationClient({ region });
+        const stackExists = await pipelineStackExists(cfnClient, env);
 
         if (stackExists) {
           // Pipeline stack exists - skip local CDK, CodePipeline will handle deployment
@@ -266,21 +278,13 @@ export function registerDeployCommands(program: Command): void {
         } else {
           // First-time deployment - run local CDK to bootstrap Pipeline stack
           spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
-          deployCdkStacks(sourcePath, options.region, options.env);
+          deployCdkStacks(sourcePath, region, env);
           spinner.succeed(chalk.green('Pipeline stack deployed - future pushes will auto-deploy'));
         }
 
         // Step 7: Save deployment config
-        const config = loadConfig();
-        const deployment: DeploymentConfig = {
-          accountId,
-          region: options.region,
-          repositoryName: options.repoName,
-          status: 'deployed',
-          lastDeployed: new Date().toISOString(),
-        };
-        config.deployment = deployment;
-        saveConfig(config);
+        const updatedConfig = loadWorkspaceConfig();
+        saveWorkspaceConfig({ ...updatedConfig, deployment: { ...updatedConfig.deployment, account_id: accountId, status: 'deployed', last_deployed: new Date().toISOString(), source_commit: sourceCommitSha, codecommit_commit: codecommitCommitId } });
 
         console.log(chalk.green('\n✓ Deployment complete!'));
         console.log(chalk.gray('\nNext steps:'));
