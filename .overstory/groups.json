@@ -300,5 +300,18 @@
 		"status": "active",
 		"createdAt": "2026-03-23T22:23:43.361Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-7f0b9fa3",
+		"name": "pipeline-docker-destroy-batch",
+		"memberIssueIds": [
+			"chimera-67b0",
+			"chimera-1ad9",
+			"chimera-9677",
+			"chimera-1756"
+		],
+		"status": "active",
+		"createdAt": "2026-03-25T06:27:54.659Z",
+		"completedAt": null
 	}
 ]
