@@ -152,8 +152,40 @@ export class PipelineStack extends cdk.Stack {
 
     const buildProject = new codebuild.PipelineProject(this, 'BuildProject', {
       projectName: `chimera-build-${props.envName}`,
-      description: 'Build and test Chimera agent runtime',
+      description: 'Lint, test, and CDK synth for Chimera',
       buildSpec: codebuild.BuildSpec.fromSourceFilename('buildspec.yml'),
+      environment: {
+        buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
+        computeType: codebuild.ComputeType.MEDIUM,
+        environmentVariables: {
+          ENV_NAME: {
+            value: props.envName,
+          },
+        },
+      },
+      cache: codebuild.Cache.local(codebuild.LocalCacheMode.CUSTOM),
+      logging: {
+        cloudWatch: {
+          logGroup: buildLogGroup,
+        },
+      },
+      timeout: cdk.Duration.minutes(15),
+    });
+
+    // ======================================================================
+    // CodeBuild Project for Docker Build Stage
+    // ======================================================================
+
+    const dockerBuildLogGroup = new logs.LogGroup(this, 'DockerBuildLogGroup', {
+      logGroupName: `/aws/codebuild/chimera-docker-build-${props.envName}`,
+      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
+    const dockerBuildProject = new codebuild.PipelineProject(this, 'DockerBuildProject', {
+      projectName: `chimera-docker-build-${props.envName}`,
+      description: 'Build and push Docker images for Chimera services',
+      buildSpec: codebuild.BuildSpec.fromSourceFilename('buildspec-docker.yml'),
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
         privileged: true, // Required for Docker build
@@ -179,22 +211,22 @@ export class PipelineStack extends cdk.Stack {
       ),
       logging: {
         cloudWatch: {
-          logGroup: buildLogGroup,
+          logGroup: dockerBuildLogGroup,
         },
       },
-      timeout: cdk.Duration.minutes(15),
+      timeout: cdk.Duration.minutes(20),
     });
 
-    // Grant ECR push permissions
+    // Grant ECR push permissions to Docker build project
     // GetAuthorizationToken is a global operation and requires resources: ['*']
-    buildProject.addToRolePolicy(
+    dockerBuildProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ecr:GetAuthorizationToken'],
         resources: ['*'],
       })
     );
     // Scope repository operations to chimera-* repositories
-    buildProject.addToRolePolicy(
+    dockerBuildProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
           'ecr:BatchCheckLayerAvailability',
@@ -211,8 +243,58 @@ export class PipelineStack extends cdk.Stack {
       })
     );
 
+    // ======================================================================
+    // CodeBuild Project for CDK Deploy Stage
+    // ======================================================================
+
+    const deployLogGroup = new logs.LogGroup(this, 'DeployLogGroup', {
+      logGroupName: `/aws/codebuild/chimera-deploy-${props.envName}`,
+      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
+    const deployProject = new codebuild.PipelineProject(this, 'DeployProject', {
+      projectName: `chimera-deploy-${props.envName}`,
+      description: 'Deploy CDK stacks for Chimera infrastructure',
+      buildSpec: codebuild.BuildSpec.fromObject({
+        version: '0.2',
+        phases: {
+          install: {
+            'runtime-versions': { nodejs: 20 },
+            commands: [
+              'curl -fsSL https://bun.sh/install | bash',
+              'export PATH="$HOME/.bun/bin:$PATH"',
+            ],
+          },
+          pre_build: {
+            commands: ['bun install --frozen-lockfile'],
+          },
+          build: {
+            commands: [
+              'cd infra && npx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..',
+            ],
+          },
+        },
+      }),
+      environment: {
+        buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
+        computeType: codebuild.ComputeType.MEDIUM,
+        environmentVariables: {
+          ENV_NAME: {
+            value: props.envName,
+          },
+        },
+      },
+      logging: {
+        cloudWatch: {
+          logGroup: deployLogGroup,
+        },
+      },
+      timeout: cdk.Duration.minutes(30),
+    });
+
     // Grant CDK deploy permissions — CodeBuild assumes CDK bootstrap roles
-    buildProject.addToRolePolicy(
+    deployProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['sts:AssumeRole'],
         resources: [
@@ -250,25 +332,14 @@ export class PipelineStack extends cdk.Stack {
           },
           pre_build: {
             commands: [
-              'echo "Installing test dependencies..."',
               'bun install',
-              'echo "Pulling Docker image from build artifacts..."',
-              'IMAGE_URI=$(cat image-uri.txt)',
-              'echo "Testing image: $IMAGE_URI"',
+              'IMAGE_URI=$(cat $CODEBUILD_SRC_DIR_DockerOutput/image-uri.txt)',
             ],
           },
           build: {
             commands: [
-              'echo "Running integration tests..."',
               'bun test:integration',
-              '',
-              'echo "Running E2E tests..."',
               'bun test:e2e',
-            ],
-          },
-          post_build: {
-            commands: [
-              'echo "Tests completed on `date`"',
             ],
           },
         },
@@ -760,9 +831,10 @@ def handler(event, context):
     // CodePipeline
     // ======================================================================
 
-    // Source artifact
+    // Pipeline artifacts
     const sourceOutput = new codepipeline.Artifact('SourceOutput');
     const buildOutput = new codepipeline.Artifact('BuildOutput');
+    const dockerOutput = new codepipeline.Artifact('DockerOutput');
 
     // Reference existing CodeCommit repository
     const repository = codecommit.Repository.fromRepositoryName(
@@ -789,7 +861,7 @@ def handler(event, context):
             }),
           ],
         },
-        // Stage 2: Build
+        // Stage 2: Build + Docker (parallel — CDK synth and Docker build are independent)
         {
           stageName: 'Build',
           actions: [
@@ -798,11 +870,28 @@ def handler(event, context):
               project: buildProject,
               input: sourceOutput,
               outputs: [buildOutput],
-              variablesNamespace: 'BuildVars',
+            }),
+            new codepipeline_actions.CodeBuildAction({
+              actionName: 'Docker_Build',
+              project: dockerBuildProject,
+              input: sourceOutput,
+              outputs: [dockerOutput],
+              variablesNamespace: 'DockerVars',
             }),
           ],
         },
-        // Stage 3: Test
+        // Stage 3: Deploy CDK stacks (infrastructure update)
+        {
+          stageName: 'Deploy',
+          actions: [
+            new codepipeline_actions.CodeBuildAction({
+              actionName: 'Cdk_Deploy',
+              project: deployProject,
+              input: sourceOutput,
+            }),
+          ],
+        },
+        // Stage 4: Test (integration + E2E against deployed infrastructure)
         {
           stageName: 'Test',
           actions: [
@@ -810,18 +899,19 @@ def handler(event, context):
               actionName: 'Integration_E2E_Tests',
               project: testProject,
               input: buildOutput,
+              extraInputs: [dockerOutput],
             }),
           ],
         },
-        // Stage 4: Deploy (invokes Step Functions for canary orchestration)
+        // Stage 5: Rollout (canary orchestration of new Docker images)
         {
-          stageName: 'Deploy',
+          stageName: 'Rollout',
           actions: [
             new codepipeline_actions.StepFunctionInvokeAction({
               actionName: 'Canary_Orchestration',
               stateMachine: orchestrationStateMachine,
               stateMachineInput: codepipeline_actions.StateMachineInput.literal({
-                imageUri: '#{BuildVars.IMAGE_URI}',
+                imageUri: '#{DockerVars.IMAGE_URI}',
               }),
             }),
           ],
