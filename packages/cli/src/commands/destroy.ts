@@ -23,7 +23,7 @@ import {
   type WriteRequest,
 } from '@aws-sdk/client-dynamodb';
 import * as os from 'os';
-import { loadConfig, saveConfig } from '../utils/config';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace';
 
 /**
  * Find project root by walking up directory tree looking for package.json
@@ -219,8 +219,8 @@ export function registerDestroyCommands(program: Command): void {
   program
     .command('destroy')
     .description('Tear down all Chimera stacks from the AWS account')
-    .option('--region <region>', 'AWS region', 'us-east-1')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
     .option('--force', 'Skip confirmation prompt')
     .option('--retain-data', 'Export DynamoDB table data to a local archive before destroying')
     .option('--export-path <path>', 'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)')
@@ -228,9 +228,12 @@ export function registerDestroyCommands(program: Command): void {
       const spinner = ora('Starting Chimera destruction').start();
 
       try {
-        const config = loadConfig();
+        const wsConfig = loadWorkspaceConfig();
+        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 
-        if (!config.deployment) {
+        if (!wsConfig.deployment) {
           spinner.warn(chalk.yellow('No deployment configuration found'));
           console.log(chalk.gray('Nothing to destroy'));
           return;
@@ -263,8 +266,8 @@ export function registerDestroyCommands(program: Command): void {
         if (options.retainData) {
           spinner.text = 'Exporting data archive...';
           const archivePath = await exportDataArchive({
-            env: options.env,
-            region: options.region,
+            env,
+            region,
             exportPath: options.exportPath,
           });
           spinner.succeed(chalk.green(`Data archived to ${archivePath}`));
@@ -276,7 +279,7 @@ export function registerDestroyCommands(program: Command): void {
         const repoRoot = findProjectRoot();
 
         // Sanitize environment name to prevent command injection
-        const safeEnv = options.env.replace(/[^a-zA-Z0-9-]/g, '');
+        const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
 
         // Destroy stacks in reverse dependency order (must use npx — bunx breaks CDK instanceof checks)
         // safeEnv is sanitized: only [a-zA-Z0-9-] characters allowed
@@ -299,8 +302,8 @@ export function registerDestroyCommands(program: Command): void {
         spinner.succeed(chalk.green('All CloudFormation stacks destroyed'));
 
         // Clear deployment config
-        config.deployment = undefined;
-        saveConfig(config);
+        const cur = loadWorkspaceConfig();
+        saveWorkspaceConfig({ ...cur, deployment: undefined });
 
         console.log(chalk.green('\n✓ Infrastructure destroyed'));
       } catch (error: any) {
@@ -314,16 +317,21 @@ export function registerDestroyCommands(program: Command): void {
   program
     .command('cleanup')
     .description('Delete Chimera stacks stuck in ROLLBACK_COMPLETE state')
-    .option('--region <region>', 'AWS region', 'us-east-1')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
     .action(async (options) => {
       const spinner = ora('Starting cleanup').start();
 
       try {
-        const client = new CloudFormationClient({ region: options.region });
+        const wsConfig = loadWorkspaceConfig();
+        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+
+        const client = new CloudFormationClient({ region });
 
         spinner.text = 'Scanning for failed stacks...';
-        const deletedCount = await cleanupFailedStacks(client, options.env);
+        const deletedCount = await cleanupFailedStacks(client, env);
 
         if (deletedCount === 0) {
           spinner.succeed(chalk.green('No failed stacks found'));
@@ -343,20 +351,24 @@ export function registerDestroyCommands(program: Command): void {
   program
     .command('redeploy')
     .description('Clean up failed stacks then retry CDK deployment')
-    .option('--region <region>', 'AWS region', 'us-east-1')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
     .option('--reseed <path>', 'Reseed DynamoDB tables from exported data archive')
     .action(async (options) => {
       console.log(chalk.bold('Chimera Redeploy\n'));
 
       try {
-        const config = loadConfig();
-        const client = new CloudFormationClient({ region: options.region });
+        const wsConfig = loadWorkspaceConfig();
+        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+
+        const client = new CloudFormationClient({ region });
 
         // Step 1: Clean up failed stacks
         console.log(chalk.bold('1. Cleaning up failed stacks\n'));
         const spinner = ora('Scanning for failed stacks...').start();
-        const deletedCount = await cleanupFailedStacks(client, options.env);
+        const deletedCount = await cleanupFailedStacks(client, env);
 
         if (deletedCount === 0) {
           spinner.succeed(chalk.green('No failed stacks found'));
@@ -372,7 +384,7 @@ export function registerDestroyCommands(program: Command): void {
         const repoRoot = findProjectRoot();
 
         // Sanitize environment name to prevent command injection
-        const safeEnv = options.env.replace(/[^a-zA-Z0-9-]/g, '');
+        const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
 
         // Run CDK deploy
         execSync(
@@ -393,24 +405,13 @@ export function registerDestroyCommands(program: Command): void {
             throw new Error(`Reseed archive not found: ${reseedPath}`);
           }
           spinner.start('Reimporting archived data...');
-          await reseedFromArchive(reseedPath, options.region);
+          await reseedFromArchive(reseedPath, region);
           spinner.succeed(chalk.green(`Data reseeded from ${reseedPath}`));
         }
 
         // Update config
-        if (!config.deployment) {
-          config.deployment = {
-            accountId: '',
-            region: options.region,
-            repositoryName: 'chimera',
-            status: 'deployed',
-            lastDeployed: new Date().toISOString(),
-          };
-        } else {
-          config.deployment.status = 'deployed';
-          config.deployment.lastDeployed = new Date().toISOString();
-        }
-        saveConfig(config);
+        const cur = loadWorkspaceConfig();
+        saveWorkspaceConfig({ ...cur, deployment: { ...cur.deployment, status: 'deployed', last_deployed: new Date().toISOString() } });
 
         console.log(chalk.green('\n✓ Redeploy complete'));
         console.log(chalk.gray('\nNext step: Run "chimera status" to verify deployment health'));
