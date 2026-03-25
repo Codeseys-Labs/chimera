@@ -13,6 +13,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import { ChatStack } from '../lib/chat-stack';
 
 describe('ChatStack', () => {
@@ -185,6 +186,24 @@ describe('ChatStack', () => {
       });
     });
 
+    describe('ALB Listeners (no certificate)', () => {
+      it('should have HTTP listener forwarding to target group', () => {
+        template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+          Port: 80,
+          Protocol: 'HTTP',
+          DefaultActions: [Match.objectLike({ Type: 'forward' })],
+        });
+      });
+
+      it('should not create an HTTPS listener when no certificate is provided', () => {
+        const listeners = template.findResources('AWS::ElasticLoadBalancingV2::Listener');
+        const httpsListeners = Object.values(listeners).filter(
+          (l: any) => l.Properties?.Port === 443,
+        );
+        expect(httpsListeners).toHaveLength(0);
+      });
+    });
+
     describe('Stack Outputs', () => {
       it('should export static assets bucket name', () => {
         template.hasOutput('StaticAssetsBucketName', {
@@ -269,6 +288,65 @@ describe('ChatStack', () => {
           PriceClass: 'PriceClass_All',
         },
       });
+    });
+  });
+
+  describe('HTTPS Configured (with certificate)', () => {
+    let httpsStack: ChatStack;
+    let httpsTemplate: Template;
+
+    beforeEach(() => {
+      const mockCert = acm.Certificate.fromCertificateArn(
+        new cdk.Stack(app, 'CertStack'),
+        'MockCert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/test-cert-id',
+      );
+
+      httpsStack = new ChatStack(app, 'TestChatStackHttps', {
+        envName: 'dev',
+        vpc,
+        albSecurityGroup,
+        ecsSecurityGroup,
+        tenantsTable,
+        sessionsTable,
+        skillsTable,
+        domainName: 'chat.example.com',
+        certificate: mockCert,
+      });
+      httpsTemplate = Template.fromStack(httpsStack);
+    });
+
+    it('should redirect HTTP to HTTPS (301) when certificate is provided', () => {
+      httpsTemplate.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Port: 80,
+        Protocol: 'HTTP',
+        DefaultActions: [
+          Match.objectLike({
+            Type: 'redirect',
+            RedirectConfig: Match.objectLike({
+              Protocol: 'HTTPS',
+              Port: '443',
+              StatusCode: 'HTTP_301',
+            }),
+          }),
+        ],
+      });
+    });
+
+    it('should create HTTPS listener forwarding to target group', () => {
+      httpsTemplate.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Port: 443,
+        Protocol: 'HTTPS',
+        DefaultActions: [Match.objectLike({ Type: 'forward' })],
+      });
+    });
+
+    it('should use HTTPS_ONLY CloudFront origin when certificate is provided', () => {
+      const distributions = httpsTemplate.findResources('AWS::CloudFront::Distribution');
+      const dist = Object.values(distributions)[0] as any;
+      const cfOrigins = dist.Properties.DistributionConfig.Origins;
+      const albOrigin = cfOrigins.find((o: any) => o.CustomOriginConfig !== undefined);
+      expect(albOrigin.CustomOriginConfig.OriginProtocolPolicy).toBe('https-only');
     });
   });
 });
