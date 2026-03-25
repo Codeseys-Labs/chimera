@@ -382,24 +382,18 @@ export function registerDeployCommands(program: Command): void {
         // Step 2: Determine source location
         spinner.start('Determining source location...');
         if (options.source === 'auto') {
-          // Auto-detect: use local if in project directory, otherwise GitHub
-          const localRoot = findProjectRoot();
-          if (localRoot) {
-            sourceLocation = { type: 'local', path: localRoot };
-            spinner.succeed(chalk.green(`Source: Local project (${localRoot})`));
-          } else {
-            sourceLocation = {
-              type: 'github-release',
-              owner: options.githubOwner,
-              repo: options.githubRepo,
-              tag: options.githubTag,
-            };
-            spinner.succeed(
-              chalk.green(
-                `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
-              ),
-            );
-          }
+          // Default to GitHub release archive
+          sourceLocation = {
+            type: 'github-release',
+            owner: options.githubOwner,
+            repo: options.githubRepo,
+            tag: options.githubTag,
+          };
+          spinner.succeed(
+            chalk.green(
+              `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
+            ),
+          );
         } else if (options.source === 'local') {
           const localRoot = findProjectRoot();
           if (!localRoot) {
