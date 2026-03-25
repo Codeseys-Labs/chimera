@@ -171,7 +171,8 @@ export class SkillPipelineStack extends cdk.Stack {
 
     props.skillsTable.grantReadWriteData(signatureVerificationFunction);
     props.skillsBucket.grantRead(signatureVerificationFunction);
-    signingKeySecret.grantReadWrite(signatureVerificationFunction);
+    signingKeySecret.grantRead(signatureVerificationFunction);
+    signingKeySecret.grantWrite(signatureVerificationFunction);
 
     props.skillsTable.grantReadWriteData(performanceTestingFunction);
     props.skillsBucket.grantRead(performanceTestingFunction);
