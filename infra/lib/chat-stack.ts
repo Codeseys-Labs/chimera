@@ -9,6 +9,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import { Construct } from 'constructs';
 
 export interface ChatStackProps extends cdk.StackProps {
@@ -20,6 +21,8 @@ export interface ChatStackProps extends cdk.StackProps {
   sessionsTable: dynamodb.ITable;
   skillsTable: dynamodb.ITable;
   ecrRepository?: ecr.IRepository;
+  domainName?: string;
+  certificate?: acm.ICertificate;
 }
 
 /**
@@ -235,32 +238,28 @@ export class ChatStack extends cdk.Stack {
 
     // ======================================================================
     // ALB Listeners
-    // HTTP (port 80): placeholder for HTTPS redirect (will be configured in deployment)
-    // HTTPS (port 443): routes to target group (certificate added in deployment)
+    // HTTP (port 80): redirects to HTTPS when certificate is available, else forwards directly
+    // HTTPS (port 443): TLS termination + forward to target group (only when certificate provided)
     // ======================================================================
     const httpListener = this.alb.addListener('HttpListener', {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultAction: elbv2.ListenerAction.forward([this.targetGroup]),
+      defaultAction: props.certificate
+        ? elbv2.ListenerAction.redirect({ protocol: 'HTTPS', port: '443', permanent: true })
+        : elbv2.ListenerAction.forward([this.targetGroup]),
     });
 
-    // Placeholder HTTPS listener (certificate will be added via ACM in deployment)
-    // For now, this is a placeholder that returns 503
-    this.alb.addListener('HttpsListener', {
-      port: 443,
-      protocol: elbv2.ApplicationProtocol.HTTP, // Will be changed to HTTPS with certificate
-      defaultAction: elbv2.ListenerAction.fixedResponse(503, {
-        contentType: 'application/json',
-        messageBody: JSON.stringify({
-          message: 'HTTPS not configured yet. Add ACM certificate in deployment.',
-        }),
-      }),
-    });
-
-    // In production, replace the placeholder with actual target group
-    // Use: this.alb.listeners[1].addAction('ForwardToChat', {
-    //   action: elbv2.ListenerAction.forward([this.targetGroup]),
-    // });
+    // HTTPS listener is only created when an ACM certificate is provided.
+    // Without a certificate (e.g. dev environments with no custom domain), HTTP-only is used.
+    const httpsListener = props.certificate
+      ? this.alb.addListener('HttpsListener', {
+          port: 443,
+          protocol: elbv2.ApplicationProtocol.HTTPS,
+          certificates: [props.certificate],
+          sslPolicy: elbv2.SslPolicy.RECOMMENDED_TLS,
+          defaultAction: elbv2.ListenerAction.forward([this.targetGroup]),
+        })
+      : undefined;
 
     // ======================================================================
     // ECS Fargate Service
@@ -284,6 +283,9 @@ export class ChatStack extends cdk.Stack {
     // Attach target group to service
     this.ecsService.attachToApplicationTargetGroup(this.targetGroup);
     this.ecsService.node.addDependency(httpListener);
+    if (httpsListener) {
+      this.ecsService.node.addDependency(httpsListener);
+    }
 
     // ======================================================================
     // Auto Scaling
@@ -351,10 +353,14 @@ export class ChatStack extends cdk.Stack {
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
     });
 
-    // ALB origin created once and reused across all API route behaviors
+    // ALB origin created once and reused across all API route behaviors.
+    // Uses HTTPS when certificate is available (CloudFront → ALB encrypted), HTTP otherwise.
     const albOrigin = new origins.LoadBalancerV2Origin(this.alb, {
-      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+      protocolPolicy: props.certificate
+        ? cloudfront.OriginProtocolPolicy.HTTPS_ONLY
+        : cloudfront.OriginProtocolPolicy.HTTP_ONLY,
       httpPort: 80,
+      httpsPort: 443,
       connectionAttempts: 3,
       connectionTimeout: cdk.Duration.seconds(10),
       readTimeout: cdk.Duration.seconds(60),
