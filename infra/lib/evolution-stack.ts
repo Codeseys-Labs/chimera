@@ -315,20 +315,160 @@ def handler(event, context):
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
+import boto3
+import os
+from datetime import datetime, timedelta
+
+dynamodb = boto3.resource('dynamodb')
+s3 = boto3.client('s3')
+
+CONFIDENCE_THRESHOLD = 0.7
+MIN_COUNT = 3
+
+def derive_skill_name(pattern):
+    tools = [t.strip() for t in pattern.split('->')]
+    parts = []
+    for tool in tools[:3]:
+        segment = tool.replace('-', '_').split('_')[0][:8]
+        if segment:
+            parts.append(segment)
+    return '-'.join(parts) if parts else 'auto-skill'
+
+def generate_skill_md(pattern_info):
+    pattern = pattern_info['pattern']
+    count = pattern_info['count']
+    confidence = pattern_info['confidence']
+    tools = [t.strip() for t in pattern.split('->')]
+    skill_name = derive_skill_name(pattern)
+    confidence_pct = str(int(round(confidence * 100)))
+
+    lines = [
+        '---',
+        'name: ' + skill_name,
+        'description: Auto-generated skill for pattern: ' + pattern + '.',
+        '---',
+        '',
+        '# ' + skill_name,
+        '',
+        'Auto-generated from repeated tool usage pattern detected in conversation logs.',
+        '',
+        '## Pattern',
+        '',
+        'Tool sequence: ' + pattern,
+        '',
+        'Detected ' + str(count) + ' times with ' + confidence_pct + '% confidence.',
+        '',
+        '## Steps',
+        '',
+    ]
+    for i, tool in enumerate(tools):
+        lines.append(str(i + 1) + '. ' + tool)
+    lines += [
+        '',
+        '## Notes',
+        '',
+        '- Status: PENDING_REVIEW - validate before promoting to production',
+        '- Confidence: ' + confidence_pct + '% (' + str(count) + ' occurrences)',
+    ]
+    return '\\n'.join(lines) + '\\n'
+
 def handler(event, context):
     """
-    Generate SKILL.md and tool wrapper from repeated pattern.
+    Generate SKILL.md files from high-confidence repeated tool patterns.
+
+    Input (from detectPatternsFunction):
+      tenant_id, patterns_found, top_patterns: [{pattern, count, confidence}]
+
+    For each pattern with confidence >= 0.7 and count >= 3:
+    1. Derives a skill name from the tool sequence
+    2. Generates a SKILL.md document
+    3. Stores SKILL.md in S3 under skills/{tenant_id}/{skill_name}/SKILL.md
+    4. Records skill metadata in DynamoDB with status PENDING_REVIEW
     """
-    # TODO: Implement skill generation
+    tenant_id = event.get('tenant_id', 'unknown')
+    top_patterns = event.get('top_patterns', [])
+    patterns_found = event.get('patterns_found', 0)
+
+    artifacts_bucket = os.environ['ARTIFACTS_BUCKET']
+    table_name = os.environ['EVOLUTION_TABLE']
+    table = dynamodb.Table(table_name)
+
+    generated_skills = []
+    generation_ts = datetime.utcnow().isoformat()
+    ts_epoch = str(int(datetime.utcnow().timestamp()))
+
+    high_confidence = [
+        p for p in top_patterns
+        if p.get('confidence', 0) >= CONFIDENCE_THRESHOLD
+        and p.get('count', 0) >= MIN_COUNT
+    ]
+
+    for pattern_info in high_confidence:
+        pattern = pattern_info['pattern']
+        skill_name = derive_skill_name(pattern)
+        skill_id = skill_name + '-' + ts_epoch
+
+        skill_md = generate_skill_md(pattern_info)
+        s3_key = 'skills/' + tenant_id + '/' + skill_name + '/SKILL.md'
+
+        s3.put_object(
+            Bucket=artifacts_bucket,
+            Key=s3_key,
+            Body=skill_md.encode('utf-8'),
+            ContentType='text/markdown',
+            Metadata={
+                'tenant-id': tenant_id,
+                'skill-name': skill_name,
+                'pattern': pattern[:256],
+                'confidence': str(pattern_info['confidence']),
+                'count': str(pattern_info['count']),
+                'generated-at': generation_ts,
+            }
+        )
+
+        table.put_item(
+            Item={
+                'PK': 'TENANT#' + tenant_id + '#SKILL#' + skill_id,
+                'SK': 'METADATA',
+                'skill_id': skill_id,
+                'skill_name': skill_name,
+                'pattern': pattern,
+                'status': 'PENDING_REVIEW',
+                's3_key': s3_key,
+                'confidence': str(pattern_info['confidence']),
+                'occurrence_count': pattern_info['count'],
+                'generated_at': generation_ts,
+                'ttl': int((datetime.utcnow() + timedelta(days=90)).timestamp()),
+            }
+        )
+
+        generated_skills.append({
+            'skill_id': skill_id,
+            'skill_name': skill_name,
+            'pattern': pattern,
+            'confidence': pattern_info['confidence'],
+            's3_key': s3_key,
+            'status': 'PENDING_REVIEW',
+        })
+
+    first = generated_skills[0] if generated_skills else {}
     return {
-        'skill_name': 'auto-generated-skill',
-        'skill_md': 'placeholder',
-        'tool_code': 'placeholder',
-        'confidence': 0.8
+        'skill_name': first.get('skill_name', 'none'),
+        'skill_md': first.get('s3_key', 'none'),
+        'tool_code': 'auto-generated',
+        'confidence': first.get('confidence', 0.0),
+        'tenant_id': tenant_id,
+        'generated_count': len(generated_skills),
+        'generated_skills': generated_skills,
+        'patterns_processed': patterns_found,
     }
 `),
       timeout: cdk.Duration.minutes(2),
       memorySize: 512,
+      environment: {
+        EVOLUTION_TABLE: this.evolutionStateTable.tableName,
+        ARTIFACTS_BUCKET: this.evolutionArtifactsBucket.bucketName,
+      },
     });
 
     // Memory Evolution: Run garbage collection on memories
@@ -498,6 +638,10 @@ def handler(event, context):
 `),
       timeout: cdk.Duration.minutes(5),
       memorySize: 512,
+      environment: {
+        ARTIFACTS_BUCKET: this.evolutionArtifactsBucket.bucketName,
+        EVOLUTION_TABLE: this.evolutionStateTable.tableName,
+      },
     });
 
     // Grant permissions
