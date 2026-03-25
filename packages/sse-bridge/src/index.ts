@@ -25,6 +25,7 @@
 export * from './types';
 export * from './strands-to-dsp';
 export * from './sse-formatter';
+export * from './stream-tee';
 
 import { StrandsToDSPConverter } from './strands-to-dsp';
 import {

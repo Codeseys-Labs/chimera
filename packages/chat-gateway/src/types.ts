@@ -95,3 +95,14 @@ export interface HealthResponse {
   timestamp: string;
   version: string;
 }
+
+/**
+ * Status of an async SSE stream held in the StreamManager.
+ * Returned by diagnostic endpoints; not part of the SSE wire format.
+ */
+export interface AsyncStreamStatus {
+  messageId: string;
+  status: 'active' | 'complete' | 'error';
+  bufferedParts: number;
+  createdAt: string;
+}
