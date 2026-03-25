@@ -21,8 +21,6 @@ export interface EmailStackProps extends cdk.StackProps {
   envName: string;
   /** The chimera-sessions DynamoDB table for storing email thread records */
   sessionsTable: dynamodb.ITable;
-  /** KMS key for encrypting SQS queues */
-  platformKey: kms.IKey;
   /** EventBridge event bus from OrchestrationStack for receiving email.send requests */
   agentEventBus: events.IEventBus;
   /**
@@ -78,6 +76,21 @@ export class EmailStack extends cdk.Stack {
     const fromAddress = props.fromAddress ?? `Chimera Agent <agent@${props.emailDomain ?? 'chimera.example.com'}>`;
 
     // ======================================================================
+    // KMS: Email-local encryption key for SQS queues
+    // Using a stack-local key avoids a CDK circular dependency: if we used
+    // SecurityStack's platformKey, CDK's auto-grant mechanism inside
+    // addEventSource() would add a key policy grant referencing Lambda role
+    // ARNs from this stack, creating SecurityStack → EmailStack back-edge
+    // while EmailStack → SecurityStack already exists.
+    // ======================================================================
+    const emailKey = new kms.Key(this, 'EmailKey', {
+      alias: `chimera-email-${props.envName}`,
+      enableKeyRotation: true,
+      description: 'Email stack SQS queue encryption key',
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
+    // ======================================================================
     // S3 Bucket: Inbound Email Storage
     // SES writes raw MIME emails here. Lambda fetches and parses them.
     // ======================================================================
@@ -123,7 +136,7 @@ export class EmailStack extends cdk.Stack {
     const parserDlq = new sqs.Queue(this, 'EmailParserDLQ', {
       queueName: `chimera-email-parser-dlq-${props.envName}`,
       retentionPeriod: cdk.Duration.days(14),
-      encryptionMasterKey: props.platformKey,
+      encryptionMasterKey: emailKey,
     });
 
     this.emailParserQueue = new sqs.Queue(this, 'EmailParserQueue', {
@@ -131,7 +144,7 @@ export class EmailStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.minutes(5),
       retentionPeriod: cdk.Duration.days(4),
       receiveMessageWaitTime: cdk.Duration.seconds(20),
-      encryptionMasterKey: props.platformKey,
+      encryptionMasterKey: emailKey,
       deadLetterQueue: {
         queue: parserDlq,
         maxReceiveCount: 3,
@@ -167,7 +180,7 @@ export class EmailStack extends cdk.Stack {
     const senderDlq = new sqs.Queue(this, 'EmailSenderDLQ', {
       queueName: `chimera-email-sender-dlq-${props.envName}`,
       retentionPeriod: cdk.Duration.days(14),
-      encryptionMasterKey: props.platformKey,
+      encryptionMasterKey: emailKey,
     });
 
     this.emailSenderQueue = new sqs.Queue(this, 'EmailSenderQueue', {
@@ -175,7 +188,7 @@ export class EmailStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.minutes(5),
       retentionPeriod: cdk.Duration.days(4),
       receiveMessageWaitTime: cdk.Duration.seconds(20),
-      encryptionMasterKey: props.platformKey,
+      encryptionMasterKey: emailKey,
       deadLetterQueue: {
         queue: senderDlq,
         maxReceiveCount: 3,

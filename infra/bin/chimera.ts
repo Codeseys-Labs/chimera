@@ -180,19 +180,19 @@ tenantOnboardingStack.addDependency(observabilityStack);
 // --- Stack 12: Email ---
 // SES receipt rules, S3 inbound bucket, email parser + sender Lambdas,
 // SQS queues for backpressure. Agent email communication channel.
-// Depends on DataStack for sessions table, SecurityStack for KMS, OrchestrationStack for event bus.
+// Depends on DataStack for sessions table and OrchestrationStack for event bus.
+// Note: uses a stack-local KMS key for SQS encryption (not SecurityStack's platformKey)
+// to avoid CDK circular dependency (see email-stack.ts for explanation).
 const emailStack = new EmailStack(app, `${prefix}-Email`, {
   env: envConfig,
   description: 'Chimera email channel: SES inbound, email parser/sender Lambdas, thread context in DDB',
   envName,
   sessionsTable: dataStack.sessionsTable,
-  platformKey: securityStack.platformKey,
   agentEventBus: orchestrationStack.eventBus,
   emailDomain: app.node.tryGetContext('emailDomain'),
   fromAddress: app.node.tryGetContext('fromAddress'),
 });
 emailStack.addDependency(dataStack);
-emailStack.addDependency(securityStack);
 emailStack.addDependency(orchestrationStack);
 
 // Apply tags to all stacks
@@ -214,6 +214,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // Stack 9 (OrchestrationStack): event bus name/ARN, task queue URL/ARN, message queue URL/ARN, event publisher role ARN
 // Stack 10 (EvolutionStack): evolution state table ARN/name, artifacts bucket ARN/name, state machine ARNs
 // Stack 11 (TenantOnboardingStack): Cedar policy store ID/ARN, onboarding state machine ARN, evaluation Lambda ARN
-// Stack 12 (EmailStack): inbound email bucket name, parser/sender queue URLs, Lambda ARNs, rule set name
+// Stack 12 (EmailStack): inbound email bucket name, email KMS key ARN, parser/sender queue URLs, Lambda ARNs, rule set name
 
 app.synth();
