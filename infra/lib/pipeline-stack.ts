@@ -19,6 +19,14 @@ export interface PipelineStackProps extends cdk.StackProps {
   envName: string;
   repositoryName: string;  // CodeCommit repository name
   branch: string;          // Branch to track (default: 'main')
+
+  // Optional: ALB canary wiring — supplied once ChatStack is deployed alongside.
+  // Lambda functions use these at runtime; omit to defer wiring until a later deploy.
+  albListenerArn?: string;         // HTTP listener on the chat-gateway ALB
+  stableTargetGroupArn?: string;   // Stable (production) ECS target group
+  canaryTargetGroupArn?: string;   // Canary ECS target group
+  ecsClusterName?: string;         // ECS cluster name
+  ecsCanaryServiceName?: string;   // ECS canary service name
 }
 
 /**
@@ -394,7 +402,7 @@ export class PipelineStack extends cdk.Stack {
     // Lambda Functions for Deployment Orchestration
     // ======================================================================
 
-    // Deploy to Canary (5% traffic)
+    // Deploy to Canary (5% traffic via ALB weighted target groups + ECS image update)
     const deployCanaryFunction = new lambda.Function(this, 'DeployCanaryFunction', {
       functionName: `chimera-deploy-canary-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -402,46 +410,136 @@ export class PipelineStack extends cdk.Stack {
       code: lambda.Code.fromInline(`
 import json
 import boto3
+import os
+from datetime import datetime
 
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+elbv2 = boto3.client('elasticloadbalancingv2')
+ecs_client = boto3.client('ecs')
+s3 = boto3.client('s3')
 
 def handler(event, context):
     """
-    Deploy new agent runtime image to canary endpoint with 5% traffic.
+    Deploy new image to canary ECS service and shift 5% ALB traffic.
 
-    Input: image URI from CodeBuild
-    Output: canary endpoint ARN and deployment timestamp
+    Input: { imageUri: str }
+    Output: { status, imageUri, trafficAllocation, deployedAt }
     """
     image_uri = event['imageUri']
+    bucket = os.environ['ARTIFACTS_BUCKET']
+    listener_arn = os.environ.get('ALB_LISTENER_ARN', '')
+    stable_tg = os.environ.get('STABLE_TARGET_GROUP_ARN', '')
+    canary_tg = os.environ.get('CANARY_TARGET_GROUP_ARN', '')
+    cluster = os.environ.get('ECS_CLUSTER', '')
+    canary_svc = os.environ.get('ECS_CANARY_SERVICE', '')
+    now = datetime.utcnow().isoformat()
 
-    # TODO: Implement actual canary deployment via Bedrock Agent Runtime API
-    # bedrock_agent_runtime.update_agent_runtime_endpoint(
-    #     runtimeName='chimera-pool',
-    #     endpointName='canary',
-    #     agentRuntimeArtifact=image_uri,
-    #     trafficAllocation={'canary': 5, 'production': 95}
-    # )
+    # Snapshot current stable image URI to S3 for rollback
+    try:
+        stable_uri = _current_image(cluster, canary_svc)
+        s3.put_object(
+            Bucket=bucket,
+            Key='deployments/latest-stable-metadata.json',
+            Body=json.dumps({'imageUri': stable_uri, 'deploymentId': context.aws_request_id, 'savedAt': now}),
+            ContentType='application/json',
+        )
+    except Exception as e:
+        print('Warning: stable snapshot failed: ' + str(e))
+
+    # Update canary ECS service to new image
+    if cluster and canary_svc:
+        _update_service(cluster, canary_svc, image_uri)
+
+    # Shift 5% traffic to canary via ALB weighted forwarding
+    if listener_arn and stable_tg and canary_tg:
+        elbv2.modify_listener(
+            ListenerArn=listener_arn,
+            DefaultActions=[{'Type': 'forward', 'ForwardConfig': {'TargetGroups': [
+                {'TargetGroupArn': stable_tg, 'Weight': 95},
+                {'TargetGroupArn': canary_tg, 'Weight': 5},
+            ]}}],
+        )
 
     return {
         'status': 'CANARY_DEPLOYED',
         'imageUri': image_uri,
         'trafficAllocation': {'canary': 5, 'production': 95},
-        'deployedAt': context.aws_request_id
+        'deployedAt': now,
     }
+
+
+def _current_image(cluster, service_name):
+    if not cluster or not service_name:
+        return 'unknown'
+    svcs = ecs_client.describe_services(cluster=cluster, services=[service_name]).get('services', [])
+    if not svcs:
+        return 'unknown'
+    td = ecs_client.describe_task_definition(taskDefinition=svcs[0]['taskDefinition'])['taskDefinition']
+    containers = td.get('containerDefinitions', [])
+    return containers[0]['image'] if containers else 'unknown'
+
+
+def _update_service(cluster, service_name, new_image):
+    svcs = ecs_client.describe_services(cluster=cluster, services=[service_name]).get('services', [])
+    if not svcs:
+        raise ValueError('Service not found: ' + service_name)
+    td = ecs_client.describe_task_definition(taskDefinition=svcs[0]['taskDefinition'])['taskDefinition']
+    containers = td['containerDefinitions']
+    for c in containers:
+        if c.get('essential', False):
+            c['image'] = new_image
+    kwargs = {
+        'family': td['family'],
+        'containerDefinitions': containers,
+        'networkMode': td.get('networkMode', 'awsvpc'),
+        'requiresCompatibilities': td.get('requiresCompatibilities', ['FARGATE']),
+        'cpu': td.get('cpu', '256'),
+        'memory': td.get('memory', '512'),
+    }
+    if td.get('executionRoleArn'):
+        kwargs['executionRoleArn'] = td['executionRoleArn']
+    if td.get('taskRoleArn'):
+        kwargs['taskRoleArn'] = td['taskRoleArn']
+    if td.get('volumes'):
+        kwargs['volumes'] = td['volumes']
+    new_td_arn = ecs_client.register_task_definition(**kwargs)['taskDefinition']['taskDefinitionArn']
+    ecs_client.update_service(cluster=cluster, service=service_name, taskDefinition=new_td_arn, forceNewDeployment=True)
 `),
       timeout: cdk.Duration.minutes(5),
       memorySize: 256,
+      environment: {
+        ARTIFACTS_BUCKET: this.artifactBucket.bucketName,
+        ENV_NAME: props.envName,
+        ALB_LISTENER_ARN: props.albListenerArn ?? '',
+        STABLE_TARGET_GROUP_ARN: props.stableTargetGroupArn ?? '',
+        CANARY_TARGET_GROUP_ARN: props.canaryTargetGroupArn ?? '',
+        ECS_CLUSTER: props.ecsClusterName ?? '',
+        ECS_CANARY_SERVICE: props.ecsCanaryServiceName ?? '',
+      },
     });
+
+    this.artifactBucket.grantReadWrite(deployCanaryFunction);
 
     deployCanaryFunction.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
-          'bedrock:UpdateAgentRuntimeEndpoint',
-          'bedrock:GetAgentRuntimeEndpoint',
+          'elbv2:ModifyListener',
+          'elbv2:DescribeListeners',
+          'elbv2:DescribeTargetGroups',
         ],
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:agent-runtime/chimera-*`,
+        // ELBv2 listener/target-group actions require resources: ['*']
+        resources: ['*'],
+      })
+    );
+
+    deployCanaryFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'ecs:DescribeServices',
+          'ecs:DescribeTaskDefinition',
+          'ecs:RegisterTaskDefinition',
+          'ecs:UpdateService',
         ],
+        resources: ['*'],
       })
     );
 
@@ -577,7 +675,7 @@ def handler(event, context):
       })
     );
 
-    // Progressive Rollout (25%, 50%, 100%)
+    // Progressive Rollout (25%, 50%, 100% via ALB weighted target groups)
     const progressiveRolloutFunction = new lambda.Function(this, 'ProgressiveRolloutFunction', {
       functionName: `chimera-progressive-rollout-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -585,44 +683,81 @@ def handler(event, context):
       code: lambda.Code.fromInline(`
 import json
 import boto3
+import os
+from datetime import datetime
 
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+elbv2 = boto3.client('elasticloadbalancingv2')
+s3 = boto3.client('s3')
 
 def handler(event, context):
     """
     Progressive traffic rollout: 25% -> 50% -> 100%.
 
-    Input: target percentage (25, 50, or 100)
-    Output: updated traffic allocation
+    Input: { targetPercentage: int, imageUri: str }
+    Output: { status, trafficAllocation, targetPercentage }
     """
-    target_percentage = event['targetPercentage']
+    target_pct = event['targetPercentage']
     image_uri = event['imageUri']
+    listener_arn = os.environ.get('ALB_LISTENER_ARN', '')
+    stable_tg = os.environ.get('STABLE_TARGET_GROUP_ARN', '')
+    canary_tg = os.environ.get('CANARY_TARGET_GROUP_ARN', '')
 
-    # TODO: Implement actual traffic shifting via Bedrock Agent Runtime API
+    if listener_arn and stable_tg and canary_tg:
+        elbv2.modify_listener(
+            ListenerArn=listener_arn,
+            DefaultActions=[{'Type': 'forward', 'ForwardConfig': {'TargetGroups': [
+                {'TargetGroupArn': stable_tg, 'Weight': 100 - target_pct},
+                {'TargetGroupArn': canary_tg, 'Weight': target_pct},
+            ]}}],
+        )
+
+    # At 100% rollout, promote canary image as the new stable baseline
+    if target_pct == 100:
+        try:
+            s3.put_object(
+                Bucket=os.environ['ARTIFACTS_BUCKET'],
+                Key='deployments/latest-stable-metadata.json',
+                Body=json.dumps({
+                    'imageUri': image_uri,
+                    'deploymentId': context.aws_request_id,
+                    'promotedAt': datetime.utcnow().isoformat(),
+                }),
+                ContentType='application/json',
+            )
+        except Exception as e:
+            print('Warning: stable promotion failed: ' + str(e))
 
     return {
         'status': 'ROLLOUT_COMPLETE',
-        'trafficAllocation': {
-            'canary': target_percentage,
-            'production': 100 - target_percentage
-        },
-        'targetPercentage': target_percentage
+        'trafficAllocation': {'canary': target_pct, 'production': 100 - target_pct},
+        'targetPercentage': target_pct,
+        'imageUri': image_uri,
     }
 `),
       timeout: cdk.Duration.minutes(2),
       memorySize: 256,
+      environment: {
+        ARTIFACTS_BUCKET: this.artifactBucket.bucketName,
+        ALB_LISTENER_ARN: props.albListenerArn ?? '',
+        STABLE_TARGET_GROUP_ARN: props.stableTargetGroupArn ?? '',
+        CANARY_TARGET_GROUP_ARN: props.canaryTargetGroupArn ?? '',
+      },
     });
+
+    this.artifactBucket.grantReadWrite(progressiveRolloutFunction);
 
     progressiveRolloutFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ['bedrock:UpdateAgentRuntimeEndpoint', 'bedrock:GetAgentRuntimeEndpoint'],
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:agent-runtime/chimera-*`,
+        actions: [
+          'elbv2:ModifyListener',
+          'elbv2:DescribeListeners',
+          'elbv2:DescribeTargetGroups',
         ],
+        resources: ['*'],
       })
     );
 
-    // Rollback Function
+    // Rollback Function — revert ALB to 100% stable, restore canary ECS service image
     const rollbackFunction = new lambda.Function(this, 'RollbackFunction', {
       functionName: `chimera-rollback-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -633,91 +768,132 @@ import boto3
 import os
 from datetime import datetime
 
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+elbv2 = boto3.client('elasticloadbalancingv2')
+ecs_client = boto3.client('ecs')
 s3 = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
 
 def handler(event, context):
     """
-    Rollback to previous stable image on canary failure.
+    Rollback on canary failure: revert ALB weights (100% stable / 0% canary)
+    and restore canary ECS service to the previous stable image.
 
-    Reverts both canary and production endpoints to :latest-stable tag.
-    Retrieves last stable version from DynamoDB or S3 backup.
+    Reads stable image URI from S3 snapshot written by deployCanary.
     """
+    bucket = os.environ['ARTIFACTS_BUCKET']
+    listener_arn = os.environ.get('ALB_LISTENER_ARN', '')
+    stable_tg = os.environ.get('STABLE_TARGET_GROUP_ARN', '')
+    canary_tg = os.environ.get('CANARY_TARGET_GROUP_ARN', '')
+    cluster = os.environ.get('ECS_CLUSTER', '')
+    canary_svc = os.environ.get('ECS_CANARY_SERVICE', '')
 
-    # Retrieve last stable image URI from S3 snapshot
-    artifacts_bucket = os.environ.get('ARTIFACTS_BUCKET', 'chimera-pipeline-artifacts')
-    snapshot_key = 'deployments/latest-stable-metadata.json'
-
+    # Retrieve stable image URI from S3 snapshot
     try:
-        response = s3.get_object(Bucket=artifacts_bucket, Key=snapshot_key)
-        stable_metadata = json.loads(response['Body'].read().decode('utf-8'))
-        stable_image_uri = stable_metadata['imageUri']
-        previous_deployment_id = stable_metadata['deploymentId']
-    except Exception as e:
-        # Fallback: use default stable tag
-        stable_image_uri = event.get('fallbackImageUri', 'LATEST_STABLE')
-        previous_deployment_id = 'unknown'
+        resp = s3.get_object(Bucket=bucket, Key='deployments/latest-stable-metadata.json')
+        meta = json.loads(resp['Body'].read().decode('utf-8'))
+        stable_uri = meta['imageUri']
+        prev_id = meta.get('deploymentId', 'unknown')
+    except Exception:
+        stable_uri = event.get('fallbackImageUri', 'unknown')
+        prev_id = 'unknown'
 
-    # Rollback to stable version
-    # NOTE: Bedrock Agent Runtime API is placeholder - actual implementation
-    # would use appropriate AWS service for agent runtime deployment
-    try:
-        # bedrock_agent_runtime.update_agent_runtime_endpoint(
-        #     runtimeName='chimera-pool',
-        #     endpointName='production',
-        #     agentRuntimeArtifact=stable_image_uri,
-        #     trafficAllocation={'canary': 0, 'production': 100}
-        # )
-        pass
-    except Exception as e:
-        return {
-            'status': 'ROLLBACK_FAILED',
-            'error': str(e),
-            'rolledBackAt': datetime.utcnow().isoformat()
-        }
+    # Revert ALB listener to 100% stable (0% canary)
+    if listener_arn and stable_tg:
+        if canary_tg:
+            default_action = {'Type': 'forward', 'ForwardConfig': {'TargetGroups': [
+                {'TargetGroupArn': stable_tg, 'Weight': 100},
+                {'TargetGroupArn': canary_tg, 'Weight': 0},
+            ]}}
+        else:
+            default_action = {'Type': 'forward', 'TargetGroupArn': stable_tg}
+        elbv2.modify_listener(ListenerArn=listener_arn, DefaultActions=[default_action])
+
+    # Restore canary ECS service to stable image
+    if cluster and canary_svc and stable_uri != 'unknown':
+        try:
+            svcs = ecs_client.describe_services(cluster=cluster, services=[canary_svc]).get('services', [])
+            if svcs:
+                td = ecs_client.describe_task_definition(taskDefinition=svcs[0]['taskDefinition'])['taskDefinition']
+                containers = td['containerDefinitions']
+                for c in containers:
+                    if c.get('essential', False):
+                        c['image'] = stable_uri
+                kwargs = {
+                    'family': td['family'],
+                    'containerDefinitions': containers,
+                    'networkMode': td.get('networkMode', 'awsvpc'),
+                    'requiresCompatibilities': td.get('requiresCompatibilities', ['FARGATE']),
+                    'cpu': td.get('cpu', '256'),
+                    'memory': td.get('memory', '512'),
+                }
+                if td.get('executionRoleArn'):
+                    kwargs['executionRoleArn'] = td['executionRoleArn']
+                if td.get('taskRoleArn'):
+                    kwargs['taskRoleArn'] = td['taskRoleArn']
+                if td.get('volumes'):
+                    kwargs['volumes'] = td['volumes']
+                new_td_arn = ecs_client.register_task_definition(**kwargs)['taskDefinition']['taskDefinitionArn']
+                ecs_client.update_service(cluster=cluster, service=canary_svc, taskDefinition=new_td_arn, forceNewDeployment=True)
+        except Exception as e:
+            print('Warning: ECS service rollback failed: ' + str(e))
 
     # Log rollback event to S3
-    rollback_event = {
-        'eventType': 'ROLLBACK',
-        'timestamp': datetime.utcnow().isoformat(),
-        'requestId': context.aws_request_id,
-        'rolledBackFrom': event.get('failedImageUri', 'unknown'),
-        'rolledBackTo': stable_image_uri,
-        'previousDeploymentId': previous_deployment_id,
-        'reason': event.get('reason', 'Canary validation failed')
-    }
-
-    rollback_log_key = f"rollback-logs/{context.aws_request_id}.json"
+    rollback_key = 'rollback-logs/' + context.aws_request_id + '.json'
     s3.put_object(
-        Bucket=artifacts_bucket,
-        Key=rollback_log_key,
-        Body=json.dumps(rollback_event, indent=2),
-        ContentType='application/json'
+        Bucket=bucket,
+        Key=rollback_key,
+        Body=json.dumps({
+            'eventType': 'ROLLBACK',
+            'timestamp': datetime.utcnow().isoformat(),
+            'requestId': context.aws_request_id,
+            'rolledBackFrom': event.get('failedImageUri', 'unknown'),
+            'rolledBackTo': stable_uri,
+            'previousDeploymentId': prev_id,
+            'reason': event.get('reason', 'Canary validation failed'),
+        }, indent=2),
+        ContentType='application/json',
     )
 
     return {
         'status': 'ROLLBACK_COMPLETE',
         'rolledBackAt': datetime.utcnow().isoformat(),
-        'stableImageUri': stable_image_uri,
-        'previousDeploymentId': previous_deployment_id,
+        'stableImageUri': stable_uri,
+        'previousDeploymentId': prev_id,
         'trafficAllocation': {'canary': 0, 'production': 100},
-        'rollbackLogKey': rollback_log_key
+        'rollbackLogKey': rollback_key,
     }
 `),
-      timeout: cdk.Duration.minutes(2),
+      timeout: cdk.Duration.minutes(5),
       memorySize: 256,
       environment: {
         ARTIFACTS_BUCKET: this.artifactBucket.bucketName,
+        ALB_LISTENER_ARN: props.albListenerArn ?? '',
+        STABLE_TARGET_GROUP_ARN: props.stableTargetGroupArn ?? '',
+        CANARY_TARGET_GROUP_ARN: props.canaryTargetGroupArn ?? '',
+        ECS_CLUSTER: props.ecsClusterName ?? '',
+        ECS_CANARY_SERVICE: props.ecsCanaryServiceName ?? '',
       },
     });
 
     rollbackFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ['bedrock:UpdateAgentRuntimeEndpoint', 'bedrock:GetAgentRuntimeEndpoint'],
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:agent-runtime/chimera-*`,
+        actions: [
+          'elbv2:ModifyListener',
+          'elbv2:DescribeListeners',
+          'elbv2:DescribeTargetGroups',
         ],
+        resources: ['*'],
+      })
+    );
+
+    rollbackFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'ecs:DescribeServices',
+          'ecs:DescribeTaskDefinition',
+          'ecs:RegisterTaskDefinition',
+          'ecs:UpdateService',
+        ],
+        resources: ['*'],
       })
     );
 
@@ -741,16 +917,18 @@ def handler(event, context):
       time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
     });
 
-    // Lambda tasks
+    // Lambda tasks — all include retry for transient Lambda cold-start failures
     const deployCanaryTask = new tasks.LambdaInvoke(this, 'DeployCanary', {
       lambdaFunction: deployCanaryFunction,
       outputPath: '$.Payload',
     });
+    deployCanaryTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
     const validateCanaryTask = new tasks.LambdaInvoke(this, 'ValidateCanary', {
       lambdaFunction: canaryBakeValidationFunction,
       outputPath: '$.Payload',
     });
+    validateCanaryTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
     const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
       lambdaFunction: progressiveRolloutFunction,
@@ -760,6 +938,7 @@ def handler(event, context):
       }),
       outputPath: '$.Payload',
     });
+    rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
     const rollout50Task = new tasks.LambdaInvoke(this, 'Rollout50Percent', {
       lambdaFunction: progressiveRolloutFunction,
@@ -769,6 +948,7 @@ def handler(event, context):
       }),
       outputPath: '$.Payload',
     });
+    rollout50Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
     const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
       lambdaFunction: progressiveRolloutFunction,
@@ -778,11 +958,13 @@ def handler(event, context):
       }),
       outputPath: '$.Payload',
     });
+    rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
     const rollbackTask = new tasks.LambdaInvoke(this, 'RollbackDeployment', {
       lambdaFunction: rollbackFunction,
       outputPath: '$.Payload',
     });
+    rollbackTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
     // Success/failure states
     const deploymentSuccess = new stepfunctions.Succeed(this, 'DeploymentSuccess');
