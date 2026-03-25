@@ -18,7 +18,7 @@ COPY packages/sse-bridge ./packages/sse-bridge
 COPY packages/chat-gateway ./packages/chat-gateway
 
 # Install dependencies
-RUN bun install --frozen-lockfile
+RUN bun install
 
 # Build packages in dependency order
 RUN cd packages/shared && bun run build
@@ -44,7 +44,7 @@ COPY --from=builder /app/packages/chat-gateway/dist ./packages/chat-gateway/dist
 COPY --from=builder /app/packages/chat-gateway/public ./packages/chat-gateway/public
 
 # Install production dependencies only
-RUN bun install --production --frozen-lockfile
+RUN bun install --production
 
 # Create non-root user
 RUN addgroup -g 1001 -S chimera && \
