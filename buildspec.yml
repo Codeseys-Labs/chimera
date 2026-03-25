@@ -22,6 +22,9 @@ phases:
       - cd infra && npx cdk synth --all && cd ..
       - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
 
+      # Prebundle chat-gateway with workspace deps resolved at CodeBuild time
+      - bun build packages/chat-gateway/src/server.ts --outdir packages/chat-gateway/dist --target bun
+
       # Build and push chat-gateway image (Bun + Hono)
       - echo "Building chat-gateway image..."
       - docker build -t $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG -t $ECR_REPOSITORY_CHAT_GATEWAY:latest -f packages/chat-gateway/Dockerfile .
