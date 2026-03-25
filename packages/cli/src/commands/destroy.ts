@@ -20,6 +20,7 @@ import {
   ScanCommand,
   BatchWriteItemCommand,
   type AttributeValue,
+  type WriteRequest,
 } from '@aws-sdk/client-dynamodb';
 import * as os from 'os';
 import { loadConfig, saveConfig } from '../utils/config';
@@ -171,7 +172,7 @@ const STACK_DESTROY_ORDER = [
  * Items are in DynamoDB wire format (AttributeValue) so they can be used
  * directly in PutRequest.Item without further marshalling.
  */
-async function reseedFromArchive(archivePath: string, region: string): Promise<void> {
+export async function reseedFromArchive(archivePath: string, region: string): Promise<void> {
   const manifestPath = path.join(archivePath, 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`Archive manifest not found at ${manifestPath}`);
@@ -189,13 +190,26 @@ async function reseedFromArchive(archivePath: string, region: string): Promise<v
     // BatchWriteItem limit: 25 items per call
     for (let i = 0; i < items.length; i += 25) {
       const batch = items.slice(i, i + 25);
-      await ddbClient.send(new BatchWriteItemCommand({
-        RequestItems: {
-          [tableName]: batch.map((item) => ({
-            PutRequest: { Item: item },
-          })),
-        },
-      }));
+      let requestItems: Record<string, WriteRequest[]> = {
+        [tableName]: batch.map((item) => ({ PutRequest: { Item: item } })),
+      };
+
+      // Retry unprocessed items with exponential backoff (max 5 retries, 100ms base delay)
+      const MAX_RETRIES = 5;
+      let delay = 100;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const response = await ddbClient.send(new BatchWriteItemCommand({ RequestItems: requestItems }));
+        const unprocessed = response.UnprocessedItems?.[tableName];
+        if (!unprocessed || unprocessed.length === 0) break;
+        if (attempt === MAX_RETRIES) {
+          throw new Error(
+            `BatchWriteItem failed after ${MAX_RETRIES} retries: ${unprocessed.length} items unprocessed in table "${tableName}"`
+          );
+        }
+        await new Promise<void>(resolve => setTimeout(resolve, delay));
+        delay *= 2;
+        requestItems = { [tableName]: unprocessed };
+      }
     }
   }
 }
