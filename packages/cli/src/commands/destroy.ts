@@ -15,7 +15,12 @@ import {
   DescribeStackResourcesCommand,
   StackStatus,
 } from '@aws-sdk/client-cloudformation';
-import { DynamoDBClient, ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  ScanCommand,
+  BatchWriteItemCommand,
+  type AttributeValue,
+} from '@aws-sdk/client-dynamodb';
 import * as os from 'os';
 import { loadConfig, saveConfig } from '../utils/config';
 
@@ -68,9 +73,12 @@ async function cleanupFailedStacks(
  * Archives are written to ~/.chimera/archives/<env>-<timestamp>/.
  * Returns the archive directory path.
  */
-async function exportDataArchive(options: { env: string; region: string }): Promise<string> {
+async function exportDataArchive(options: { env: string; region: string; exportPath?: string }): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const archiveDir = path.join(os.homedir(), '.chimera', 'archives', `${options.env}-${timestamp}`);
+  const defaultDir = path.join(os.homedir(), '.chimera', 'archives', `${options.env}-${timestamp}`);
+  const archiveDir = options.exportPath
+    ? path.resolve(options.exportPath)
+    : defaultDir;
   fs.mkdirSync(archiveDir, { recursive: true });
 
   const cfClient = new CloudFormationClient({ region: options.region });
@@ -149,6 +157,49 @@ async function exportDataArchive(options: { env: string; region: string }): Prom
   return archiveDir;
 }
 
+/**
+ * Reverse dependency order for stack teardown (most dependent stacks first)
+ */
+const STACK_DESTROY_ORDER = [
+  'TenantOnboarding', 'Evolution', 'Orchestration', 'Chat',
+  'SkillPipeline', 'Api', 'Observability', 'Pipeline',
+  'Data', 'Security', 'Network',
+];
+
+/**
+ * Reseed DynamoDB tables from a local archive produced by exportDataArchive.
+ * Items are in DynamoDB wire format (AttributeValue) so they can be used
+ * directly in PutRequest.Item without further marshalling.
+ */
+async function reseedFromArchive(archivePath: string, region: string): Promise<void> {
+  const manifestPath = path.join(archivePath, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`Archive manifest not found at ${manifestPath}`);
+  }
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const ddbClient = new DynamoDBClient({ region });
+
+  for (const tableName of manifest.tables as string[]) {
+    const safeTableName = tableName.replace(/[^a-zA-Z0-9-]/g, '_');
+    const filePath = path.join(archivePath, `${safeTableName}.json`);
+    if (!fs.existsSync(filePath)) continue;
+
+    const items: Record<string, AttributeValue>[] = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+    // BatchWriteItem limit: 25 items per call
+    for (let i = 0; i < items.length; i += 25) {
+      const batch = items.slice(i, i + 25);
+      await ddbClient.send(new BatchWriteItemCommand({
+        RequestItems: {
+          [tableName]: batch.map((item) => ({
+            PutRequest: { Item: item },
+          })),
+        },
+      }));
+    }
+  }
+}
+
 export function registerDestroyCommands(program: Command): void {
   // chimera destroy - Tear down all CloudFormation stacks using CDK
   program
@@ -158,6 +209,7 @@ export function registerDestroyCommands(program: Command): void {
     .option('--env <environment>', 'Environment name', 'dev')
     .option('--force', 'Skip confirmation prompt')
     .option('--retain-data', 'Export DynamoDB table data to a local archive before destroying')
+    .option('--export-path <path>', 'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)')
     .action(async (options) => {
       const spinner = ora('Starting Chimera destruction').start();
 
@@ -199,6 +251,7 @@ export function registerDestroyCommands(program: Command): void {
           const archivePath = await exportDataArchive({
             env: options.env,
             region: options.region,
+            exportPath: options.exportPath,
           });
           spinner.succeed(chalk.green(`Data archived to ${archivePath}`));
           console.log(chalk.gray('  Archive path saved to ~/.chimera/last-archive.json for reseeding'));
@@ -211,15 +264,23 @@ export function registerDestroyCommands(program: Command): void {
         // Sanitize environment name to prevent command injection
         const safeEnv = options.env.replace(/[^a-zA-Z0-9-]/g, '');
 
-        // Run CDK destroy (must use npx — bunx breaks CDK instanceof checks)
-        spinner.text = 'Running CDK destroy (this may take 10-20 minutes)...';
-        execSync(
-          `cd infra && npx cdk destroy --all --force --context environment=${safeEnv}`,
-          {
-            cwd: repoRoot,
-            stdio: 'inherit',
+        // Destroy stacks in reverse dependency order (must use npx — bunx breaks CDK instanceof checks)
+        // safeEnv is sanitized: only [a-zA-Z0-9-] characters allowed
+        for (const stackSuffix of STACK_DESTROY_ORDER) {
+          const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
+          spinner.text = `Destroying ${stackName}...`;
+          try {
+            execSync(
+              `cd infra && npx cdk destroy ${stackName} --force --context environment=${safeEnv}`,
+              {
+                cwd: repoRoot,
+                stdio: ['pipe', 'pipe', 'pipe'],
+              }
+            );
+          } catch {
+            // Stack may not exist or already deleted — continue with remaining stacks
           }
-        );
+        }
 
         spinner.succeed(chalk.green('All CloudFormation stacks destroyed'));
 
@@ -270,6 +331,7 @@ export function registerDestroyCommands(program: Command): void {
     .description('Clean up failed stacks then retry CDK deployment')
     .option('--region <region>', 'AWS region', 'us-east-1')
     .option('--env <environment>', 'Environment name', 'dev')
+    .option('--reseed <path>', 'Reseed DynamoDB tables from exported data archive')
     .action(async (options) => {
       console.log(chalk.bold('Chimera Redeploy\n'));
 
@@ -308,6 +370,18 @@ export function registerDestroyCommands(program: Command): void {
         );
 
         spinner.succeed(chalk.green('Deployment complete'));
+
+        // Step 3: Reseed from archive (optional)
+        if (options.reseed) {
+          console.log(chalk.bold('\n3. Reseeding DynamoDB tables\n'));
+          const reseedPath = path.resolve(options.reseed);
+          if (!fs.existsSync(reseedPath)) {
+            throw new Error(`Reseed archive not found: ${reseedPath}`);
+          }
+          spinner.start('Reimporting archived data...');
+          await reseedFromArchive(reseedPath, options.region);
+          spinner.succeed(chalk.green(`Data reseeded from ${reseedPath}`));
+        }
 
         // Update config
         if (!config.deployment) {

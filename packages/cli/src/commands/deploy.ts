@@ -341,7 +341,7 @@ function deployCdkStacks(repoRoot: string, region: string, environment: string):
   // Deploy only the Pipeline stack — CodePipeline buildspec deploys the rest
   // Pass correct context key 'environment' (not 'envName') to match chimera.ts
   execSync(
-    `cd infra && bunx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`,
+    `cd infra && npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`,
     {
       cwd: repoRoot,
       stdio: 'inherit',
@@ -370,7 +370,7 @@ export function registerDeployCommands(program: Command): void {
     .option('--github-tag <tag>', 'GitHub release tag (or "latest")', 'latest')
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
-      let sourceLocation: SourceLocation;
+      let sourceLocation: SourceLocation | undefined;
       let sourcePath: string | null = null;
 
       try {
