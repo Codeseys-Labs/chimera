@@ -252,7 +252,7 @@ docker push $ECR_REPOSITORY:latest
 
 ```dockerfile
 # Stage 1: Build dependencies
-FROM oven/bun:1.0 AS deps
+FROM oven/bun:1.3 AS deps
 WORKDIR /app
 COPY package.json bun.lockb ./
 RUN bun install --frozen-lockfile --production

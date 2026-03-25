@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 env:
-  BUN_VERSION: "1.2.0"
+  BUN_VERSION: "1.3.11"
 
 jobs:
   # Create the GitHub release first
