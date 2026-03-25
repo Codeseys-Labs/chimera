@@ -327,5 +327,19 @@
 		"status": "active",
 		"createdAt": "2026-03-25T07:36:27.324Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-48ac384c",
+		"name": "remaining-features-batch",
+		"memberIssueIds": [
+			"chimera-4cb2",
+			"chimera-6a26",
+			"chimera-0f23",
+			"chimera-2b2a",
+			"chimera-257c"
+		],
+		"status": "active",
+		"createdAt": "2026-03-25T16:39:31.713Z",
+		"completedAt": null
 	}
 ]
