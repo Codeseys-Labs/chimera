@@ -981,6 +981,15 @@ def handler(event, context):
       )
       .otherwise(rollout25Task);
 
+    // Catch handlers: on unhandled Lambda errors, trigger rollback then fail.
+    // rollbackTask already has .next(deploymentFailed) set via checkCanaryHealth above.
+    deployCanaryTask.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+    validateCanaryTask.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+    rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+    rollout50Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+    rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+    rollbackTask.addCatch(deploymentFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+
     // Build orchestration flow
     const definition = deployCanaryTask
       .next(waitCanaryBake)
