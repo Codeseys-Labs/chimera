@@ -564,6 +564,15 @@ def handler(event, context):
         cause: 'New prompt variant did not exceed quality threshold',
       }));
 
+    const promptEvolutionError = new stepfunctions.Fail(this, 'PromptEvolutionError', {
+      error: 'PromptEvolutionFailed',
+      cause: 'Lambda invocation failed after retries',
+    });
+
+    analyzeLogsTask.addCatch(promptEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
+    generateVariantTask.addCatch(promptEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
+    testVariantTask.addCatch(promptEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
+
     const promptEvolutionDefinition = analyzeLogsTask
       .next(generateVariantTask)
       .next(testVariantTask)
@@ -620,6 +629,14 @@ def handler(event, context):
       )
       .otherwise(new stepfunctions.Succeed(this, 'NoPatternsDetected'));
 
+    const skillGenerationError = new stepfunctions.Fail(this, 'SkillGenerationError', {
+      error: 'SkillGenerationFailed',
+      cause: 'Lambda invocation failed after retries',
+    });
+
+    detectPatternsTask.addCatch(skillGenerationError, { errors: ['States.ALL'], resultPath: '$.error' });
+    generateSkillTask.addCatch(skillGenerationError, { errors: ['States.ALL'], resultPath: '$.error' });
+
     const skillGenerationDefinition = detectPatternsTask.next(patternsFound);
 
     const skillGenerationLogGroup = new logs.LogGroup(this, 'SkillGenerationLogGroup', {
@@ -654,6 +671,13 @@ def handler(event, context):
       backoffRate: 2,
       interval: cdk.Duration.seconds(1),
     });
+
+    const memoryEvolutionError = new stepfunctions.Fail(this, 'MemoryEvolutionError', {
+      error: 'MemoryEvolutionFailed',
+      cause: 'Lambda invocation failed after retries',
+    });
+
+    memoryGCTask.addCatch(memoryEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
 
     const memoryEvolutionDefinition = memoryGCTask.next(
       new stepfunctions.Succeed(this, 'MemoryEvolutionSuccess')
@@ -691,6 +715,13 @@ def handler(event, context):
       backoffRate: 2,
       interval: cdk.Duration.seconds(1),
     });
+
+    const feedbackProcessorError = new stepfunctions.Fail(this, 'FeedbackProcessorError', {
+      error: 'FeedbackProcessorFailed',
+      cause: 'Lambda invocation failed after retries',
+    });
+
+    processFeedbackTask.addCatch(feedbackProcessorError, { errors: ['States.ALL'], resultPath: '$.error' });
 
     const feedbackProcessorDefinition = processFeedbackTask.next(
       new stepfunctions.Succeed(this, 'FeedbackProcessingSuccess')
