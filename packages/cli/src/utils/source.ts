@@ -50,8 +50,21 @@ async function resolveGitHubReleaseUrl(
 
           try {
             const release = JSON.parse(data);
-            // Use tarball_url for source tarball (not zipball)
-            resolve(release.tarball_url);
+            // Find the chimera-agent-*.tar.gz release asset (not the generic source tarball)
+            const asset = (release.assets || []).find(
+              (a: { name: string }) =>
+                a.name.startsWith('chimera-agent-') && a.name.endsWith('.tar.gz'),
+            );
+            if (!asset) {
+              reject(
+                new Error(
+                  `No chimera-agent-*.tar.gz asset found in release ${release.tag_name}. ` +
+                    `Ensure the release was built with the build-agent-archive workflow job.`,
+                ),
+              );
+              return;
+            }
+            resolve(asset.browser_download_url);
           } catch (err) {
             reject(new Error(`Failed to parse GitHub API response: ${err}`));
           }
