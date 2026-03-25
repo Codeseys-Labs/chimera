@@ -9,7 +9,7 @@ import {
   CloudFormationClient,
   DescribeStacksCommand,
 } from '@aws-sdk/client-cloudformation';
-import { loadConfig, saveConfig } from '../utils/config';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace';
 
 /**
  * Get CloudFormation stack outputs
@@ -46,23 +46,22 @@ export function registerConnectCommand(program: Command): void {
   program
     .command('connect')
     .description('Connect to deployed Chimera instance (saves API endpoints to local config)')
-    .option('--region <region>', 'AWS region', 'us-east-1')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
     .action(async (options) => {
       const spinner = ora('Connecting to Chimera deployment').start();
 
       try {
-        const config = loadConfig();
+        const wsConfig = loadWorkspaceConfig();
+        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 
-        if (!config.deployment) {
-          throw new Error('No deployment found. Run "chimera deploy" first.');
-        }
-
-        const client = new CloudFormationClient({ region: options.region });
+        const client = new CloudFormationClient({ region });
 
         // Get API stack outputs
         spinner.text = 'Fetching API Gateway endpoints...';
-        const apiStackName = `Chimera-${options.env}-Api`;
+        const apiStackName = `Chimera-${env}-Api`;
         const apiOutputs = await getStackOutputs(client, apiStackName);
 
         const apiUrl = apiOutputs.ApiUrl || apiOutputs.RestApiUrl;
@@ -76,7 +75,7 @@ export function registerConnectCommand(program: Command): void {
 
         // Get Security stack outputs
         spinner.start('Fetching Cognito configuration...');
-        const securityStackName = `Chimera-${options.env}-Security`;
+        const securityStackName = `Chimera-${env}-Security`;
         const securityOutputs = await getStackOutputs(client, securityStackName);
 
         const cognitoUserPoolId = securityOutputs.UserPoolId;
@@ -89,12 +88,8 @@ export function registerConnectCommand(program: Command): void {
         spinner.succeed(chalk.green('Cognito configuration retrieved'));
 
         // Update config
-        config.deployment.apiUrl = apiUrl;
-        config.deployment.webSocketUrl = webSocketUrl;
-        config.deployment.cognitoUserPoolId = cognitoUserPoolId;
-        config.deployment.cognitoClientId = cognitoClientId;
-        config.deployment.region = options.region;
-        saveConfig(config);
+        const currentConfig = loadWorkspaceConfig();
+        saveWorkspaceConfig({ ...currentConfig, endpoints: { api_url: apiUrl, websocket_url: webSocketUrl, cognito_user_pool_id: cognitoUserPoolId, cognito_client_id: cognitoClientId } });
 
         console.log(chalk.green('\n✓ Connected to Chimera deployment'));
         console.log(chalk.gray('\nEndpoints:'));
@@ -106,7 +101,7 @@ export function registerConnectCommand(program: Command): void {
         if (cognitoClientId) {
           console.log(chalk.gray(`  Client ID:    ${cognitoClientId}`));
         }
-        console.log(chalk.gray('\nConfiguration saved to ~/.chimera/config.json'));
+        console.log(chalk.gray('\nConfiguration saved to chimera.toml'));
       } catch (error: any) {
         spinner.fail(chalk.red('Connection failed'));
         console.error(chalk.red(error.message));

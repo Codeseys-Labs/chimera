@@ -9,7 +9,7 @@ import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs';
 import { CodeCommitClient } from '@aws-sdk/client-codecommit';
-import { loadConfig } from '../utils/config';
+import { loadWorkspaceConfig } from '../utils/workspace';
 import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit';
 
 /**
@@ -76,18 +76,16 @@ export function registerSyncCommand(program: Command): void {
       const spinner = ora('Starting sync operation').start();
 
       try {
-        // Load deployment config
-        spinner.text = 'Loading deployment configuration...';
-        const config = loadConfig();
-
-        if (!config.deployment) {
-          spinner.fail(chalk.red('No deployment found'));
-          console.error(chalk.red('Run "chimera deploy" first to create a deployment'));
+        const wsConfig = loadWorkspaceConfig();
+        const region = wsConfig?.aws?.region;
+        const repositoryName = wsConfig?.workspace?.repository;
+        if (!region || !repositoryName) {
+          spinner.fail(chalk.red('No workspace configuration found'));
+          console.error(chalk.red('Run chimera init to configure your workspace'));
           process.exit(1);
         }
-
-        const { region, repositoryName } = config.deployment;
-        spinner.succeed(chalk.green(`Deployment found: ${repositoryName} in ${region}`));
+        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        spinner.succeed(chalk.green('Workspace: ' + repositoryName + ' in ' + region));
 
         // Find project root
         spinner.start('Locating project root...');
