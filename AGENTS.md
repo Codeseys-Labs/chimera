@@ -56,8 +56,120 @@ npx cdk deploy --all           # CDK uses npx (Node required)
 npm install
 npm test
 cdk synth        # Assumes global CDK
-npx cdk synth
+bunx cdk synth   # Bun breaks CDK
 ```
+
+---
+
+## Codebase Map
+
+### Repository Structure
+
+```
+chimera/
+├── .overstory/              # Multi-agent orchestration (worktrees, specs, agent defs)
+├── .mulch/                  # Expertise management (learned conventions, patterns)
+├── .seeds/                  # Git-native issue tracking (tasks, bugs, epics)
+├── .canopy/                 # Git-native prompt management (versioned prompts)
+├── infra/                   # AWS CDK infrastructure (11 stacks, TypeScript)
+├── packages/                # Application code (TypeScript + Python)
+├── tests/                   # Test suites (unit, integration, e2e, load)
+├── docs/                    # Documentation (architecture, ADRs, runbooks, research)
+├── scripts/                 # Utility scripts (deployment, data seeding, automation)
+├── seed-data/               # Initial data for DynamoDB tables
+├── .github/workflows/       # GitHub Actions CI/CD pipelines
+└── *.md                     # Project root docs (README, CLAUDE, AGENTS, VISION)
+```
+
+### Infrastructure (`infra/`)
+
+AWS CDK infrastructure organized into 11 separation-of-concerns stacks:
+
+```
+infra/
+├── bin/chimera.ts                    # CDK app entry point
+└── lib/                              # Stack definitions
+    ├── network-stack.ts              # VPC, subnets, NAT, security groups
+    ├── data-stack.ts                 # DynamoDB (6 tables), S3 (3 buckets)
+    ├── security-stack.ts             # Cognito, IAM, Cedar, KMS, WAF
+    ├── observability-stack.ts        # CloudWatch, X-Ray, alarms, SNS
+    ├── api-stack.ts                  # API Gateway (REST + WebSocket), JWT auth
+    ├── skill-pipeline-stack.ts       # 7-stage skill security pipeline
+    ├── chat-stack.ts                 # ECS Fargate, ALB, SSE bridge
+    ├── orchestration-stack.ts        # EventBridge, SQS queues
+    ├── evolution-stack.ts            # Self-evolution engine
+    ├── tenant-onboarding-stack.ts    # Tenant provisioning
+    └── pipeline-stack.ts             # CI/CD, CodePipeline, canary
+```
+
+### Application Packages (`packages/`)
+
+Monorepo with TypeScript and Python packages:
+
+| Package | Language | Purpose |
+|---------|----------|---------|
+| **core** | TypeScript | Shared types, utilities, interfaces |
+| **sse-bridge** | TypeScript | Strands → Vercel Data Stream Protocol adapter |
+| **agents** | Python | Strands ReAct agent with 25+ AWS tools |
+| **shared** | TypeScript | Cross-package constants, errors, validators |
+| **chat-gateway** | TypeScript | Hono HTTP/SSE gateway (ECS Fargate) |
+| **cli** | TypeScript | CLI for deployment, tenant management |
+
+### Documentation (`docs/`)
+
+```
+docs/
+├── architecture/                 # System design, canonical schemas
+│   ├── ARCHITECTURE.md           # Canonical architecture reference
+│   ├── canonical-data-model.md   # DynamoDB 6-table schema
+│   └── decisions/                # ADRs (Architecture Decision Records)
+│       ├── 001-023...md          # 23 ADRs, 7 need updates
+├── research/                     # Investigation, competitive analysis
+│   ├── evolution/                # Self-evolution research
+│   ├── integration-enhancement/  # AWS/OSS integration
+│   └── multi-tenancy/            # Multi-tenancy patterns
+├── runbooks/                     # Ops procedures, incident response
+├── guides/                       # How-to guides, tutorials
+├── analysis/                     # Analysis reports, audits
+├── ROADMAP.md                    # Implementation roadmap
+├── VISION.md                     # Product vision, long-term goals
+└── SESSION-RETROSPECTIVE.md      # Latest session learnings
+```
+
+### Testing (`tests/`)
+
+```
+tests/
+├── unit/               # Fast, isolated unit tests (Jest)
+├── integration/        # Multi-component integration tests
+├── e2e/                # Full system end-to-end tests
+├── load/               # Load and performance tests (k6)
+└── helpers/            # Test utilities, fixtures, mocks
+```
+
+**Coverage:** 85%+ unit test coverage, comprehensive integration and e2e tests.
+
+### Expertise (`.mulch/`)
+
+Learned conventions across 13 domains:
+
+- **architecture** (6 records): Model routing, tier restrictions, cross-stack dependencies
+- **infrastructure** (14 records): CodeBuild YAML, Docker patterns, KMS policies, Step Functions retries
+- **security** (3 records): Cedar tests, GSI filtering, XSS prevention
+- **documentation** (4 records): Tool choices, ADR audit findings
+- **development** (16 records): Bun/uv/npx patterns, lead agent constraints, quality gates
+
+**Total:** 551+ records capturing production learnings.
+
+### Key Files
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `README.md` | Project overview, quick start | ✅ Current |
+| `CLAUDE.md` | Development workflow, best practices | ✅ Comprehensive |
+| `AGENTS.md` | Capability reference (this file) | ✅ Complete |
+| `VISION.md` | Product vision, roadmap | ✅ Canonical |
+| `bun.lock` | Text-based lockfile (Bun 1.2+) | ✅ Active |
 
 ---
 

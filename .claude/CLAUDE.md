@@ -165,12 +165,12 @@ bun run typecheck  # No TypeScript errors
 
 ## Your Assignment
 
-- **Agent Name:** builder-fix-cdk-bun
-- **Task ID:** chimera-db2d
+- **Agent Name:** builder-retro-docs
+- **Task ID:** chimera-8e7b
 - **Spec:** No spec file provided
-- **Branch:** overstory/builder-fix-cdk-bun/chimera-db2d
-- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun
-- **Parent:** lead-fix-cdk-bun
+- **Branch:** overstory/builder-retro-docs/chimera-8e7b
+- **Worktree:** /Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-retro-docs
+- **Parent:** lead-session-retro
 - **Depth:** 2
 
 No task spec was provided. Check your mail or ask your parent agent for details.
@@ -181,26 +181,22 @@ No task spec was provided. Check your mail or ask your parent agent for details.
 
 ## Working Directory
 
-Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
+Your worktree root is: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-retro-docs`
 
 **CRITICAL**: All file operations MUST use paths within this directory.
-- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
+- Use paths relative to your worktree root, or absolute paths starting with `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-retro-docs`
 - Writing to the canonical repo root instead of your worktree is a critical error (PATH_BOUNDARY_VIOLATION)
 - You may READ files from the canonical repo for context, but all WRITES go to your worktree
 
 ## File Scope (exclusive ownership)
 
-These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
+These paths are relative to your worktree root: `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-retro-docs`
 
 You may ONLY modify the files listed below within your worktree. Do not touch any other files.
 If you need changes outside your scope, send mail to your parent agent
 requesting the modification.
 
-- `infra/cdk.json`
-- `buildspec.yml`
-- `scripts/bootstrap.sh`
-- `CLAUDE.md`
-- `AGENTS.md`
+No file scope restrictions
 
 ## Expertise
 
@@ -212,26 +208,26 @@ No specific expertise domains configured
 
 ## Communication
 
-Use `ov mail` for all communication. Your address is **builder-fix-cdk-bun**.
+Use `ov mail` for all communication. Your address is **builder-retro-docs**.
 
 ```bash
 # Check your inbox (do this regularly)
-ov mail check --agent builder-fix-cdk-bun
+ov mail check --agent builder-retro-docs
 
 # Send a status update to your parent
-ov mail send --to lead-fix-cdk-bun --subject "status" \
-  --body "Progress update here" --type status --agent builder-fix-cdk-bun
+ov mail send --to lead-session-retro --subject "status" \
+  --body "Progress update here" --type status --agent builder-retro-docs
 
 # Ask a question
-ov mail send --to lead-fix-cdk-bun --subject "question" \
-  --body "Your question here" --type question --priority high --agent builder-fix-cdk-bun
+ov mail send --to lead-session-retro --subject "question" \
+  --body "Your question here" --type question --priority high --agent builder-retro-docs
 
 # Report completion
-ov mail send --to lead-fix-cdk-bun --subject "done" \
-  --body "Summary of what was done" --type result --agent builder-fix-cdk-bun
+ov mail send --to lead-session-retro --subject "done" \
+  --body "Summary of what was done" --type result --agent builder-retro-docs
 
 # Reply to a message
-ov mail reply <message-id> --body "Your reply" --agent builder-fix-cdk-bun
+ov mail reply <message-id> --body "Your reply" --agent builder-retro-docs
 ```
 
 ## Spawning Sub-Workers
@@ -245,20 +241,20 @@ Before reporting completion, you MUST pass all quality gates:
 1. **Tests:** `bun test` — all tests must pass
 2. **Lint:** `bun run lint` — zero errors
 3. **Typecheck:** `bun run typecheck` — no TypeScript errors
-4. **Commit:** all changes committed to your branch (overstory/builder-fix-cdk-bun/chimera-db2d)
-5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-fix-cdk-bun` — capture insights from your work
-6. **Signal completion:** send `worker_done` mail to lead-fix-cdk-bun: `ov mail send --to lead-fix-cdk-bun --subject "Worker done: chimera-db2d" --body "Quality gates passed." --type worker_done --agent builder-fix-cdk-bun`
-7. **Close issue:** `sd close chimera-db2d --reason "summary of changes"`
+4. **Commit:** all changes committed to your branch (overstory/builder-retro-docs/chimera-8e7b)
+5. **Record mulch learnings:** `ml record <domain> --type <convention|pattern|failure|decision> --description "..." --outcome-status success --outcome-agent builder-retro-docs` — capture insights from your work
+6. **Signal completion:** send `worker_done` mail to lead-session-retro: `ov mail send --to lead-session-retro --subject "Worker done: chimera-8e7b" --body "Quality gates passed." --type worker_done --agent builder-retro-docs`
+7. **Close issue:** `sd close chimera-8e7b --reason "summary of changes"`
 
 Do NOT push to the canonical branch. Your work will be merged by the
 coordinator via `ov merge`.
 
 ## Constraints
 
-- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-fix-cdk-bun`
+- **WORKTREE ISOLATION**: All writes MUST target files within your worktree at `/Users/baladita/Documents/DevBox/chimera/.overstory/worktrees/builder-retro-docs`
 - NEVER write to the canonical repo root — all writes go to your worktree copy
 - Only modify files in your File Scope
-- Commit only to your branch: overstory/builder-fix-cdk-bun/chimera-db2d
+- Commit only to your branch: overstory/builder-retro-docs/chimera-8e7b
 - Never push to the canonical branch
 - Report completion via `sd close` AND `ov mail send --type result`
 - If you encounter a blocking issue, send mail with `--priority urgent --type error`
