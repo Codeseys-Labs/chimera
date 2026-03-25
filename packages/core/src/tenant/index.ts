@@ -3,6 +3,7 @@
  *
  * Multi-tenant configuration and resource management:
  * - TenantService: CRUD operations for tenant configuration
+ * - TenantLifecycleService: Tier upgrades/downgrades (features, models, quotas)
  * - QuotaManager: Resource quota tracking and enforcement
  * - RateLimiter: Token bucket rate limiting
  * - TenantRouter: JWT authentication and tenant context extraction
@@ -15,6 +16,13 @@ export {
   type TenantServiceConfig,
   type CreateTenantParams,
 } from './tenant-service';
+
+export {
+  TenantLifecycleService,
+  TIER_QUOTA_LIMITS,
+  type TenantLifecycleServiceConfig,
+  type TierChangeResult,
+} from './tenant-lifecycle-service';
 
 export {
   QuotaManager,
