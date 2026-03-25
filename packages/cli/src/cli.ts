@@ -17,6 +17,7 @@ import { registerConnectCommand } from './commands/connect';
 import { registerStatusCommand } from './commands/status';
 import { registerSyncCommand } from './commands/sync';
 import { registerUpgradeCommand } from './commands/upgrade';
+import { registerInitCommand } from './commands/init';
 
 const program = new Command();
 
@@ -35,6 +36,7 @@ registerConnectCommand(program);
 registerStatusCommand(program);
 registerSyncCommand(program);
 registerUpgradeCommand(program);
+registerInitCommand(program);
 
 // Error handling
 program.exitOverride();
