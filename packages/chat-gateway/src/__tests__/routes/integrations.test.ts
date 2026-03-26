@@ -2,36 +2,33 @@
  * Tests for chat platform integration routes
  */
 
+import { Hono } from 'hono';
+import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';
-import express from 'express';
-import type { Express } from 'express';
 import integrationsRouter from '../../routes/integrations';
+import type { AuthContext } from '../../middleware/auth';
 
-// Mock tenant context middleware
-function mockTenantContext(tenantId: string, userId?: string) {
-  return (req: any, _res: any, next: any) => {
-    req.tenantContext = {
-      tenantId,
-      userId,
-      tier: 'enterprise',
-    };
-    next();
-  };
+function createTestApp(tenantContext?: { tenantId: string; userId?: string }) {
+  const app = new Hono();
+  if (tenantContext) {
+    app.use('/integrations/*', async (c, next) => {
+      (c as any).set('auth', {
+        sub: tenantContext.userId || 'user-anonymous',
+        tenantId: tenantContext.tenantId,
+        tenantTier: 'enterprise',
+      } as AuthContext);
+      await next();
+    });
+  }
+  app.route('/integrations', integrationsRouter);
+  return createAdaptorServer({ fetch: app.fetch });
 }
 
 describe('Integration Routes', () => {
-  let app: Express;
-
-  beforeEach(() => {
-    app = express();
-    app.use(express.json());
-  });
-
   describe('GET /integrations/:tenantId', () => {
     it('should return list of integrations for tenant', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app).get(`/integrations/${tenantId}`).expect(200);
 
@@ -42,8 +39,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject request for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app).get('/integrations/tenant-b').expect(403);
 
@@ -51,8 +47,7 @@ describe('Integration Routes', () => {
     });
 
     it('should allow platform admin to access any tenant', async () => {
-      app.use(mockTenantContext('chimera-platform', 'admin-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'chimera-platform', userId: 'admin-123' });
 
       const response = await request(app).get('/integrations/tenant-b').expect(200);
 
@@ -61,8 +56,7 @@ describe('Integration Routes', () => {
 
     it('should not expose access tokens in list', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app).get(`/integrations/${tenantId}`).expect(200);
 
@@ -76,8 +70,7 @@ describe('Integration Routes', () => {
   describe('POST /integrations/:tenantId/slack', () => {
     it('should initiate Slack OAuth flow', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       // Set Slack client ID for test
       process.env.SLACK_CLIENT_ID = 'test-client-id';
@@ -96,8 +89,7 @@ describe('Integration Routes', () => {
 
     it('should reject request without redirectUri', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/slack`)
@@ -108,8 +100,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject request for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app)
         .post('/integrations/tenant-b/slack')
@@ -121,8 +112,7 @@ describe('Integration Routes', () => {
 
     it('should return error if Slack client ID not configured', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       // Clear Slack client ID
       delete process.env.SLACK_CLIENT_ID;
@@ -139,8 +129,7 @@ describe('Integration Routes', () => {
   describe('POST /integrations/:tenantId/slack/callback', () => {
     it('should handle Slack OAuth callback', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/slack/callback`)
@@ -158,8 +147,7 @@ describe('Integration Routes', () => {
 
     it('should reject callback without code', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/slack/callback`)
@@ -171,8 +159,7 @@ describe('Integration Routes', () => {
 
     it('should reject callback without state', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/slack/callback`)
@@ -183,8 +170,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject callback for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app)
         .post('/integrations/tenant-b/slack/callback')
@@ -202,8 +188,7 @@ describe('Integration Routes', () => {
     it('should remove integration', async () => {
       const tenantId = 'test-tenant';
       const workspaceId = 'T01234567';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .delete(`/integrations/${tenantId}/slack/${workspaceId}`)
@@ -215,8 +200,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject removal for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app)
         .delete('/integrations/tenant-b/slack/T01234567')
@@ -229,8 +213,7 @@ describe('Integration Routes', () => {
   describe('GET /integrations/:tenantId/users', () => {
     it('should return list of user pairings', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .get(`/integrations/${tenantId}/users`)
@@ -244,8 +227,7 @@ describe('Integration Routes', () => {
 
     it('should filter by platform', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .get(`/integrations/${tenantId}/users?platform=slack`)
@@ -259,8 +241,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject request for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app).get('/integrations/tenant-b/users').expect(403);
 
@@ -271,8 +252,7 @@ describe('Integration Routes', () => {
   describe('POST /integrations/:tenantId/users', () => {
     it('should create user pairing', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/users`)
@@ -292,8 +272,7 @@ describe('Integration Routes', () => {
 
     it('should reject request without required fields', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/users`)
@@ -305,8 +284,7 @@ describe('Integration Routes', () => {
 
     it('should reject invalid platform', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .post(`/integrations/${tenantId}/users`)
@@ -321,8 +299,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject request for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app)
         .post('/integrations/tenant-b/users')
@@ -340,8 +317,7 @@ describe('Integration Routes', () => {
   describe('DELETE /integrations/:tenantId/users/:platform/:platformUserId', () => {
     test('should remove user pairing', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       const response = await request(app)
         .delete(`/integrations/${tenantId}/users/slack/U12345`)
@@ -354,8 +330,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject removal for different tenant', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app)
         .delete('/integrations/tenant-b/users/slack/U12345')
@@ -367,8 +342,7 @@ describe('Integration Routes', () => {
 
   describe('POST /integrations/resolve-user', () => {
     it('should resolve platform user to Cognito sub', async () => {
-      app.use(mockTenantContext('test-tenant', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
       const response = await request(app)
         .post('/integrations/resolve-user')
@@ -385,8 +359,7 @@ describe('Integration Routes', () => {
     });
 
     it('should reject request without required fields', async () => {
-      app.use(mockTenantContext('test-tenant', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
       const response = await request(app)
         .post('/integrations/resolve-user')
@@ -399,8 +372,7 @@ describe('Integration Routes', () => {
 
   describe('Authorization', () => {
     it('platform admin can manage any tenant integrations', async () => {
-      app.use(mockTenantContext('chimera-platform', 'admin-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'chimera-platform', userId: 'admin-123' });
 
       // Should be able to access tenant-b integrations
       const response = await request(app).get('/integrations/tenant-b').expect(200);
@@ -409,8 +381,7 @@ describe('Integration Routes', () => {
     });
 
     it('regular tenant cannot manage other tenants', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       // Should NOT be able to access tenant-b integrations
       const response = await request(app).get('/integrations/tenant-b').expect(403);
@@ -422,8 +393,7 @@ describe('Integration Routes', () => {
   describe('Error Handling', () => {
     it('should handle errors gracefully', async () => {
       const tenantId = 'test-tenant';
-      app.use(mockTenantContext(tenantId, 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId, userId: 'user-123' });
 
       // All routes should return proper error response format
       const response = await request(app).get(`/integrations/${tenantId}`).expect(200);
@@ -432,8 +402,7 @@ describe('Integration Routes', () => {
     });
 
     it('should return consistent error format', async () => {
-      app.use(mockTenantContext('tenant-a', 'user-123'));
-      app.use('/integrations', integrationsRouter);
+      const app = createTestApp({ tenantId: 'tenant-a', userId: 'user-123' });
 
       const response = await request(app).get('/integrations/tenant-b').expect(403);
 

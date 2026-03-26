@@ -2,21 +2,39 @@
  * Tests for Telegram webhook routes
  */
 
+import { Hono } from 'hono';
+import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';
-import express from 'express';
-import type { Express } from 'express';
-import telegramRouter from '../../routes/telegram';
 
-// Mock tenant context middleware
-function mockTenantContext(tenantId: string, userId?: string) {
-  return (req: any, _res: any, next: any) => {
-    req.tenantContext = {
-      tenantId,
-      userId,
-      tier: 'enterprise',
-    };
-    next();
-  };
+// Mock @chimera/core before importing route to avoid BEDROCK_MODELS export issue
+jest.mock('@chimera/core', () => ({
+  createAgent: jest.fn().mockReturnValue({
+    invoke: jest.fn().mockResolvedValue({ output: 'Hello from Chimera!' }),
+  }),
+  createDefaultSystemPrompt: jest.fn().mockReturnValue('You are a helpful assistant.'),
+  UserPairingService: jest.fn().mockImplementation(() => ({
+    resolveUser: jest.fn().mockResolvedValue(null),
+    updatePairing: jest.fn().mockResolvedValue({}),
+  })),
+}));
+
+import telegramRouter from '../../routes/telegram';
+import type { TenantContext } from '../../types';
+
+function createTestApp(tenantContext?: { tenantId: string; userId?: string }) {
+  const app = new Hono();
+  if (tenantContext) {
+    app.use('/telegram/*', async (c, next) => {
+      (c as any).set('tenantContext', {
+        tenantId: tenantContext.tenantId,
+        userId: tenantContext.userId,
+        tier: 'enterprise',
+      } as TenantContext);
+      await next();
+    });
+  }
+  app.route('/telegram', telegramRouter);
+  return createAdaptorServer({ fetch: app.fetch });
 }
 
 // A valid Telegram text message update
@@ -42,13 +60,10 @@ function makeTextUpdate(overrides: Record<string, any> = {}) {
 }
 
 describe('Telegram Routes', () => {
-  let app: Express;
   const originalEnv = process.env;
 
   beforeEach(() => {
     process.env = { ...originalEnv, NODE_ENV: 'test' };
-    app = express();
-    app.use(express.json());
   });
 
   afterEach(() => {
@@ -62,8 +77,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should process a valid text message', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const response = await request(app)
           .post('/telegram/webhook')
@@ -78,8 +92,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should return 200 for non-text updates (sticker, photo, etc.)', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const nonTextUpdate = {
           update_id: 2,
@@ -100,8 +113,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should return 200 for updates with no message', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const noMessageUpdate = { update_id: 3 };
 
@@ -114,8 +126,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should filter out bot messages to prevent loops', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const botUpdate = makeTextUpdate({
           from: {
@@ -134,8 +145,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should return 500 when tenant context is missing', async () => {
-        // No mockTenantContext — simulates missing middleware
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp(); // No tenantContext
 
         const response = await request(app)
           .post('/telegram/webhook')
@@ -158,8 +168,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should accept requests with a valid secret token', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const response = await request(app)
           .post('/telegram/webhook')
@@ -171,8 +180,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should reject requests with an invalid token (401)', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const response = await request(app)
           .post('/telegram/webhook')
@@ -184,8 +192,7 @@ describe('Telegram Routes', () => {
       });
 
       it('should reject requests with no token header (401)', async () => {
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const response = await request(app)
           .post('/telegram/webhook')
@@ -199,8 +206,7 @@ describe('Telegram Routes', () => {
         delete process.env.TELEGRAM_WEBHOOK_SECRET;
         process.env.NODE_ENV = 'production';
 
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         const response = await request(app)
           .post('/telegram/webhook')
@@ -217,8 +223,7 @@ describe('Telegram Routes', () => {
         // respond 200 so Telegram doesn't keep retrying
         delete process.env.TELEGRAM_WEBHOOK_SECRET;
 
-        app.use(mockTenantContext('test-tenant', 'user-123'));
-        app.use('/telegram', telegramRouter);
+        const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
         // Send an empty body that will fail adapter.parseIncoming
         const response = await request(app)
@@ -238,8 +243,7 @@ describe('Telegram Routes', () => {
     });
 
     it('should succeed with valid url and secretToken', async () => {
-      app.use(mockTenantContext('test-tenant', 'user-123'));
-      app.use('/telegram', telegramRouter);
+      const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
       const response = await request(app)
         .post('/telegram/set-webhook')
@@ -257,8 +261,7 @@ describe('Telegram Routes', () => {
     });
 
     it('should reject request without url (400)', async () => {
-      app.use(mockTenantContext('test-tenant', 'user-123'));
-      app.use('/telegram', telegramRouter);
+      const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
       const response = await request(app)
         .post('/telegram/set-webhook')
@@ -269,8 +272,7 @@ describe('Telegram Routes', () => {
     });
 
     it('should reject request without secretToken (400)', async () => {
-      app.use(mockTenantContext('test-tenant', 'user-123'));
-      app.use('/telegram', telegramRouter);
+      const app = createTestApp({ tenantId: 'test-tenant', userId: 'user-123' });
 
       const response = await request(app)
         .post('/telegram/set-webhook')
@@ -281,8 +283,7 @@ describe('Telegram Routes', () => {
     });
 
     it('should require tenant context (500)', async () => {
-      // No tenant context middleware
-      app.use('/telegram', telegramRouter);
+      const app = createTestApp(); // No tenant context
 
       const response = await request(app)
         .post('/telegram/set-webhook')
