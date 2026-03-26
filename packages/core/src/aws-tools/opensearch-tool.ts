@@ -133,7 +133,7 @@ export function createOpenSearchTools(clientFactory: AWSClientFactory) {
           DomainName: input.domainName,
           EngineVersion: input.engineVersion ?? 'OpenSearch_2.5',
           ClusterConfig: {
-            InstanceType: input.instanceType ?? 't3.small.search',
+            InstanceType: (input.instanceType ?? 't3.small.search') as any,
             InstanceCount: input.instanceCount ?? 1,
             DedicatedMasterEnabled: input.dedicatedMasterEnabled ?? false,
             ZoneAwarenessEnabled: input.zoneAwarenessEnabled ?? false,
@@ -238,7 +238,7 @@ export function createOpenSearchTools(clientFactory: AWSClientFactory) {
         const command = new UpdateDomainConfigCommand({
           DomainName: input.domainName,
           ClusterConfig: input.instanceType || input.instanceCount !== undefined || input.dedicatedMasterEnabled !== undefined ? {
-            InstanceType: input.instanceType,
+            InstanceType: input.instanceType as any,
             InstanceCount: input.instanceCount,
             DedicatedMasterEnabled: input.dedicatedMasterEnabled,
           } : undefined,
