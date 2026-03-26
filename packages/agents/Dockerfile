@@ -1,6 +1,6 @@
 
 
-FROM python:3.11-slim
+FROM 123456789012.dkr.ecr.us-west-2.amazonaws.com/docker-hub/library/python:3.11-slim
 
 WORKDIR /app
 

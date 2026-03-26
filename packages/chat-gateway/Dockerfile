@@ -5,7 +5,7 @@
 #   bun build packages/chat-gateway/src/server.ts --outdir packages/chat-gateway/dist --target bun
 # The Docker image simply copies and runs the pre-built bundle — no workspace resolution needed.
 
-FROM oven/bun:1.3-alpine
+FROM 123456789012.dkr.ecr.us-west-2.amazonaws.com/docker-hub/oven/bun:1.3-alpine
 
 WORKDIR /app
 
