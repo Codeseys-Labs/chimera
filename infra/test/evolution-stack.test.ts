@@ -420,6 +420,62 @@ describe('EvolutionStack', () => {
     });
   });
 
+  describe('Lambda Handler Logic (no TODO stubs)', () => {
+    const getFunctionCode = (functionName: string): string => {
+      const resources = template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: functionName },
+      });
+      const fn = Object.values(resources)[0] as any;
+      return (fn?.Properties?.Code?.ZipFile as string) ?? '';
+    };
+
+    it('AnalyzeConversationLogsFunction should have real DynamoDB implementation', () => {
+      const code = getFunctionCode('chimera-evolution-analyze-logs-dev');
+      expect(code).not.toContain('# TODO');
+      expect(code).toContain('boto3');
+      expect(code).toContain('table.query');
+      expect(code).toContain('failures');
+      expect(code).toContain('corrections');
+    });
+
+    it('GeneratePromptVariantFunction should have real prompt generation logic', () => {
+      const code = getFunctionCode('chimera-evolution-generate-prompt-dev');
+      expect(code).not.toContain('# TODO');
+      expect(code).toContain('boto3');
+      expect(code).toContain('EVOLUTION_TABLE');
+      expect(code).toContain('variant_id');
+      expect(code).toContain('table.put_item');
+    });
+
+    it('TestPromptVariantFunction should have real evaluation logic', () => {
+      const code = getFunctionCode('chimera-evolution-test-prompt-dev');
+      expect(code).not.toContain('# TODO');
+      expect(code).toContain('boto3');
+      expect(code).toContain('avg_quality_score');
+      expect(code).toContain('golden_cases');
+      expect(code).toContain('pass_rate');
+    });
+
+    it('MemoryGCFunction should have real lifecycle transition logic', () => {
+      const code = getFunctionCode('chimera-evolution-memory-gc-dev');
+      expect(code).not.toContain('# TODO');
+      expect(code).toContain('boto3');
+      expect(code).toContain('WARM_THRESHOLD_DAYS');
+      expect(code).toContain('GSI1-lifecycle');
+      expect(code).toContain('promoted');
+    });
+
+    it('ProcessFeedbackFunction should have real feedback routing logic', () => {
+      const code = getFunctionCode('chimera-evolution-process-feedback-dev');
+      expect(code).not.toContain('# TODO');
+      expect(code).toContain('boto3');
+      expect(code).toContain('thumbs_down');
+      expect(code).toContain('thumbs_up');
+      expect(code).toContain('correction');
+      expect(code).toContain('GSI2-unprocessed-feedback');
+    });
+  });
+
   describe('Prod Environment', () => {
     let prodStack: EvolutionStack;
     let prodTemplate: Template;
