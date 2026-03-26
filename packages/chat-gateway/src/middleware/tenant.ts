@@ -83,7 +83,7 @@ export async function extractTenantContext(
   // For development/testing: accept header-provided tier without DynamoDB lookup
   // In production, this would be replaced with actual DynamoDB validation
   const tierHeader = c.req.header('x-tenant-tier') || 'basic';
-  const validTiers = ['basic', 'advanced', 'enterprise', 'dedicated'];
+  const validTiers = ['basic', 'advanced', 'premium'];
   const tier = validTiers.includes(tierHeader) ? tierHeader : 'basic';
 
   // Attach tenant context to Hono context

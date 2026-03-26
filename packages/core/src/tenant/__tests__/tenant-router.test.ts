@@ -302,17 +302,17 @@ describe('TenantRouter', () => {
   });
 
   describe('routeToEndpoint', () => {
-    it('should route dedicated tier to dedicated cluster', () => {
+    it('should route dedicated deploymentModel to dedicated cluster', () => {
       const context = {
-        tenantId: 'enterprise-corp',
+        tenantId: 'premium-corp',
         userId: 'user-123',
         userGroups: [],
-        tenantConfig: createMockTenantConfig('enterprise-corp', 'dedicated'),
+        tenantConfig: createMockTenantConfig('premium-corp', 'premium', 'dedicated'),
         isAdmin: false,
       };
 
       const endpoint = router.routeToEndpoint(context);
-      expect(endpoint).toBe('https://enterprise-corp.agentcore.us-east-1.chimera.aws');
+      expect(endpoint).toBe('https://premium-corp.agentcore.us-east-1.chimera.aws');
     });
 
     it('should route shared tiers to shared cluster', () => {

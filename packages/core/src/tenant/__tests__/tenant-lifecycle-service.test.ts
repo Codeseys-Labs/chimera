@@ -69,12 +69,12 @@ describe('TenantLifecycleService', () => {
       expect(ddb.update.mock.calls.length).toBeGreaterThanOrEqual(5);
     });
 
-    it('upgrades advanced → enterprise: grants cronJobs and selfEditingIac', async () => {
+    it('upgrades advanced → premium: grants cronJobs and selfEditingIac', async () => {
       const profile = makeProfile(TENANT_ID, 'advanced');
       const ddb = makeMockDdb(profile);
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: ddb as any });
 
-      await svc.changeTier(TENANT_ID, 'enterprise');
+      await svc.changeTier(TENANT_ID, 'premium');
 
       // Find the CONFIG#features update call
       const featureCall = ddb.update.mock.calls.find((call: any) =>
@@ -87,14 +87,14 @@ describe('TenantLifecycleService', () => {
       expect(featureValues[':ms']).toBe(20);    // maxSubagents
     });
 
-    it('downgrades enterprise → basic: revokes premium features', async () => {
-      const profile = makeProfile(TENANT_ID, 'enterprise');
+    it('downgrades premium → basic: revokes premium features', async () => {
+      const profile = makeProfile(TENANT_ID, 'premium');
       const ddb = makeMockDdb(profile);
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: ddb as any });
 
       const result = await svc.changeTier(TENANT_ID, 'basic');
 
-      expect(result.previousTier).toBe('enterprise');
+      expect(result.previousTier).toBe('premium');
       expect(result.newTier).toBe('basic');
 
       const featureCall = ddb.update.mock.calls.find((call: any) =>
@@ -108,7 +108,7 @@ describe('TenantLifecycleService', () => {
       expect(featureValues[':ms']).toBe(1);      // maxSubagents
     });
 
-    it('upgrades basic → advanced: expands model pool', async () => {
+    it('upgrades basic → advanced: expands model pool (no Opus)', async () => {
       const profile = makeProfile(TENANT_ID, 'basic');
       const ddb = makeMockDdb(profile);
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: ddb as any });
@@ -147,10 +147,10 @@ describe('TenantLifecycleService', () => {
       const ddb = makeMockDdb(profile);
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: ddb as any });
 
-      await svc.changeTier(TENANT_ID, 'enterprise');
+      await svc.changeTier(TENANT_ID, 'premium');
 
-      const enterpriseLimits = TIER_QUOTA_LIMITS['enterprise'];
-      for (const [resource, limit] of Object.entries(enterpriseLimits)) {
+      const premiumLimits = TIER_QUOTA_LIMITS['premium'];
+      for (const [resource, limit] of Object.entries(premiumLimits)) {
         const quotaCall = ddb.update.mock.calls.find((call: any) =>
           call[0]?.Key?.SK === `QUOTA#${resource}`
         );
@@ -158,6 +158,8 @@ describe('TenantLifecycleService', () => {
         expect(quotaCall![0].ExpressionAttributeValues[':limit']).toBe(limit);
       }
     });
+
+
 
     it('throws if tenant not found', async () => {
       const ddb = makeMockDdb(null); // no item returned
@@ -199,14 +201,14 @@ describe('TenantLifecycleService', () => {
       expect(cfg.maxSubagents).toBe(1);
     });
 
-    it('returns dedicated tier with all features enabled', () => {
+    it('returns premium tier with all features enabled', () => {
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: {} as any });
-      const cfg = svc.getTierFeatureConfig('dedicated');
+      const cfg = svc.getTierFeatureConfig('premium');
       expect(cfg.codeInterpreter).toBe(true);
       expect(cfg.browser).toBe(true);
       expect(cfg.cronJobs).toBe(true);
       expect(cfg.selfEditingIac).toBe(true);
-      expect(cfg.maxSubagents).toBe(100);
+      expect(cfg.maxSubagents).toBe(20);
     });
   });
 
@@ -218,9 +220,9 @@ describe('TenantLifecycleService', () => {
       expect(cfg.monthlyBudgetUsd).toBe(100);
     });
 
-    it('returns enterprise tier with full model pool', () => {
+    it('returns premium tier with full model pool', () => {
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: {} as any });
-      const cfg = svc.getTierModelConfig('enterprise');
+      const cfg = svc.getTierModelConfig('premium');
       expect(cfg.allowedModels).toContain('us.anthropic.claude-opus-4-6-v1:0');
       expect(cfg.allowedModels).toContain('us.amazon.nova-micro-v1:0');
       expect(cfg.monthlyBudgetUsd).toBe(5000);
@@ -233,16 +235,16 @@ describe('TenantLifecycleService', () => {
       expect(svc.getTierQuotaLimits('basic')['agent-sessions']).toBe(1);
     });
 
-    it('dedicated tier has maximum quota limits', () => {
+    it('premium tier has maximum quota limits', () => {
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: {} as any });
-      const limits = svc.getTierQuotaLimits('dedicated');
-      expect(limits['agent-sessions']).toBe(100);
-      expect(limits['api-requests']).toBe(1_000_000);
+      const limits = svc.getTierQuotaLimits('premium');
+      expect(limits['agent-sessions']).toBe(20);
+      expect(limits['api-requests']).toBe(100_000);
     });
 
     it('quota limits increase with each tier upgrade', () => {
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: {} as any });
-      const tiers = ['basic', 'advanced', 'enterprise', 'dedicated'] as const;
+      const tiers = ['basic', 'advanced', 'premium'] as const;
       for (let i = 1; i < tiers.length; i++) {
         const prev = svc.getTierQuotaLimits(tiers[i - 1]);
         const curr = svc.getTierQuotaLimits(tiers[i]);

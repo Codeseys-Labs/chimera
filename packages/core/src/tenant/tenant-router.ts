@@ -311,8 +311,8 @@ export class TenantRouter {
     const { tenantId } = context;
     const region = context.tenantConfig.profile.dataRegion;
 
-    // For dedicated tier, route to dedicated AgentCore cluster
-    if (context.tenantConfig.profile.tier === 'dedicated') {
+    // For dedicated deployment model, route to dedicated AgentCore cluster
+    if (context.tenantConfig.profile.deploymentModel === 'dedicated') {
       return `https://${tenantId}.agentcore.${region}.chimera.aws`;
     }
 
