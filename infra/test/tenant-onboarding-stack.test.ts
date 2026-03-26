@@ -2,9 +2,10 @@
  * CDK tests for TenantOnboardingStack
  *
  * Validates the tenant provisioning workflow:
- * - 7 onboarding Lambda functions + 1 Cedar evaluation Lambda (from CedarPolicyConstruct)
- *   plus 1 CDK-managed LogRetentionFunction = 9 total Lambda functions
- * - Step Functions Standard state machine for the onboarding saga
+ * - 7 onboarding Lambda functions + 7 offboarding Lambda functions
+ *   + 1 Cedar evaluation Lambda (from CedarPolicyConstruct)
+ *   + 1 CDK-managed LogRetentionFunction = 16 total Lambda functions
+ * - 2 Step Functions Standard state machines: onboarding saga + offboarding saga
  * - AWS Verified Permissions policy store (STRICT validation mode)
  * - CloudWatch log group for Cedar policy evaluation audit trail
  * - Stack outputs for state machine ARN and Cedar policy store ID
@@ -61,9 +62,9 @@ describe('TenantOnboardingStack', () => {
     });
 
     describe('Lambda Functions', () => {
-      it('should create 9 Lambda functions (8 app + 1 CDK LogRetentionFunction)', () => {
-        // 7 onboarding Lambdas + 1 cedar eval Lambda + 1 CDK LogRetentionFunction singleton
-        template.resourceCountIs('AWS::Lambda::Function', 9);
+      it('should create 16 Lambda functions (15 app + 1 CDK LogRetentionFunction)', () => {
+        // 7 onboarding + 7 offboarding + 1 cedar eval Lambda + 1 CDK LogRetentionFunction singleton
+        template.resourceCountIs('AWS::Lambda::Function', 16);
       });
 
       it('should create app Lambda functions with Node.js 20.x runtime', () => {
@@ -299,8 +300,8 @@ describe('TenantOnboardingStack', () => {
     });
 
     describe('Step Functions State Machine', () => {
-      it('should create exactly 1 state machine', () => {
-        template.resourceCountIs('AWS::StepFunctions::StateMachine', 1);
+      it('should create exactly 2 state machines (onboarding + offboarding)', () => {
+        template.resourceCountIs('AWS::StepFunctions::StateMachine', 2);
       });
 
       it('should create state machine with correct name', () => {
