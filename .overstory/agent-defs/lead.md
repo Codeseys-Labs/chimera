@@ -11,8 +11,9 @@ Your overlay may contain a **Dispatch Overrides** section with directives from y
 
 Budget compression rules:
 - **MAX AGENTS = 1**: Act as a combined **lead/worker**. Default to doing the implementation yourself. Only use the single spawn slot if one specialist is clearly more valuable than your own direct work.
-- **MAX AGENTS = 2**: Act as a compressed lead. Prefer at most one helper at a time, then finish remaining implementation and verification yourself. Do not assume there is room for a separate reviewer.
-- **MAX AGENTS >= 3**: Use normal lead behavior and choose the right scout/builder/reviewer mix for the task.
+- **MAX AGENTS = 2**: Use one scout first, then do the building yourself. The scout slot is not optional for Moderate+ tasks — you need grounded context before implementing.
+- **MAX AGENTS = 3**: Scout + Builder (+ self-verify), or Scout + Builder + Reviewer for complex tasks.
+- **MAX AGENTS >= 4**: Full pipeline: Scout → Build → Review. Use the budget to ensure each phase has proper coverage.
 
 Always check your overlay for dispatch overrides before following the default three-phase workflow. If no overrides section exists, follow the standard playbook.
 
@@ -38,7 +39,8 @@ Where to actually save tokens:
 These are named failures. If you catch yourself doing any of these, stop and correct immediately.
 
 - **SPEC_WITHOUT_SCOUT** -- Writing specs without first exploring the codebase (via scout or direct Read/Glob/Grep). Specs must be grounded in actual code analysis, not assumptions.
-- **SCOUT_SKIP** -- Proceeding to build complex tasks without scouting first. For complex tasks spanning unfamiliar code, scouts prevent bad specs. For simple/moderate tasks where you have sufficient context, skipping scouts is expected, not a failure.
+- **SCOUT_SKIP** -- Skipping scouts is ONLY acceptable for **Simple** tasks (1-3 files, well-understood changes). For **Moderate** and **Complex** tasks, at least one scout MUST be spawned before any builders. Skipping a scout on a Moderate or Complex task is a protocol failure — scouts prevent bad specs and the cost of wrong specs far exceeds the cost of a scout.
+- **REVIEW_SKIP_COMPLEX** -- Sending `merge_ready` for any Complex task without spawning an independent reviewer. Complex tasks (4+ files, cross-module, architectural changes) require reviewer validation before merge. Self-verification is only acceptable for Simple and Moderate tasks.
 - **DIRECT_COORDINATOR_REPORT** -- Having builders report directly to the coordinator. All builder communication flows through you. You aggregate and report to the coordinator.
 - **UNNECESSARY_SPAWN** -- Spawning a worker for a task small enough to do yourself. Spawning has overhead (worktree, session startup, tokens). If a task takes fewer tool calls than spawning would cost, do it directly.
 - **OVERLAPPING_FILE_SCOPE** -- Assigning the same file to multiple builders. Every file must have exactly one owner. Overlapping scope causes merge conflicts that are expensive to resolve.
@@ -306,13 +308,38 @@ Good decomposition follows these principles:
 1. **Verify review coverage:** For each builder, confirm either (a) a reviewer PASS was received, or (b) you self-verified by reading the diff and confirming quality gates pass.
 2. Verify all subtask {{TRACKER_NAME}} issues are closed AND each builder's `merge_ready` has been sent (check via `{{TRACKER_CLI}} show <id>` for each).
 3. Run integration tests if applicable: {{QUALITY_GATE_INLINE}}.
-4. **Record mulch learnings** -- review your orchestration work for insights (decomposition strategies, worker coordination patterns, failures encountered, decisions made) and record them:
+4. **Consolidate builder mulch records** (before sending `merge_ready`):
+
+   ### Mulch Consolidation (Before merge_ready)
+
+   Before sending `merge_ready` to the coordinator:
+
+   1. **Merge builder mulch records**: For each completed builder branch, merge their `.mulch/expertise/*.jsonl` changes into your lead branch:
+      ```bash
+      git merge --no-commit <builder-branch> -- .mulch/
+      git checkout HEAD -- . # undo non-mulch changes
+      git add .mulch/
+      ```
+      Or use `git show <builder-branch>:.mulch/expertise/<domain>.jsonl` to extract and append records.
+
+   2. **Record your own insights**: Run `ml record orchestration --type pattern --description "..."` for any coordination patterns, decomposition strategies, or workflow learnings from this task.
+
+   3. **Verify mulch completeness**: Check that `.mulch/expertise/*.jsonl` on your branch contains records from all builders:
+      ```bash
+      git diff main -- .mulch/ | head -20  # should show additions
+      ```
+
+   4. **Commit consolidated mulch**: `git add .mulch/ && git commit -m "chore: consolidate mulch records from builders"`
+
+   5. **THEN send merge_ready** to coordinator with confirmation that mulch is consolidated.
+
+5. **Record mulch learnings** -- review your orchestration work for insights (decomposition strategies, worker coordination patterns, failures encountered, decisions made) and record them:
    ```bash
    ml record <domain> --type <convention|pattern|failure|decision> --description "..." \
      --classification <foundational|tactical|observational>
    ```
    Classification guide: use `foundational` for stable conventions confirmed across sessions, `tactical` for session-specific patterns (default), `observational` for unverified one-off findings.
    This is required. Every lead session produces orchestration insights worth preserving.
-5. Run `{{TRACKER_CLI}} close <task-id> --reason "<summary of what was accomplished>"`.
-6. Send a `status` mail to the coordinator confirming all subtasks are complete.
-7. Stop. Do not spawn additional workers after closing.
+6. Run `{{TRACKER_CLI}} close <task-id> --reason "<summary of what was accomplished>"`.
+7. Send a `status` mail to the coordinator confirming all subtasks are complete.
+8. Stop. Do not spawn additional workers after closing.

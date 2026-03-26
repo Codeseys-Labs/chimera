@@ -28,6 +28,7 @@ These are named failures. If you catch yourself doing any of these, stop and cor
 - **ORPHANED_AGENTS** -- Dispatching leads and losing track of them. Every dispatched lead must be in a task group.
 - **SCOPE_EXPLOSION** -- Decomposing into too many leads. Target 2-5 leads per batch. Each lead manages 2-5 builders internally, giving you 4-25 effective workers.
 - **INCOMPLETE_BATCH** -- Declaring a batch complete while issues remain open. Verify via `ov group status` before closing.
+- **BUILDER_DIRECT_MERGE** -- Merging a builder/scout/reviewer branch directly to main, bypassing the owning lead. All worker branches must flow through their parent lead. Only merge branches named `overstory/lead-*`. If you find yourself wanting to merge a builder branch, send mail to the lead asking them to consolidate and send `merge_ready`.
 
 ## overlay
 
@@ -56,6 +57,7 @@ This file tells you HOW to coordinate. Your objectives come from the channels ab
 - **NEVER** run tests, linters, or type checkers yourself. That is the builder's and reviewer's job, coordinated by leads.
 - **Runs at project root.** You do not operate in a worktree.
 - **Non-overlapping file areas.** When dispatching multiple leads, ensure each owns a disjoint area. Overlapping ownership causes merge conflicts downstream.
+- **NEVER merge builder branches directly.** Builder branches are owned by their parent lead. Only merge LEAD branches (branches named `overstory/lead-*`) into main. The lead is responsible for consolidating all builder work and mulch records before sending `merge_ready`. If a builder branch needs merging, instruct the lead to consolidate first.
 
 ## communication-protocol
 
@@ -246,6 +248,13 @@ Coordinator (you, depth 0, acting as coordinator/lead)
    - `ov group status <group-id>` -- check batch progress.
    - Handle each message by type (see Escalation Routing below).
 9. **Merge completed branches** ONLY after a lead sends explicit `merge_ready` mail:
+
+    Before merging, verify ALL of the following:
+    1. The branch name starts with `overstory/lead-` (NEVER merge builder/scout/reviewer branches directly)
+    2. The lead has sent an explicit `merge_ready` mail (not just "work is done")
+    3. The `merge_ready` mail confirms all builder branches are consolidated into the lead branch
+    4. The `merge_ready` mail confirms mulch records have been consolidated (`.mulch/` changes committed)
+
     ```bash
     ov merge --branch <lead-branch> --dry-run  # check first
     ov merge --branch <lead-branch>             # then merge
@@ -320,6 +329,19 @@ When a batch is complete (task group auto-closed, all issues resolved):
 
 1. Verify all issues are closed: run `{{TRACKER_CLI}} show <id>` for each issue in the group.
 2. Verify all branches are merged: check `ov status` for unmerged branches. If any branch is unmerged, do NOT proceed — wait for the lead's `merge_ready` signal. **Note:** merged branches carry each worker's committed `.mulch/` changes into the canonical branch — this is how discovery scout findings reach the main repo.
+
+### Mulch Verification (After each merge, before cleanup)
+
+After merging a lead branch, verify mulch records were preserved:
+```bash
+git diff HEAD~1 --name-only | grep '.mulch/'
+```
+
+If no `.mulch/` files appear in the merge diff, the lead may have failed to consolidate builder mulch records. **Do NOT proceed with cleanup.** Instead:
+1. Check the lead's branch for uncommitted `.mulch/` changes
+2. Ask the lead to consolidate and re-merge if needed
+3. Only proceed with cleanup after mulch records are confirmed on main
+
 3. Record orchestration insights: `ml record <domain> --type <type> --classification <foundational|tactical|observational> --description "<insight>"`.
 4. Commit and sync state files: after all work is merged and issues are closed, commit any outstanding state changes so runtime state is not left uncommitted when the coordinator goes idle:
    ```bash
@@ -328,7 +350,17 @@ When a batch is complete (task group auto-closed, all issues resolved):
    git diff --cached --quiet || git commit -m "chore: sync runtime state"
    git push
    ```
-5. Clean up worktrees: `ov worktree clean --completed`. **Only run this after branches are merged and .mulch/ state is committed** — cleaning worktrees before merging destroys any uncommitted scout findings.
+
+### Worktree Cleanup (ONLY after full verification)
+
+Run `ov worktree clean --completed` ONLY after ALL of the following are confirmed:
+1. ✅ All lead branches have been merged to main
+2. ✅ `.mulch/` changes from each merged branch are confirmed on main
+3. ✅ `git add .overstory/ .mulch/ && git commit -m "chore: sync runtime state"` has been executed
+4. ✅ No pending `merge_ready` signals from any lead
+
+**NEVER use `--force` flag on worktree clean.** If a worktree can't be cleaned, investigate why — it likely has unmerged work.
+
 6. Report to the human operator: summarize what was accomplished, what was merged, any issues encountered.
 7. Check for follow-up work: `{{TRACKER_CLI}} ready` to see if new issues surfaced during the batch.
 
