@@ -38,7 +38,7 @@ import { evaluateChange, getPillarsByScore } from './pillar-evaluator.js';
  *   currentState: { capacity: 100, throttlingRate: 0.15 },
  *   desiredState: { capacity: 200, throttlingRate: 0 },
  *   costImpact: 50,
- *   impactedTiers: ['enterprise'],
+ *   impactedTiers: ['premium'],
  * };
  *
  * const presentation = presentTradeoffs(change);
@@ -195,8 +195,8 @@ function generateRecommendationReasoning(
       return `The benefits (${benefitCount} pillars improved) outweigh the trade-offs (${tradeoffCount} pillars impacted). Proceed with awareness of the documented trade-offs.`;
     }
 
-    if (change.impactedTiers?.includes('enterprise')) {
-      return `While there are trade-offs, the impact on enterprise tier tenants justifies this change. Monitor the affected pillars closely.`;
+    if (change.impactedTiers?.includes('premium')) {
+      return `While there are trade-offs, the impact on premium tier tenants justifies this change. Monitor the affected pillars closely.`;
     }
 
     return `This change involves trade-offs across ${tradeoffCount} pillar(s). Review the specific impacts and ensure they align with your priorities before proceeding.`;

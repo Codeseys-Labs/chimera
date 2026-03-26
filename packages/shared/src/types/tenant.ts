@@ -7,7 +7,7 @@
 /**
  * Tenant subscription tier
  */
-export type TenantTier = 'basic' | 'advanced' | 'enterprise' | 'dedicated';
+export type TenantTier = 'basic' | 'advanced' | 'premium';
 
 /**
  * Tenant lifecycle status
@@ -23,6 +23,7 @@ export interface TenantProfile {
   tenantId: string;
   name: string;
   tier: TenantTier;
+  deploymentModel?: 'shared' | 'dedicated'; // defaults to 'shared'
   status: TenantStatus;
   adminEmail: string;
   dataRegion: string;

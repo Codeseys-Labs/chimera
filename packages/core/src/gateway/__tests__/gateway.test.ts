@@ -167,18 +167,11 @@ describe('Tier Configuration', () => {
       expect(isToolAvailable('codebuild', 'advanced')).toBe(false);
     });
 
-    it('should allow all tools for enterprise subscription', () => {
-      expect(isToolAvailable('lambda', 'enterprise')).toBe(true);
-      expect(isToolAvailable('sqs', 'enterprise')).toBe(true);
-      expect(isToolAvailable('bedrock', 'enterprise')).toBe(true);
-      expect(isToolAvailable('config-scanner', 'enterprise')).toBe(true);
-    });
-
-    it('should allow all tools for dedicated subscription', () => {
-      expect(isToolAvailable('lambda', 'dedicated')).toBe(true);
-      expect(isToolAvailable('sqs', 'dedicated')).toBe(true);
-      expect(isToolAvailable('bedrock', 'dedicated')).toBe(true);
-      expect(isToolAvailable('config-scanner', 'dedicated')).toBe(true);
+    it('should allow all tools for premium subscription', () => {
+      expect(isToolAvailable('lambda', 'premium')).toBe(true);
+      expect(isToolAvailable('sqs', 'premium')).toBe(true);
+      expect(isToolAvailable('bedrock', 'premium')).toBe(true);
+      expect(isToolAvailable('config-scanner', 'premium')).toBe(true);
     });
   });
 
@@ -202,13 +195,8 @@ describe('Tier Configuration', () => {
       expect(tiers).not.toContain(3);
     });
 
-    it('should return all 25 tools for enterprise subscription', () => {
-      const tools = getAvailableTools('enterprise');
-      expect(tools.length).toBe(25);
-    });
-
-    it('should return all 25 tools for dedicated subscription', () => {
-      const tools = getAvailableTools('dedicated');
+    it('should return all 25 tools for premium subscription', () => {
+      const tools = getAvailableTools('premium');
       expect(tools.length).toBe(25);
     });
   });
@@ -266,20 +254,12 @@ describe('Tool Registry', () => {
       expect(advancedTools.length).toBeGreaterThan(basicTools.length);
     });
 
-    it('should return all tools for enterprise tier', () => {
-      const enterpriseTools = registry.getToolsForTier('enterprise');
-      expect(enterpriseTools.length).toBeGreaterThan(0);
-      // Enterprise should have all 25 tools (significantly more than basic)
+    it('should return all tools for premium tier', () => {
+      const premiumTools = registry.getToolsForTier('premium');
+      expect(premiumTools.length).toBeGreaterThan(0);
+      // Premium should have all 25 tools (significantly more than basic)
       const basicTools = registry.getToolsForTier('basic');
-      expect(enterpriseTools.length).toBeGreaterThan(basicTools.length);
-    });
-
-    it('should return all tools for dedicated tier', () => {
-      const dedicatedTools = registry.getToolsForTier('dedicated');
-      expect(dedicatedTools.length).toBeGreaterThan(0);
-      // Dedicated should have all 25 tools (same as enterprise)
-      const enterpriseTools = registry.getToolsForTier('enterprise');
-      expect(dedicatedTools.length).toBe(enterpriseTools.length);
+      expect(premiumTools.length).toBeGreaterThan(basicTools.length);
     });
 
     it('should return tools for specific identifier', () => {
@@ -434,7 +414,7 @@ describe('Tool Loader', () => {
     it('should respect deniedTools list', () => {
       const context: TenantToolContext = {
         tenantId: 'tenant-123',
-        subscriptionTier: 'enterprise',
+        subscriptionTier: 'premium',
         deniedTools: ['lambda'],
       };
       expect(loader.isToolAvailable('lambda', context)).toBe(false);
@@ -497,13 +477,11 @@ describe('Tool Loader', () => {
     it('should return identifiers for each tier', () => {
       const basicIds = loader.getAvailableIdentifiers('basic');
       const advancedIds = loader.getAvailableIdentifiers('advanced');
-      const enterpriseIds = loader.getAvailableIdentifiers('enterprise');
-      const dedicatedIds = loader.getAvailableIdentifiers('dedicated');
+      const premiumIds = loader.getAvailableIdentifiers('premium');
 
       expect(basicIds.length).toBe(11); // 5 tier1 + 6 discovery
       expect(advancedIds.length).toBe(16); // 5+5+6
-      expect(enterpriseIds.length).toBe(25); // all
-      expect(dedicatedIds.length).toBe(25); // all
+      expect(premiumIds.length).toBe(25); // all
     });
   });
 });

@@ -12,7 +12,7 @@ import type { IaCChangeType } from '../evolution/types';
  */
 export interface CedarProvisioningContext {
   tenantId: string;
-  tier: 'basic' | 'advanced' | 'enterprise';
+  tier: 'basic' | 'advanced' | 'premium';
   changeType: IaCChangeType;
   targetResourceType: string;
   estimatedMonthlyCostDelta: number;
@@ -37,7 +37,7 @@ export interface CedarProvisioningResult {
  * Tenant tier configuration
  */
 export interface TenantTierConfig {
-  tier: 'basic' | 'advanced' | 'enterprise';
+  tier: 'basic' | 'advanced' | 'premium';
   maxMonthlyCost: number;
   autoApproveCostThreshold: number;
   maxDeploymentsPerHour: number;
@@ -66,8 +66,8 @@ export class CedarProvisioningPolicies {
       maxDeploymentsPerDay: 20,
       allowedRegions: ['us-east-1', 'us-west-2', 'eu-west-1'],
     },
-    enterprise: {
-      tier: 'enterprise',
+    premium: {
+      tier: 'premium',
       maxMonthlyCost: 10000,
       autoApproveCostThreshold: 200,
       maxDeploymentsPerHour: 10,
@@ -343,7 +343,7 @@ when {
   (principal.tenantId.tier == "advanced" &&
    context.currentMonthlyCost + context.estimatedMonthlyCostDelta < 2000.0)
   ||
-  (principal.tenantId.tier == "enterprise" &&
+  (principal.tenantId.tier == "premium" &&
    context.currentMonthlyCost + context.estimatedMonthlyCostDelta < 10000.0)
 };
 
@@ -409,7 +409,7 @@ when {
   /**
    * Get tier configuration
    */
-  getTierConfig(tier: 'basic' | 'advanced' | 'enterprise'): TenantTierConfig {
+  getTierConfig(tier: 'basic' | 'advanced' | 'premium'): TenantTierConfig {
     return this.tierConfigs[tier];
   }
 }

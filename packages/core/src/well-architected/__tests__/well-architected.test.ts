@@ -239,13 +239,13 @@ describe('InfrastructureChange structure', () => {
         throttling_rate: 0,
       },
       costImpact: 50, // $50/month increase
-      impactedTiers: ['pro', 'enterprise'],
+      impactedTiers: ['advanced', 'premium'],
       proposedBy: 'agent-capacity-monitor',
     };
 
     expect(change.type).toBe('CAPACITY_INCREASE');
     expect(change.costImpact).toBe(50);
-    expect(change.impactedTiers).toContain('pro');
+    expect(change.impactedTiers).toContain('advanced');
   });
 
   it('should describe new resource creation', () => {

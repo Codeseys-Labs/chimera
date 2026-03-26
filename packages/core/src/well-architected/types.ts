@@ -185,7 +185,7 @@ export interface InfrastructureChange {
   /**
    * Optional: Which tenant tier(s) are impacted
    */
-  impactedTiers?: ('basic' | 'pro' | 'enterprise')[];
+  impactedTiers?: ('basic' | 'advanced' | 'premium')[];
 
   /**
    * Optional: Agent proposing this change

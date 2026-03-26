@@ -19,7 +19,7 @@ export function registerTenantCommands(program: Command): void {
     .command('create')
     .description('Create a new tenant')
     .option('-n, --name <name>', 'Tenant name')
-    .option('-t, --tier <tier>', 'Subscription tier (basic|advanced|enterprise)', 'basic')
+    .option('-t, --tier <tier>', 'Subscription tier (basic|advanced|premium)', 'basic')
     .option('--region <region>', 'AWS region', 'us-east-1')
     .action(async (options) => {
       const spinner = ora('Creating tenant').start();
@@ -40,7 +40,7 @@ export function registerTenantCommands(program: Command): void {
               type: 'list',
               name: 'tier',
               message: 'Subscription tier:',
-              choices: ['basic', 'advanced', 'enterprise'],
+              choices: ['basic', 'advanced', 'premium'],
               default: tier,
             },
             {
