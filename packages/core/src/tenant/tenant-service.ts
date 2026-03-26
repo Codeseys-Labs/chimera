@@ -193,8 +193,7 @@ export class TenantService {
     const maxSubagentsByTier: Record<TenantTier, number> = {
       basic: 1,
       advanced: 5,
-      enterprise: 20,
-      dedicated: 100,
+      premium: 20,
     };
 
     // Create PROFILE item
@@ -217,8 +216,8 @@ export class TenantService {
       SK: 'CONFIG#features',
       codeInterpreter: params.tier !== 'basic',
       browser: params.tier !== 'basic',
-      cronJobs: params.tier === 'enterprise' || params.tier === 'dedicated',
-      selfEditingIac: params.tier === 'enterprise' || params.tier === 'dedicated',
+      cronJobs: params.tier === 'premium',
+      selfEditingIac: params.tier === 'premium',
       maxSubagents: maxSubagentsByTier[params.tier],
       allowedModelProviders: ['bedrock'],
       mcpToolsEnabled: true,
@@ -233,13 +232,7 @@ export class TenantService {
         'us.anthropic.claude-sonnet-4-6-v1:0',
         'us.anthropic.claude-opus-4-6-v1:0',
       ],
-      enterprise: [
-        'us.amazon.nova-micro-v1:0',
-        'us.amazon.nova-lite-v1:0',
-        'us.anthropic.claude-sonnet-4-6-v1:0',
-        'us.anthropic.claude-opus-4-6-v1:0',
-      ],
-      dedicated: [
+      premium: [
         'us.amazon.nova-micro-v1:0',
         'us.amazon.nova-lite-v1:0',
         'us.anthropic.claude-sonnet-4-6-v1:0',
@@ -259,7 +252,7 @@ export class TenantService {
         default: 'us.anthropic.claude-sonnet-4-6-v1:0',
       },
       fallbackChain: ['us.anthropic.claude-sonnet-4-6-v1:0'],
-      monthlyBudgetUsd: params.tier === 'basic' ? 100 : params.tier === 'advanced' ? 1000 : 5000,
+      monthlyBudgetUsd: params.tier === 'basic' ? 100 : params.tier === 'advanced' ? 1000 : 5000, // premium = 5000
       costAlertThreshold: 0.8,
       routingMode: 'auto', // Default to auto-routing with Thompson Sampling
       availableModelsWithCosts: [
