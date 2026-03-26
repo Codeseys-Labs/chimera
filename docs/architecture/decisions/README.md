@@ -58,6 +58,16 @@ Each ADR follows this structure:
 - [ADR-022](./ADR-022-skipLibCheck-cdk-synth.md) - skipLibCheck for CDK Synthesis Performance
 - [ADR-023](./ADR-023-batched-createcommit-codecommit.md) - Batched CreateCommit for CodeCommit Deployments
 
+### Modernization (Stream Research)
+
+- [ADR-024](./ADR-024-standardize-tier-naming.md) - Standardize Tenant Tier Naming
+- [ADR-025](./ADR-025-cdk-nag-compliance.md) - CDK Nag Compliance Scanning
+- [ADR-026](./ADR-026-l3-construct-library.md) - L3 Construct Library for Chimera Conventions
+- [ADR-027](./ADR-027-react-vite-shadcn-frontend.md) - React + Vite + shadcn/ui for Web Frontend
+- [ADR-028](./ADR-028-amplify-gen2-auth.md) - AWS Amplify Gen 2 for Frontend Authentication
+- [ADR-029](./ADR-029-bun-builtin-apis.md) - Bun Built-in APIs — Named Exports and Node-Server Adapter
+- [ADR-030](./ADR-030-unified-chimera-toml.md) - Unified chimera.toml Configuration
+
 ## Supersession Chain
 
 ```
@@ -76,7 +86,7 @@ None yet - all ADRs are currently active (Status: Accepted)
 
 When adding a new ADR:
 
-1. Use the next sequential number (ADR-019, ADR-020, etc.)
+1. Use the next sequential number (ADR-031, ADR-032, etc.)
 2. Follow the standard template structure
 3. Link related ADRs in "Related Decisions" section
 4. Update this README index
@@ -84,7 +94,7 @@ When adding a new ADR:
 
 ## Metadata
 
-- **Total ADRs**: 23
+- **Total ADRs**: 30
 - **Status**: All Accepted
-- **Last Updated**: 2026-03-24
+- **Last Updated**: 2026-03-26
 - **Authority**: This directory is the canonical source for architectural decisions
