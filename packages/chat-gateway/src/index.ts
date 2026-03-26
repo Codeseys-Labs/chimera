@@ -8,7 +8,7 @@
  */
 
 // Hono app (for embedding in other servers)
-export { default as app } from './server';
+export { app } from './server';
 
 // Types
 export * from './types';
