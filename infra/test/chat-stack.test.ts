@@ -2,10 +2,9 @@
  * CDK tests for ChatStack
  *
  * Validates the chat gateway infrastructure:
- * - S3 bucket for static UI assets (private, OAI-accessible)
- * - CloudFront distribution with S3 default origin and ALB API behaviors
- * - OAI (Origin Access Identity) for S3 access
- * - SPA error responses (403/404 -> index.html)
+ * - CloudFront distribution with ALB as default origin (no S3 static assets)
+ * - ALB listeners and target groups
+ * - SPA error responses removed (handled by FrontendStack)
  * - Stack outputs for all resources
  */
 
@@ -68,100 +67,60 @@ describe('ChatStack', () => {
       template = Template.fromStack(stack);
     });
 
-    describe('S3 Static Assets Bucket', () => {
-      it('should create an S3 bucket with all public access blocked', () => {
-        template.hasResourceProperties('AWS::S3::Bucket', {
-          PublicAccessBlockConfiguration: {
-            BlockPublicAcls: true,
-            BlockPublicPolicy: true,
-            IgnorePublicAcls: true,
-            RestrictPublicBuckets: true,
-          },
-        });
-      });
-
-      it('should not enable versioning in dev', () => {
-        const buckets = template.findResources('AWS::S3::Bucket');
-        // The static assets bucket in dev should not have versioning
-        const staticBucket = Object.values(buckets).find((b: any) =>
-          b.Properties?.PublicAccessBlockConfiguration?.BlockPublicAcls === true &&
-          b.Properties?.VersioningConfiguration === undefined
-        );
-        expect(staticBucket).toBeDefined();
-      });
-    });
-
-    describe('CloudFront OAI', () => {
-      it('should create an Origin Access Identity', () => {
-        template.resourceCountIs('AWS::CloudFront::CloudFrontOriginAccessIdentity', 1);
-
-        template.hasResourceProperties('AWS::CloudFront::CloudFrontOriginAccessIdentity', {
-          CloudFrontOriginAccessIdentityConfig: {
-            Comment: 'OAI for Chimera static assets - dev',
-          },
-        });
-      });
-    });
-
     describe('CloudFront Distribution', () => {
       it('should create a CloudFront distribution', () => {
         template.resourceCountIs('AWS::CloudFront::Distribution', 1);
       });
 
-      it('should have S3 as the default origin', () => {
+      it('should NOT create an S3 bucket (static assets moved to FrontendStack)', () => {
+        // ChatStack no longer owns any S3 buckets
+        template.resourceCountIs('AWS::S3::Bucket', 0);
+      });
+
+      it('should NOT create an OAI (no S3 origin)', () => {
+        template.resourceCountIs('AWS::CloudFront::CloudFrontOriginAccessIdentity', 0);
+      });
+
+      it('should have ALB as the default origin', () => {
         const distributions = template.findResources('AWS::CloudFront::Distribution');
         const dist = Object.values(distributions)[0] as any;
-        const origins = dist.Properties.DistributionConfig.Origins;
+        const defaultBehavior = dist.Properties.DistributionConfig.DefaultCacheBehavior;
 
-        // At least one origin should be an S3 bucket (has S3OriginConfig)
-        const s3Origin = origins.find((o: any) => o.S3OriginConfig !== undefined);
-        expect(s3Origin).toBeDefined();
+        // Default behavior must NOT point to an S3 origin (no S3OriginConfig on default)
+        // The origin should be an ALB (CustomOriginConfig)
+        const origins = dist.Properties.DistributionConfig.Origins;
+        const defaultOriginId = defaultBehavior.TargetOriginId;
+        const defaultOrigin = origins.find((o: any) => o.Id === defaultOriginId);
+        expect(defaultOrigin.CustomOriginConfig).toBeDefined();
+        expect(defaultOrigin.S3OriginConfig).toBeUndefined();
       });
 
-      it('should have ALB as an additional origin', () => {
+      it('should have caching disabled on the default (ALB) behavior', () => {
         const distributions = template.findResources('AWS::CloudFront::Distribution');
         const dist = Object.values(distributions)[0] as any;
-        const origins = dist.Properties.DistributionConfig.Origins;
+        const defaultBehavior = dist.Properties.DistributionConfig.DefaultCacheBehavior;
 
-        // At least one origin should be an ALB (has CustomOriginConfig)
-        const albOrigin = origins.find((o: any) => o.CustomOriginConfig !== undefined);
-        expect(albOrigin).toBeDefined();
+        // CACHING_DISABLED managed policy ID
+        expect(defaultBehavior.CachePolicyId).toBe('4135ea2d-6df8-44a3-9df3-4b5a84be39ad');
       });
 
-      it('should set defaultRootObject to index.html', () => {
-        template.hasResourceProperties('AWS::CloudFront::Distribution', {
-          DistributionConfig: {
-            DefaultRootObject: 'index.html',
-          },
-        });
+      it('should redirect HTTP to HTTPS', () => {
+        const distributions = template.findResources('AWS::CloudFront::Distribution');
+        const dist = Object.values(distributions)[0] as any;
+        const defaultBehavior = dist.Properties.DistributionConfig.DefaultCacheBehavior;
+
+        expect(defaultBehavior.ViewerProtocolPolicy).toBe('redirect-to-https');
       });
 
-      it('should have custom error response for 403 -> index.html', () => {
-        template.hasResourceProperties('AWS::CloudFront::Distribution', {
-          DistributionConfig: {
-            CustomErrorResponses: Match.arrayWith([
-              Match.objectLike({
-                ErrorCode: 403,
-                ResponseCode: 200,
-                ResponsePagePath: '/index.html',
-              }),
-            ]),
-          },
-        });
-      });
+      it('should NOT have SPA error responses (403/404 -> index.html)', () => {
+        const distributions = template.findResources('AWS::CloudFront::Distribution');
+        const dist = Object.values(distributions)[0] as any;
+        const errorResponses = dist.Properties.DistributionConfig.CustomErrorResponses ?? [];
 
-      it('should have custom error response for 404 -> index.html', () => {
-        template.hasResourceProperties('AWS::CloudFront::Distribution', {
-          DistributionConfig: {
-            CustomErrorResponses: Match.arrayWith([
-              Match.objectLike({
-                ErrorCode: 404,
-                ResponseCode: 200,
-                ResponsePagePath: '/index.html',
-              }),
-            ]),
-          },
-        });
+        const spaErrors = errorResponses.filter(
+          (e: any) => (e.ErrorCode === 403 || e.ErrorCode === 404) && e.ResponsePagePath === '/index.html',
+        );
+        expect(spaErrors).toHaveLength(0);
       });
 
       it('should have custom error responses for 500, 502, 503, 504', () => {
@@ -177,12 +136,10 @@ describe('ChatStack', () => {
         });
       });
 
-      it('should redirect HTTP to HTTPS', () => {
+      it('should NOT set defaultRootObject', () => {
         const distributions = template.findResources('AWS::CloudFront::Distribution');
         const dist = Object.values(distributions)[0] as any;
-        const defaultBehavior = dist.Properties.DistributionConfig.DefaultCacheBehavior;
-
-        expect(defaultBehavior.ViewerProtocolPolicy).toBe('redirect-to-https');
+        expect(dist.Properties.DistributionConfig.DefaultRootObject).toBeUndefined();
       });
     });
 
@@ -205,20 +162,10 @@ describe('ChatStack', () => {
     });
 
     describe('Stack Outputs', () => {
-      it('should export static assets bucket name', () => {
-        template.hasOutput('StaticAssetsBucketName', {
-          Export: {
-            Name: 'TestChatStack-StaticAssetsBucketName',
-          },
-        });
-      });
-
-      it('should export static assets bucket ARN', () => {
-        template.hasOutput('StaticAssetsBucketArn', {
-          Export: {
-            Name: 'TestChatStack-StaticAssetsBucketArn',
-          },
-        });
+      it('should NOT export static assets bucket outputs', () => {
+        const outputs = template.findOutputs('*');
+        expect(outputs['StaticAssetsBucketName']).toBeUndefined();
+        expect(outputs['StaticAssetsBucketArn']).toBeUndefined();
       });
 
       it('should export CloudFront distribution ID', () => {
@@ -254,32 +201,6 @@ describe('ChatStack', () => {
         skillsTable,
       });
       template = Template.fromStack(stack);
-    });
-
-    it('should enable versioning on static assets bucket in prod', () => {
-      template.hasResourceProperties('AWS::S3::Bucket', {
-        PublicAccessBlockConfiguration: {
-          BlockPublicAcls: true,
-          BlockPublicPolicy: true,
-          IgnorePublicAcls: true,
-          RestrictPublicBuckets: true,
-        },
-        VersioningConfiguration: {
-          Status: 'Enabled',
-        },
-      });
-    });
-
-    it('should use RETAIN removal policy for static bucket in prod', () => {
-      const buckets = template.findResources('AWS::S3::Bucket');
-      // Find the static assets bucket (has PublicAccessBlockConfiguration)
-      const staticBucket = Object.values(buckets).find((b: any) =>
-        b.Properties?.PublicAccessBlockConfiguration?.BlockPublicAcls === true
-      ) as any;
-
-      expect(staticBucket).toBeDefined();
-      expect(staticBucket.DeletionPolicy).toBe('Retain');
-      expect(staticBucket.UpdateReplacePolicy).toBe('Retain');
     });
 
     it('should use PRICE_CLASS_ALL in prod', () => {

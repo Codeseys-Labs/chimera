@@ -7,7 +7,6 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { serveStatic } from '@hono/node-server/serve-static';
 import { extractTenantContext } from './middleware/tenant';
 import { rateLimitMiddleware, recordMetricsMiddleware } from './middleware/rate-limit';
 import authRouter from './routes/auth';
@@ -22,9 +21,6 @@ const app = new Hono();
 
 // Middleware
 app.use('*', cors());
-
-// Serve static files for web chat UI (if public directory exists)
-app.use('/static/*', serveStatic({ root: './public' }));
 
 // Health check route (no auth required)
 app.route('/', healthRouter);
