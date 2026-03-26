@@ -298,7 +298,7 @@ export class PipelineStack extends cdk.Stack {
           logGroup: deployLogGroup,
         },
       },
-      timeout: cdk.Duration.minutes(30),
+      timeout: cdk.Duration.minutes(60),
     });
 
     // Grant CDK deploy permissions — CodeBuild assumes CDK bootstrap roles
