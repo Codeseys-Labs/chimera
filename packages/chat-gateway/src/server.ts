@@ -80,7 +80,17 @@ app.onError((err, c) => {
   return c.json(errorResponse, 500);
 });
 
-// Start server (only when run directly, not when imported for tests)
+// Named export for library/test use.
+// NOTE: Do NOT add `export default app` here. Bun detects a default export
+// with a .fetch method and auto-starts a built-in HTTP server ("Started
+// development server"), which races with the explicit serve() below and causes
+// "port already in use" crashes in the Docker container.
+export { app };
+
+// Start server only when this module is the entry point (not when imported by tests).
+// In Node.js CJS (jest/ts-jest), require.main !== module when imported — correct.
+// In the Bun bundle (bun server.js), Bun's CJS compat sets require.main === module
+// for the entry file — correct, server starts exactly once.
 if (require.main === module) {
   (async () => {
     const { serve } = await import('@hono/node-server');
@@ -90,13 +100,10 @@ if (require.main === module) {
       fetch: app.fetch,
       port: Number(PORT),
     }, (info) => {
-      console.log(`🚀 Chimera chat gateway listening on port ${info.port}`);
+      console.log(`Chimera chat gateway listening on port ${info.port}`);
       console.log(`   Health: http://localhost:${info.port}/health`);
       console.log(`   Chat (streaming): POST http://localhost:${info.port}/chat/stream`);
       console.log(`   Chat (sync): POST http://localhost:${info.port}/chat/message`);
     });
   })();
 }
-
-// Export for testing
-export default app;
