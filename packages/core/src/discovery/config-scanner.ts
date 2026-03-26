@@ -24,6 +24,7 @@ import type {
   ResourceInventoryEntry,
   AWSResourceType,
   AWSRegion,
+  ResourceStatus,
 } from './types';
 import { DiscoveryError } from './types';
 
@@ -111,10 +112,10 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
     callback: async (input) => {
       try {
         const filter: ResourceFilter = {
-          resourceTypes: input.resourceTypes,
+          resourceTypes: input.resourceTypes as AWSResourceType[] | undefined,
           regions: input.regions as AWSRegion[] | undefined,
           tags: input.tags,
-          statuses: input.statuses,
+          statuses: input.statuses as ResourceStatus[] | undefined,
         };
 
         // Build SQL query from filters

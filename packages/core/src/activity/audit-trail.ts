@@ -537,7 +537,7 @@ export class AuditTrail {
 
     const queryResult = await this.config.dynamodb.query(queryParams);
 
-    return (queryResult.Items || []).map((item: ActionLogItem) => item.actionLog);
+    return (queryResult.Items || []).map((item) => (item as ActionLogItem).actionLog);
   }
 
   /**
@@ -584,7 +584,7 @@ export class AuditTrail {
 
     const result = await this.config.dynamodb.query(queryParams);
 
-    return (result.Items || []).map((item: ActionLogItem) => item.actionLog);
+    return (result.Items || []).map((item) => (item as ActionLogItem).actionLog);
   }
 
   /**
@@ -636,7 +636,7 @@ export class AuditTrail {
 
     const result = await this.config.dynamodb.query(queryParams);
 
-    return (result.Items || []).map((item: ActionLogItem) => item.actionLog);
+    return (result.Items || []).map((item) => (item as ActionLogItem).actionLog);
   }
 
   /**
@@ -728,6 +728,6 @@ export class AuditTrail {
 
     const result = await this.config.dynamodb.query(params);
 
-    return (result.Items || []).map((item: ActionLogItem) => item.actionLog);
+    return (result.Items || []).map((item) => (item as ActionLogItem).actionLog);
   }
 }

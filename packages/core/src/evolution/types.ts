@@ -623,3 +623,19 @@ export interface EvolutionConfig {
   /** Memory GC stale threshold (days) */
   memoryStaleThresholdDays: number;
 }
+
+/** Cost per 1K tokens by model ID (USD) */
+export const BEDROCK_MODELS: Record<string, number> = {
+  'anthropic.claude-3-haiku-20240307-v1:0': 0.00025,
+  'anthropic.claude-3-sonnet-20240229-v1:0': 0.003,
+  'anthropic.claude-3-5-sonnet-20240620-v1:0': 0.003,
+  'anthropic.claude-3-5-sonnet-20241022-v2:0': 0.003,
+  'anthropic.claude-3-opus-20240229-v1:0': 0.015,
+  'anthropic.claude-3-5-haiku-20241022-v1:0': 0.0008,
+  'us.anthropic.claude-3-haiku-20240307-v1:0': 0.00025,
+  'us.anthropic.claude-3-sonnet-20240229-v1:0': 0.003,
+  'us.anthropic.claude-3-5-sonnet-20240620-v1:0': 0.003,
+  'us.anthropic.claude-3-5-sonnet-20241022-v2:0': 0.003,
+  'us.anthropic.claude-3-opus-20240229-v1:0': 0.015,
+  'us.anthropic.claude-3-5-haiku-20241022-v1:0': 0.0008,
+};

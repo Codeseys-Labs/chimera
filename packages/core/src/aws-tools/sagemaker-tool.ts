@@ -119,7 +119,7 @@ export function createSageMakerTools(clientFactory: AWSClientFactory) {
             VariantName: v.variantName,
             ModelName: v.modelName,
             InitialInstanceCount: v.initialInstanceCount,
-            InstanceType: v.instanceType as InstanceType,
+            InstanceType: v.instanceType as any,
             InitialVariantWeight: v.initialVariantWeight ?? 1.0,
           })),
           Tags: tags,
