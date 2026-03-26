@@ -9,7 +9,8 @@ import { TenantConfig } from '@chimera/shared';
  */
 export function createMockTenantConfig(
   tenantId: string,
-  tier: 'basic' | 'advanced' | 'enterprise' | 'dedicated' = 'advanced'
+  tier: 'basic' | 'advanced' | 'premium' = 'advanced',
+  deploymentModel: 'shared' | 'dedicated' = 'shared'
 ): TenantConfig {
   return {
     profile: {
@@ -18,6 +19,7 @@ export function createMockTenantConfig(
       tenantId,
       name: `${tenantId} Corp`,
       tier,
+      deploymentModel,
       status: 'ACTIVE',
       adminEmail: `admin@${tenantId}.com`,
       dataRegion: 'us-east-1',
@@ -29,9 +31,9 @@ export function createMockTenantConfig(
       SK: 'CONFIG#features',
       codeInterpreter: true,
       browser: true,
-      cronJobs: tier === 'enterprise' || tier === 'dedicated',
-      selfEditingIac: tier === 'enterprise' || tier === 'dedicated',
-      maxSubagents: tier === 'basic' ? 1 : tier === 'advanced' ? 5 : tier === 'enterprise' ? 20 : 100,
+      cronJobs: tier === 'premium',
+      selfEditingIac: tier === 'premium',
+      maxSubagents: tier === 'basic' ? 1 : tier === 'advanced' ? 5 : 20,
       allowedModelProviders: ['bedrock'],
       mcpToolsEnabled: true,
     },

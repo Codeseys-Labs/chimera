@@ -106,8 +106,7 @@ export const TOOL_TIER_MAP: Record<ToolIdentifier, ToolTier | 'discovery'> = {
 const TENANT_TIER_ACCESS: Record<TenantTier, ToolTier> = {
   basic: 1,
   advanced: 2,
-  enterprise: 3,
-  dedicated: 3,
+  premium: 3,
 };
 
 /**

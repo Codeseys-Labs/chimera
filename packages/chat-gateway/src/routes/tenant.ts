@@ -87,7 +87,7 @@ function canAccessTenant(c: Context, targetTenantId: string): boolean {
  * {
  *   "tenantId": "acme-corp",
  *   "name": "ACME Corporation",
- *   "tier": "enterprise",
+ *   "tier": "premium",
  *   "adminEmail": "admin@acme.com",
  *   "dataRegion": "us-east-1"
  * }
@@ -119,7 +119,7 @@ router.post('/', async (c: Context) => {
     }
 
     // Validate tier
-    const validTiers: TenantTier[] = ['basic', 'advanced', 'enterprise', 'dedicated'];
+    const validTiers: TenantTier[] = ['basic', 'advanced', 'premium'];
     if (!validTiers.includes(tier)) {
       return c.json({
         error: {
@@ -407,7 +407,7 @@ router.get('/query/tier/:tier', async (c: Context) => {
     const status = c.req.query('status');
 
     // Validate tier
-    const validTiers: TenantTier[] = ['basic', 'advanced', 'enterprise', 'dedicated'];
+    const validTiers: TenantTier[] = ['basic', 'advanced', 'premium'];
     if (!validTiers.includes(tier as TenantTier)) {
       return c.json({
         error: {

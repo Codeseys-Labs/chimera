@@ -60,19 +60,12 @@ const TIER_FEATURES: Record<TenantTier, Omit<TenantFeatureConfig, 'PK' | 'SK' | 
     selfEditingIac: false,
     maxSubagents: 5,
   },
-  enterprise: {
+  premium: {
     codeInterpreter: true,
     browser: true,
     cronJobs: true,
     selfEditingIac: true,
     maxSubagents: 20,
-  },
-  dedicated: {
-    codeInterpreter: true,
-    browser: true,
-    cronJobs: true,
-    selfEditingIac: true,
-    maxSubagents: 100,
   },
 };
 
@@ -97,16 +90,7 @@ const TIER_MODELS: Record<TenantTier, { allowedModels: string[]; monthlyBudgetUs
     ],
     monthlyBudgetUsd: 1000,
   },
-  enterprise: {
-    allowedModels: [
-      'us.amazon.nova-micro-v1:0',
-      'us.amazon.nova-lite-v1:0',
-      'us.anthropic.claude-sonnet-4-6-v1:0',
-      'us.anthropic.claude-opus-4-6-v1:0',
-    ],
-    monthlyBudgetUsd: 5000,
-  },
-  dedicated: {
+  premium: {
     allowedModels: [
       'us.amazon.nova-micro-v1:0',
       'us.amazon.nova-lite-v1:0',
@@ -129,15 +113,10 @@ export const TIER_QUOTA_LIMITS: Record<TenantTier, Record<string, number>> = {
     'api-requests': 10_000,
     'tokens-monthly': 10_000_000,
   },
-  enterprise: {
+  premium: {
     'agent-sessions': 20,
     'api-requests': 100_000,
     'tokens-monthly': 100_000_000,
-  },
-  dedicated: {
-    'agent-sessions': 100,
-    'api-requests': 1_000_000,
-    'tokens-monthly': 1_000_000_000,
   },
 };
 
