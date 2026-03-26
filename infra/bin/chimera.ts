@@ -11,6 +11,7 @@ import { PipelineStack } from '../lib/pipeline-stack';
 import { OrchestrationStack } from '../lib/orchestration-stack';
 import { EvolutionStack } from '../lib/evolution-stack';
 import { EmailStack } from '../lib/email-stack';
+import { FrontendStack } from '../lib/frontend-stack';
 
 const app = new cdk.App();
 const envName = app.node.tryGetContext('environment') ?? 'dev';
@@ -196,8 +197,16 @@ const emailStack = new EmailStack(app, `${prefix}-Email`, {
 emailStack.addDependency(dataStack);
 emailStack.addDependency(orchestrationStack);
 
+// --- Stack 13: Frontend ---
+// S3 + CloudFront for the React SPA. No dependencies on other stacks.
+const frontendStack = new FrontendStack(app, `${prefix}-Frontend`, {
+  env: envConfig,
+  description: 'Chimera frontend: S3 + CloudFront for React SPA',
+  envName,
+});
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack, emailStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack, emailStack, frontendStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -216,5 +225,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // Stack 10 (EvolutionStack): evolution state table ARN/name, artifacts bucket ARN/name, state machine ARNs
 // Stack 11 (TenantOnboardingStack): Cedar policy store ID/ARN, onboarding state machine ARN, evaluation Lambda ARN
 // Stack 12 (EmailStack): inbound email bucket name, email KMS key ARN, parser/sender queue URLs, Lambda ARNs, rule set name
+// Stack 13 (FrontendStack): S3 bucket name/ARN, CloudFront distribution ID/domain, frontend URL
 
 app.synth();

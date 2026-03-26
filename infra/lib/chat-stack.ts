@@ -8,7 +8,6 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
-import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import { Construct } from 'constructs';
 
@@ -34,7 +33,6 @@ export interface ChatStackProps extends cdk.StackProps {
  * (@chimera/sse-bridge).
  *
  * Architecture:
- * - CloudFront -> S3 (static assets: HTML, JS, CSS)
  * - CloudFront -> ALB -> ECS Fargate (API routes: /chat/*, /auth/*, etc.)
  * - Auto-scaling based on CPU and memory
  * - CloudWatch Logs for application and access logs
@@ -52,7 +50,6 @@ export class ChatStack extends cdk.Stack {
   public readonly taskDefinition: ecs.FargateTaskDefinition;
   public readonly targetGroup: elbv2.ApplicationTargetGroup;
   public readonly distribution: cloudfront.Distribution;
-  public readonly staticAssetsBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: ChatStackProps) {
     super(scope, id, props);
@@ -310,48 +307,14 @@ export class ChatStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // S3 Bucket for Static UI Assets
-    // Stores HTML, JS, CSS files served via CloudFront (not ALB).
-    // OAI (Origin Access Identity) grants CloudFront read-only S3 access
-    // without making the bucket public.
-    // ======================================================================
-    this.staticAssetsBucket = new s3.Bucket(this, 'StaticAssetsBucket', {
-      bucketName: `chimera-static-${props.envName}-${this.account}`,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      versioned: isProd,
-      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
-    });
-
-    // OAI allows CloudFront to fetch objects from the private S3 bucket
-    const oai = new cloudfront.OriginAccessIdentity(this, 'StaticAssetsOAI', {
-      comment: `OAI for Chimera static assets - ${props.envName}`,
-    });
-    this.staticAssetsBucket.grantRead(oai);
-
-    // ======================================================================
     // CloudFront Distribution
-    // Default behavior: S3 origin (static HTML/JS/CSS)
-    // API route behaviors: ALB origin (chat, auth, health, tenants, slack)
-    // SPA fallback: 403/404 -> /index.html for client-side routing
+    // Default behavior: ALB origin (API routes — caching disabled)
+    // Additional behaviors: ALB for /chat/*, /auth/*, /health, /tenants/*, /slack/*
     // Uses ALL_VIEWER origin request policy to forward all headers including
     // Authorization (which is a restricted header that gets silently stripped
     // when explicitly listed in OriginRequestHeaderBehavior.allowList)
+    // Static frontend assets are served by FrontendStack (separate CloudFront distribution).
     // ======================================================================
-
-    // Cache policy for static assets (24h TTL)
-    const staticCachePolicy = new cloudfront.CachePolicy(this, 'StaticCachePolicy', {
-      cachePolicyName: `chimera-static-${props.envName}`,
-      comment: 'Cache policy for static assets with 24h TTL',
-      defaultTtl: cdk.Duration.hours(24),
-      maxTtl: cdk.Duration.days(7),
-      minTtl: cdk.Duration.hours(1),
-      enableAcceptEncodingGzip: true,
-      enableAcceptEncodingBrotli: true,
-      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
-      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-    });
 
     // ALB origin created once and reused across all API route behaviors.
     // Uses HTTPS when certificate is available (CloudFront → ALB encrypted), HTTP otherwise.
@@ -367,7 +330,7 @@ export class ChatStack extends cdk.Stack {
       keepaliveTimeout: cdk.Duration.seconds(60),
     });
 
-    // CloudFront distribution
+    // CloudFront distribution — API proxy only; static frontend served by FrontendStack
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
       comment: `Chimera Chat Gateway CDN - ${props.envName}`,
       enabled: true,
@@ -376,13 +339,12 @@ export class ChatStack extends cdk.Stack {
         : cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       enableIpv6: true,
-      defaultRootObject: 'index.html',
       defaultBehavior: {
-        origin: new origins.S3Origin(this.staticAssetsBucket, { originAccessIdentity: oai }),
+        origin: albOrigin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-        compress: true,
-        cachePolicy: staticCachePolicy,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
       },
       additionalBehaviors: {
         '/chat/*': {
@@ -421,20 +383,6 @@ export class ChatStack extends cdk.Stack {
         },
       },
       errorResponses: [
-        {
-          // SPA fallback: S3 returns 403 for missing objects -> serve index.html
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-        {
-          // SPA fallback: deep links return 404 from S3 -> serve index.html
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
         {
           httpStatus: 500,
           ttl: cdk.Duration.seconds(0),
@@ -519,16 +467,5 @@ export class ChatStack extends cdk.Stack {
       description: 'CloudFront HTTPS endpoint URL',
     });
 
-    new cdk.CfnOutput(this, 'StaticAssetsBucketName', {
-      value: this.staticAssetsBucket.bucketName,
-      exportName: `${this.stackName}-StaticAssetsBucketName`,
-      description: 'S3 bucket name for static UI assets',
-    });
-
-    new cdk.CfnOutput(this, 'StaticAssetsBucketArn', {
-      value: this.staticAssetsBucket.bucketArn,
-      exportName: `${this.stackName}-StaticAssetsBucketArn`,
-      description: 'S3 bucket ARN for static UI assets',
-    });
   }
 }

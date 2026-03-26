@@ -1,0 +1,170 @@
+import * as cdk from 'aws-cdk-lib';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import { Construct } from 'constructs';
+
+export interface FrontendStackProps extends cdk.StackProps {
+  envName: string;
+  certificate?: acm.ICertificate;
+  domainNames?: string[];
+}
+
+/**
+ * Frontend layer for Chimera.
+ *
+ * Deploys the React SPA (Vite build) to S3 + CloudFront.
+ * Static assets (JS/CSS with content hashes) are cached for 1 year.
+ * HTML entry points always revalidate (TTL=0) to pick up new deploys.
+ * SPA routing: CloudFront 403/404 -> index.html.
+ *
+ * This stack is independent of all other stacks — no dependencies.
+ */
+export class FrontendStack extends cdk.Stack {
+  public readonly bucket: s3.Bucket;
+  public readonly distribution: cloudfront.Distribution;
+
+  constructor(scope: Construct, id: string, props: FrontendStackProps) {
+    super(scope, id, props);
+
+    const isProd = props.envName === 'prod';
+
+    // ======================================================================
+    // S3 Bucket for React SPA Assets
+    // Private bucket — CloudFront accesses via OAI only.
+    // ======================================================================
+    this.bucket = new s3.Bucket(this, 'FrontendBucket', {
+      bucketName: `chimera-frontend-${props.envName}-${this.account}`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      versioned: isProd,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: !isProd,
+    });
+
+    // OAI allows CloudFront to fetch objects from the private S3 bucket
+    const oai = new cloudfront.OriginAccessIdentity(this, 'FrontendOAI', {
+      comment: `OAI for Chimera frontend - ${props.envName}`,
+    });
+    this.bucket.grantRead(oai);
+
+    // ======================================================================
+    // Cache Policies
+    // HTML: TTL=0 so browsers always revalidate (new deploys picked up immediately)
+    // Assets: TTL=365d because Vite hashes all asset filenames (immutable)
+    // ======================================================================
+    const htmlCachePolicy = new cloudfront.CachePolicy(this, 'HtmlCachePolicy', {
+      cachePolicyName: `chimera-frontend-html-${props.envName}`,
+      comment: 'No caching for HTML — always revalidate on new deploys',
+      defaultTtl: cdk.Duration.seconds(0),
+      maxTtl: cdk.Duration.seconds(0),
+      minTtl: cdk.Duration.seconds(0),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+    });
+
+    const assetsCachePolicy = new cloudfront.CachePolicy(this, 'AssetsCachePolicy', {
+      cachePolicyName: `chimera-frontend-assets-${props.envName}`,
+      comment: 'Long-term caching for Vite-hashed assets (immutable filenames)',
+      defaultTtl: cdk.Duration.days(365),
+      maxTtl: cdk.Duration.days(365),
+      minTtl: cdk.Duration.days(365),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+    });
+
+    // ======================================================================
+    // CloudFront Distribution
+    // Default behavior: S3 via OAI (HTML with revalidation)
+    // /assets/*: S3 via OAI (Vite-hashed assets, long cache)
+    // SPA fallback: 403/404 -> index.html for client-side routing
+    // ======================================================================
+    this.distribution = new cloudfront.Distribution(this, 'Distribution', {
+      comment: `Chimera Frontend CDN - ${props.envName}`,
+      enabled: true,
+      priceClass: isProd
+        ? cloudfront.PriceClass.PRICE_CLASS_ALL
+        : cloudfront.PriceClass.PRICE_CLASS_100,
+      httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
+      enableIpv6: true,
+      defaultRootObject: 'index.html',
+      defaultBehavior: {
+        origin: new origins.S3Origin(this.bucket, { originAccessIdentity: oai }),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        compress: true,
+        cachePolicy: htmlCachePolicy,
+      },
+      additionalBehaviors: {
+        '/assets/*': {
+          origin: new origins.S3Origin(this.bucket, { originAccessIdentity: oai }),
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+          compress: true,
+          cachePolicy: assetsCachePolicy,
+        },
+      },
+      ...(props.certificate
+        ? {
+            certificate: props.certificate,
+            domainNames: props.domainNames,
+          }
+        : {}),
+      errorResponses: [
+        {
+          // SPA fallback: S3 returns 403 for missing objects -> serve index.html
+          httpStatus: 403,
+          responseHttpStatus: 200,
+          responsePagePath: '/index.html',
+          ttl: cdk.Duration.seconds(0),
+        },
+        {
+          // SPA fallback: deep links return 404 from S3 -> serve index.html
+          httpStatus: 404,
+          responseHttpStatus: 200,
+          responsePagePath: '/index.html',
+          ttl: cdk.Duration.seconds(0),
+        },
+      ],
+    });
+
+    // ======================================================================
+    // Stack Outputs
+    // ======================================================================
+    new cdk.CfnOutput(this, 'FrontendBucketName', {
+      value: this.bucket.bucketName,
+      exportName: `${this.stackName}-FrontendBucketName`,
+      description: 'S3 bucket name for React SPA assets',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendBucketArn', {
+      value: this.bucket.bucketArn,
+      exportName: `${this.stackName}-FrontendBucketArn`,
+      description: 'S3 bucket ARN for React SPA assets',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendDistributionId', {
+      value: this.distribution.distributionId,
+      exportName: `${this.stackName}-FrontendDistributionId`,
+      description: 'CloudFront distribution ID for cache invalidation',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendDistributionDomainName', {
+      value: this.distribution.distributionDomainName,
+      exportName: `${this.stackName}-FrontendDistributionDomainName`,
+      description: 'CloudFront distribution domain name',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendUrl', {
+      value: `https://${this.distribution.distributionDomainName}`,
+      exportName: `${this.stackName}-FrontendUrl`,
+      description: 'Frontend HTTPS URL',
+    });
+  }
+}
