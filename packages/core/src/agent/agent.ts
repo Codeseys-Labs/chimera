@@ -69,7 +69,7 @@ export interface AgentConfig {
 
   /** Model instance with converse API (optional, for real LLM calls) */
   model?: {
-    converse(turn: { messages: Message[]; tools?: ToolSpec[]; systemPrompt?: string }): Promise<{ output: { message: Message }; stopReason: string }>
+    converse(turn: { messages: Message[]; tools?: ToolSpec[]; systemPrompt?: string; modelId?: string }): Promise<{ output: { message: Message }; stopReason: string }>
   };
 
   /** Loaded tools with full specifications (optional, for tool calling) */

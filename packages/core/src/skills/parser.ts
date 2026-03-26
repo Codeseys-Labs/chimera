@@ -173,7 +173,7 @@ export async function parseSkillMd(
     author: yaml.author,
     trustLevel: yaml.trust_level || 'community',
     format: 'SKILL.md',
-    permissions,
+    permissions: permissions as SkillDefinition['permissions'],
     dependencies,
     implementation,
     source,
@@ -296,10 +296,10 @@ function normalizeDependencies(deps?: SkillMdFrontmatter['dependencies']): Skill
 
   return {
     skills: deps.skills,
-    mcpServers: deps.mcp_servers,
+    mcp_servers: deps.mcp_servers,
     packages: deps.packages,
     binaries: deps.binaries,
-    envVars: deps.env_vars,
+    env_vars: deps.env_vars,
   };
 }
 

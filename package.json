@@ -35,7 +35,7 @@
     "lint:infra": "cd infra && bun run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "pretypecheck": "cd packages/shared && bun run build",
+    "pretypecheck": "cd packages/shared && bunx tsc --build --force",
     "typecheck": "tsc --build",
     "clean": "bun run clean:packages && bun run clean:infra",
     "clean:packages": "rm -rf packages/*/dist packages/*/node_modules",

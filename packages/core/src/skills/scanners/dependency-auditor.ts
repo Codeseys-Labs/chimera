@@ -251,7 +251,7 @@ export class DependencyAuditor {
         throw new Error(`OSV API returned ${response.status}: ${response.statusText}`);
       }
 
-      const data: OSVQueryResponse = await response.json();
+      const data = await response.json() as OSVQueryResponse;
 
       return this.parseOSVResponse(data, packageName, ecosystem);
     } finally {
@@ -321,13 +321,13 @@ export class DependencyAuditor {
   /**
    * Extract fixed version from affected ranges
    */
-  private extractFixedVersion(affected?: OSVQueryResponse['vulns'][0]['affected']): string | undefined {
+  private extractFixedVersion(affected?: NonNullable<OSVQueryResponse['vulns']>[number]['affected']): string | undefined {
     if (!affected || affected.length === 0) return undefined;
 
     for (const pkg of affected) {
       if (pkg.ranges) {
         for (const range of pkg.ranges) {
-          const fixedEvent = range.events.find(e => e.fixed);
+          const fixedEvent = range.events.find((e: { introduced?: string; fixed?: string }) => e.fixed);
           if (fixedEvent?.fixed) {
             return fixedEvent.fixed;
           }
@@ -341,7 +341,7 @@ export class DependencyAuditor {
   /**
    * Extract affected versions
    */
-  private extractAffectedVersions(affected?: OSVQueryResponse['vulns'][0]['affected']): string[] {
+  private extractAffectedVersions(affected?: NonNullable<OSVQueryResponse['vulns']>[number]['affected']): string[] {
     if (!affected || affected.length === 0) return [];
 
     const versions: string[] = [];

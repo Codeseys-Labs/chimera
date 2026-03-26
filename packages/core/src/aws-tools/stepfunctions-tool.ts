@@ -108,9 +108,10 @@ export function createStepFunctionsTools(clientFactory: AWSClientFactory) {
           type: (input.type ?? 'STANDARD') as StateMachineType,
           loggingConfiguration: input.loggingConfiguration as LoggingConfiguration,
           tracingConfiguration: input.tracingConfiguration as TracingConfiguration,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           tags: createResourceTags(input.tenantId, input.agentId, {
             billingCategory: 'workflow-stepfunctions',
-          }),
+          }) as any,
         });
 
         const response = await retryWithBackoff(
