@@ -638,4 +638,8 @@ export const BEDROCK_MODELS: Record<string, number> = {
   'us.anthropic.claude-3-5-sonnet-20241022-v2:0': 0.003,
   'us.anthropic.claude-3-opus-20240229-v1:0': 0.015,
   'us.anthropic.claude-3-5-haiku-20241022-v1:0': 0.0008,
+  'us.amazon.nova-micro-v1:0': 0.000088,
+  'us.amazon.nova-lite-v1:0': 0.00024,
+  'us.anthropic.claude-sonnet-4-6-v1:0': 0.009,
+  'us.anthropic.claude-opus-4-6-v1:0': 0.045,
 };
