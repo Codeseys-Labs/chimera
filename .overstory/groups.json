@@ -365,5 +365,26 @@
 		"status": "completed",
 		"createdAt": "2026-03-25T18:56:36.681Z",
 		"completedAt": "2026-03-26T18:45:25.552Z"
+	},
+	{
+		"id": "group-ce298b65",
+		"name": "modernization-research-batch",
+		"memberIssueIds": [
+			"chimera-50c5",
+			"chimera-0d49",
+			"chimera-662e",
+			"chimera-9b3b",
+			"chimera-14f7",
+			"chimera-c091",
+			"chimera-4f23",
+			"chimera-8eb2",
+			"chimera-ac68",
+			"chimera-a322",
+			"chimera-b569",
+			"chimera-dbc2"
+		],
+		"status": "active",
+		"createdAt": "2026-03-26T21:14:20.776Z",
+		"completedAt": null
 	}
 ]
