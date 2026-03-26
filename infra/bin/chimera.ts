@@ -97,6 +97,7 @@ const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
   envName,
   repositoryName: app.node.tryGetContext('repositoryName') ?? 'chimera',
   branch: app.node.tryGetContext('branch') ?? 'main',
+  dockerHubSecretArn: app.node.tryGetContext('dockerHubSecretArn'),
 });
 
 // --- Stack 7: Skill Pipeline ---
