@@ -233,7 +233,7 @@ export class PipelineStack extends cdk.Stack {
         resources: ['*'],
       })
     );
-    // Scope repository operations to chimera-* repositories
+    // Scope repository operations to chimera-* repositories and docker-hub pull-through cache
     dockerBuildProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
@@ -247,6 +247,7 @@ export class PipelineStack extends cdk.Stack {
         ],
         resources: [
           `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
+          `arn:aws:ecr:${this.region}:${this.account}:repository/docker-hub/*`,
         ],
       })
     );
@@ -384,7 +385,7 @@ export class PipelineStack extends cdk.Stack {
         resources: ['*'],
       })
     );
-    // Scope repository operations to chimera-* repositories
+    // Scope repository operations to chimera-* repositories and docker-hub pull-through cache
     testProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
@@ -394,6 +395,7 @@ export class PipelineStack extends cdk.Stack {
         ],
         resources: [
           `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
+          `arn:aws:ecr:${this.region}:${this.account}:repository/docker-hub/*`,
         ],
       })
     );
