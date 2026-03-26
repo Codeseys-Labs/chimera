@@ -359,7 +359,7 @@ router.get('/stream/:messageId', async (c: Context) => {
       return c.json(error, 500);
     }
 
-    const messageId = c.req.param('messageId');
+    const messageId = c.req.param('messageId') ?? '';
     const record = streamManager.getForTenant(messageId, tenantContext.tenantId);
 
     if (!record) {

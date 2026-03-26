@@ -186,7 +186,7 @@ export class RateLimiter {
             ':now': now.toISOString(),
             ':expectedLastRefill': bucket.lastRefill,
           },
-          ReturnValues: 'ALL_NEW',
+          ReturnValues: 'ALL_NEW' as const,
         };
 
         const result = await this.config.dynamodb.update(updateParams);

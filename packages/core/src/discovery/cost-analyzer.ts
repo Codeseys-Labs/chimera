@@ -315,7 +315,7 @@ export function createCostAnalyzerTools(config: CostAnalyzerConfig) {
     }),
     callback: async (input) => {
       const now = new Date();
-      const startDate = new Date(now.getTime() - input.lookbackDays * 24 * 60 * 60 * 1000);
+      const startDate = new Date(now.getTime() - (input.lookbackDays ?? 30) * 24 * 60 * 60 * 1000);
 
       const timePeriod = {
         start: startDate.toISOString().split('T')[0],

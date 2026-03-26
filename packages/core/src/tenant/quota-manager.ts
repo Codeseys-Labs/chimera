@@ -202,7 +202,7 @@ export class QuotaManager {
         ExpressionAttributeValues: {
           ':amount': amount,
         },
-        ReturnValues: 'ALL_NEW',
+        ReturnValues: 'ALL_NEW' as const,
       };
 
       await this.config.dynamodb.update(updateParams);

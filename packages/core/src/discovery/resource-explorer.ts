@@ -23,6 +23,7 @@ import type {
   ResourceQueryResult,
   ResourceInventoryEntry,
   AWSRegion,
+  AWSResourceType,
   ResourceTag,
 } from './types';
 import { DiscoveryError } from './types';
@@ -142,7 +143,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
     }),
     callback: async (input) => {
       try {
-        const resources = await executeSearch(config, input.queryString, input.maxResults, input.nextToken);
+        const resources = await executeSearch(config, input.queryString, input.maxResults ?? 100, input.nextToken);
 
         const result: ResourceQueryResult = {
           items: resources.map((r) => explorerResourceToInventoryEntry(config, r)),
@@ -150,7 +151,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
             nextToken: undefined,
             hasMore: false,
             totalCount: resources.length,
-            pageSize: input.maxResults,
+            pageSize: input.maxResults ?? 100,
           },
         };
 
@@ -176,14 +177,14 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
     }),
     callback: async (input) => {
       const filter: ResourceFilter = {
-        resourceTypes: input.resourceTypes,
+        resourceTypes: input.resourceTypes as AWSResourceType[] | undefined,
         regions: input.regions as AWSRegion[] | undefined,
         tags: input.tags,
       };
 
       const queryString = ExplorerQueryBuilder.fromFilter(filter);
 
-      const resources = await executeSearch(config, queryString, input.limit, input.nextToken);
+      const resources = await executeSearch(config, queryString, input.limit ?? 100, input.nextToken);
 
       const result: ResourceQueryResult = {
         items: resources.map((r) => explorerResourceToInventoryEntry(config, r)),
@@ -191,7 +192,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
           nextToken: undefined,
           hasMore: false,
           totalCount: resources.length,
-          pageSize: input.limit,
+          pageSize: input.limit ?? 100,
         },
       };
 
@@ -212,7 +213,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
         ? `tag:${input.tagKey}=${input.tagValue}`
         : `tag:${input.tagKey}`;
 
-      const resources = await executeSearch(config, queryString, input.maxResults);
+      const resources = await executeSearch(config, queryString, input.maxResults ?? 100);
       const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
       return JSON.stringify({ resources: items }, null, 2);
@@ -230,7 +231,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
     callback: async (input) => {
       const queryString = `resourcetype:${input.service}:${input.type}`;
 
-      const resources = await executeSearch(config, queryString, input.maxResults);
+      const resources = await executeSearch(config, queryString, input.maxResults ?? 100);
       const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
       return JSON.stringify({ resources: items }, null, 2);

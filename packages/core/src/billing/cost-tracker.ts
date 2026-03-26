@@ -220,7 +220,7 @@ export class CostTracker {
       UpdateExpression: `SET ${updateExpressions.join(', ')}`,
       ExpressionAttributeNames: attributeNames,
       ExpressionAttributeValues: attributeValues,
-      ReturnValues: 'ALL_NEW',
+      ReturnValues: 'ALL_NEW' as const,
     };
 
     await this.config.dynamodb.update(updateParams);

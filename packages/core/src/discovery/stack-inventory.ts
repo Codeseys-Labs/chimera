@@ -182,7 +182,7 @@ export function createStackInventoryTools(config: StackInventoryConfig) {
       includeResources: z.boolean().default(false).describe('Include resource details'),
     }),
     callback: async (input) => {
-      const hierarchy = await getStackHierarchyImpl(config, input.stackName, input.region as AWSRegion, input.includeResources);
+      const hierarchy = await getStackHierarchyImpl(config, input.stackName, input.region as AWSRegion, input.includeResources ?? false);
       return JSON.stringify(hierarchy, null, 2);
     },
   });
@@ -209,7 +209,7 @@ async function listStacksImpl(config: StackInventoryConfig, filter?: StackFilter
 
 async function getStackImpl(config: StackInventoryConfig, stackName: string, region: AWSRegion): Promise<StackSummary> {
   // Stub: Would call AWS SDK CloudFormationClient.describeStacks
-  throw new DiscoveryError('NOT_FOUND', 'Stack not found', null);
+  throw new DiscoveryError('RESOURCE_NOT_FOUND', 'Stack not found', null);
 }
 
 async function listStackResourcesImpl(
@@ -247,10 +247,9 @@ async function detectDriftImpl(
   return {
     stackId: '',
     stackName: options.stackName,
-    driftStatus: 'NOT_CHECKED',
-    driftedResourceCount: 0,
-    totalResourceCount: 0,
-    driftDetectionTime: new Date(),
+    stackDriftStatus: 'NOT_CHECKED',
+    detectionTime: new Date().toISOString(),
+    driftedResourcesCount: 0,
     driftedResources: [],
   };
 }

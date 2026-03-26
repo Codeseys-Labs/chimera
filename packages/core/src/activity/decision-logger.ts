@@ -447,11 +447,11 @@ export class DecisionLogger {
     const result = await this.config.dynamodb.query(params);
 
     return {
-      decisions: result.Items.map((item: any) => item.decisionLog),
+      decisions: (result.Items ?? []).map((item: any) => item.decisionLog),
       nextToken: result.LastEvaluatedKey
         ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
         : undefined,
-      total: result.Items.length,
+      total: (result.Items ?? []).length,
     };
   }
 
@@ -477,7 +477,7 @@ export class DecisionLogger {
       Limit: 1,
     });
 
-    return result.Items.length > 0 ? result.Items[0].decisionLog : null;
+    return (result.Items ?? []).length > 0 ? (result.Items ?? [])[0].decisionLog : null;
   }
 
   /**

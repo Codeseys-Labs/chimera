@@ -120,7 +120,7 @@ export interface ConverseResponse {
  */
 export class BedrockModel {
   private client: BedrockRuntimeClient;
-  private config: Required<Omit<BedrockModelConfig, 'client'>>;
+  private config: Omit<Required<Omit<BedrockModelConfig, 'client'>>, 'topP'> & { topP?: number };
 
   constructor(config: BedrockModelConfig) {
     this.config = {
@@ -146,9 +146,10 @@ export class BedrockModel {
     if (block.toolUse) {
       return {
         toolUse: {
-          toolUseId: block.toolUse.toolUseId,
-          name: block.toolUse.name,
-          input: block.toolUse.input,
+          toolUseId: block.toolUse.toolUseId ?? '',
+          name: block.toolUse.name ?? '',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          input: block.toolUse.input as any,
         },
       };
     }
@@ -156,10 +157,11 @@ export class BedrockModel {
     if (block.toolResult) {
       return {
         toolResult: {
-          toolUseId: block.toolResult.toolUseId,
+          toolUseId: block.toolResult.toolUseId ?? '',
           content: typeof block.toolResult.content === 'string'
             ? [{ text: block.toolResult.content }]
-            : [{ json: block.toolResult.content }],
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            : [{ json: block.toolResult.content as any }],
           status: block.toolResult.status,
         },
       };
@@ -187,7 +189,8 @@ export class BedrockModel {
         name: tool.name,
         description: tool.description,
         inputSchema: {
-          json: tool.inputSchema,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          json: tool.inputSchema as any,
         },
       },
     };
@@ -204,8 +207,8 @@ export class BedrockModel {
     if (block.toolUse) {
       return {
         toolUse: {
-          toolUseId: block.toolUse.toolUseId,
-          name: block.toolUse.name,
+          toolUseId: block.toolUse.toolUseId ?? '',
+          name: block.toolUse.name ?? '',
           input: block.toolUse.input as Record<string, unknown>,
         },
       };
@@ -227,12 +230,12 @@ export class BedrockModel {
           contentStr = JSON.stringify(content);
         }
       } else {
-        contentStr = content as string;
+        contentStr = (content as unknown) as string;
       }
 
       return {
         toolResult: {
-          toolUseId: block.toolResult.toolUseId,
+          toolUseId: block.toolResult.toolUseId ?? '',
           content: contentStr,
           status: block.toolResult.status as 'success' | 'error',
         },
