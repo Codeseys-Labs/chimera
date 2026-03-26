@@ -7,7 +7,7 @@
 
 import request from 'supertest';
 import { createAdaptorServer } from '@hono/node-server';
-import honoApp from '../server';
+import { app as honoApp } from '../server';
 
 const app = createAdaptorServer({ fetch: honoApp.fetch });
 
