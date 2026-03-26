@@ -3,13 +3,16 @@
  */
 
 import request from 'supertest';
-import app from '../server';
+import { createAdaptorServer } from '@hono/node-server';
+import honoApp from '../server';
+
+const app = createAdaptorServer({ fetch: honoApp.fetch });
 
 describe('Chat Gateway Server', () => {
   describe('Server Initialization', () => {
     it('should create app without errors', () => {
       expect(app).toBeDefined();
-      expect(typeof app).toBe('function'); // Express apps are functions
+      expect(typeof app).toBe('object'); // createAdaptorServer returns an http.Server
     });
   });
 
