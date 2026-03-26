@@ -180,6 +180,9 @@ cd .overstory/worktrees/<agent-name>
 | **Lead agents** | Research, architecture, task decomposition, merge coordination | `lead-arch`, `lead-docs`, `lead-infra` |
 | **Builder agents** | Implementation, testing, documentation-as-you-go | `builder-data`, `builder-api`, `builder-docs` |
 | **Scout agents** | Quick exploration, recon, feasibility checks | `scout-01`, `scout-02` |
+| **Reviewer agents** | Independent code review, quality validation, spec compliance verification | `review-<task>` |
+
+> **Scout-first is mandatory:** For moderate and complex tasks, leads MUST spawn a scout before spawning builders. Scouts explore the codebase and report findings; leads use these findings to write accurate builder specs. Only simple tasks (1-3 files, well-understood changes) may skip the scout phase.
 
 ### Communication Protocol
 
@@ -569,6 +572,25 @@ Before sending `merge_ready`:
 5. ✅ Documentation updated
 6. ✅ Mulch records synced: `mulch sync`
 7. ✅ Seeds issues synced: `sd sync`
+8. ✅ Builder `.mulch/` records consolidated into lead branch
+9. ✅ Lead's own orchestration insights recorded via `mulch record`
+
+### Worktree Merge Flow
+
+Changes flow UP the agent hierarchy, never bypass levels:
+
+```
+Builder worktree → Lead branch (lead consolidates) → Main (coordinator merges)
+Scout worktree  → Lead branch (lead records findings) → Main (coordinator merges)
+```
+
+**Rules:**
+- Builders and scouts commit to their own worktree branches
+- Leads merge builder/scout work + `.mulch/` records into their lead branch
+- Leads send `merge_ready` to coordinator only after full consolidation
+- Coordinator ONLY merges `overstory/lead-*` branches (never builder/scout branches)
+- Coordinator verifies `.mulch/` changes are present before worktree cleanup
+- Worktree cleanup NEVER uses `--force`
 
 ### Merge Coordinator Actions
 
