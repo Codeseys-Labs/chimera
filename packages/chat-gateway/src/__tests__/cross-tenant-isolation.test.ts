@@ -6,7 +6,10 @@
  */
 
 import request from 'supertest';
-import app from '../server';
+import { createAdaptorServer } from '@hono/node-server';
+import honoApp from '../server';
+
+const app = createAdaptorServer({ fetch: honoApp.fetch });
 
 describe('Cross-Tenant Isolation', () => {
   const tenantA = 'tenant-alpha';

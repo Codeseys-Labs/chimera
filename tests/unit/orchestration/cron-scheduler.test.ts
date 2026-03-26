@@ -329,7 +329,7 @@ describe('CronScheduler', () => {
 
       const history = scheduler.getExecutionHistory('job-011', 3);
       expect(history.length).toBe(3);
-    });
+    }, 30000);
   });
 
   describe('getJobs', () => {

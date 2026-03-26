@@ -226,7 +226,7 @@ describe('A2AProtocol', () => {
   });
 
   describe('registerGroup', () => {
-    it('should register new agent group', () => {
+    it('should register new agent group', async () => {
       protocol.registerGroup('new-team', ['agent-A', 'agent-B']);
 
       // Verify by attempting broadcast
