@@ -383,8 +383,31 @@
 			"chimera-b569",
 			"chimera-dbc2"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-26T21:14:20.776Z",
+		"completedAt": "2026-03-26T21:59:47.827Z"
+	},
+	{
+		"id": "group-4575d507",
+		"name": "impl-batch-1",
+		"memberIssueIds": [
+			"chimera-1af1",
+			"chimera-25ac",
+			"chimera-14f1"
+		],
+		"status": "active",
+		"createdAt": "2026-03-26T22:07:47.048Z",
+		"completedAt": null
+	},
+	{
+		"id": "group-2df8810c",
+		"name": "impl-batch-2",
+		"memberIssueIds": [
+			"chimera-6422",
+			"chimera-96ce"
+		],
+		"status": "active",
+		"createdAt": "2026-03-26T22:07:47.388Z",
 		"completedAt": null
 	}
 ]
