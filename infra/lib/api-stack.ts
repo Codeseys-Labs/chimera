@@ -231,6 +231,10 @@ export class ApiStack extends cdk.Stack {
     // ======================================================================
     const webhooks = this.api.root.addResource('webhooks');
     for (const platform of ['slack', 'discord', 'teams', 'telegram', 'github']) {
+      // INTENTIONAL: This endpoint uses MockIntegration until PlatformRuntimeStack
+      // wires real Lambda handlers. The chat-gateway (Hono on ECS Fargate) handles
+      // all real webhook traffic via its mounted routes (/slack, /discord, /teams,
+      // /telegram). API Gateway webhook routes are lower priority. See ADR-024.
       webhooks.addResource(platform).addMethod('POST',
         new apigw.MockIntegration({
           integrationResponses: [{
@@ -258,6 +262,10 @@ export class ApiStack extends cdk.Stack {
     // Provides drop-in compatibility for OpenAI clients and libraries.
     // Enables migration from OpenClaw or other OpenAI-compatible systems.
     // ======================================================================
+    // INTENTIONAL: This endpoint uses MockIntegration until PlatformRuntimeStack
+    // wires real Lambda handlers. The chat-gateway (Hono on ECS Fargate) handles
+    // all real traffic. API Gateway REST endpoints are the management API and
+    // are lower priority. See ADR-024.
     const openaiV1 = this.api.root.addResource('v1');
     openaiV1.addResource('chat').addResource('completions').addMethod('POST',
       new apigw.MockIntegration({
@@ -399,6 +407,10 @@ export class ApiStack extends cdk.Stack {
       cachingEnabled: false,
     };
 
+    // INTENTIONAL: This endpoint uses MockIntegration until PlatformRuntimeStack
+    // wires real Lambda handlers. The chat-gateway (Hono on ECS Fargate) handles
+    // all real traffic. API Gateway REST endpoints are the management API and
+    // are lower priority. See ADR-024.
     return resource.addMethod(
       httpMethod,
       new apigw.MockIntegration({
