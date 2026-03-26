@@ -13,6 +13,7 @@ import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
 export interface PipelineStackProps extends cdk.StackProps {
@@ -27,6 +28,10 @@ export interface PipelineStackProps extends cdk.StackProps {
   canaryTargetGroupArn?: string;   // Canary ECS target group
   ecsClusterName?: string;         // ECS cluster name
   ecsCanaryServiceName?: string;   // ECS canary service name
+
+  // Optional: Docker Hub credentials for rate limit avoidance.
+  // Secret must contain JSON keys: username, token
+  dockerHubSecretArn?: string;
 }
 
 /**
@@ -233,7 +238,7 @@ export class PipelineStack extends cdk.Stack {
         resources: ['*'],
       })
     );
-    // Scope repository operations to chimera-* repositories and docker-hub pull-through cache
+    // Scope repository operations to chimera-* repositories
     dockerBuildProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
@@ -247,10 +252,26 @@ export class PipelineStack extends cdk.Stack {
         ],
         resources: [
           `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
-          `arn:aws:ecr:${this.region}:${this.account}:repository/docker-hub/*`,
         ],
       })
     );
+
+    // If Docker Hub credentials are provided, inject them as env vars so buildspec
+    // can docker login and avoid rate limits.
+    if (props.dockerHubSecretArn) {
+      const dockerHubSecret = secretsmanager.Secret.fromSecretCompleteArn(
+        this, 'DockerHubSecret', props.dockerHubSecretArn
+      );
+      dockerBuildProject.addEnvironmentVariable('DOCKER_HUB_USERNAME', {
+        value: `${props.dockerHubSecretArn}:username`,
+        type: codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+      });
+      dockerBuildProject.addEnvironmentVariable('DOCKER_HUB_TOKEN', {
+        value: `${props.dockerHubSecretArn}:token`,
+        type: codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+      });
+      dockerHubSecret.grantRead(dockerBuildProject);
+    }
 
     // ======================================================================
     // CodeBuild Project for CDK Deploy Stage
@@ -385,7 +406,7 @@ export class PipelineStack extends cdk.Stack {
         resources: ['*'],
       })
     );
-    // Scope repository operations to chimera-* repositories and docker-hub pull-through cache
+    // Scope repository operations to chimera-* repositories
     testProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
@@ -395,7 +416,6 @@ export class PipelineStack extends cdk.Stack {
         ],
         resources: [
           `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
-          `arn:aws:ecr:${this.region}:${this.account}:repository/docker-hub/*`,
         ],
       })
     );

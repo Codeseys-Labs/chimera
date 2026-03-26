@@ -27,6 +27,15 @@ export interface WorkspaceConfig {
     cognito_user_pool_id?: string;
     cognito_client_id?: string;
   };
+  /** Optional Docker Hub credentials for avoiding pull rate limits.
+   *  If present, `chimera deploy` stores these in Secrets Manager and
+   *  wires the secret into the CodeBuild Docker stage so buildspec-docker.yml
+   *  can `docker login` before pulling base images.
+   */
+  docker?: {
+    username?: string;
+    token?: string;
+  };
 }
 
 const TOML_FILENAME = 'chimera.toml';
