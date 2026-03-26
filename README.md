@@ -18,7 +18,7 @@ a unified architecture.
 Chimera is a **production-ready Agent-as-a-Service platform** where:
 
 - **Tenants** deploy AI agents with first-class AWS account access across multiple channels
-- **Agents** use 25+ AWS tools, multi-modal processing, memory, and orchestration to build, deploy, and operate infrastructure autonomously
+- **Agents** use 40 AWS tools, multi-modal processing, memory, and orchestration to build, deploy, and operate infrastructure autonomously
 - **The platform** self-evolves: auto-generates skills, optimizes model routing, A/B tests prompts, modifies its own infrastructure
 - **Everything** runs on AWS managed services with AgentCore MicroVM isolation and 11 production-grade CDK stacks
 
@@ -36,7 +36,7 @@ Chimera is an AWS-native rebuild inspired by:
 
 | Capability | Implementation Status |
 |-----------|----------------------|
-| **AWS Account Intelligence** | ✅ **BUILT** — 25 AWS tools (EC2, S3, Lambda, CloudWatch, RDS, SageMaker, Athena, Step Functions, CodePipeline, etc.) • Discovery modules (Config, Resource Explorer, Cost analyzer, Stack inventory) • Well-Architected Framework tool for architecture review |
+| **AWS Account Intelligence** | ✅ **BUILT** — 40 AWS tools (19 TypeScript + 21 Python: EC2, S3, Lambda, CloudWatch, RDS, SageMaker, Athena, Step Functions, CodePipeline, etc.) • Discovery modules (Config, Resource Explorer, Cost analyzer, Stack inventory) • Well-Architected Framework tool for architecture review |
 | **Infrastructure as Capability** | ✅ **BUILT** — Infra-builder module generates CDK from requirements • CodeCommit/CodePipeline tools for git-based deployment • Self-modifying IaC with safety harness |
 | **Multi-Modal Processing** | ✅ **BUILT** — Auto-detection and routing for images, audio, video, documents • Rekognition, Transcribe, Textract tools integrated |
 | **Agent Runtime** | ✅ **BUILT** — Python agent with Strands SDK + AgentCore Runtime • ReAct loop with streaming • MicroVM isolation • AgentCore Memory integration (STM + LTM) |
@@ -117,7 +117,7 @@ bun test
 
 # Synthesize CDK infrastructure
 cd infra
-bunx cdk synth --quiet
+npx cdk synth --quiet
 ```
 
 ## Project Structure
@@ -137,7 +137,7 @@ chimera/
 │   └── constructs/           # L3 constructs
 ├── docs/                     # Documentation
 │   ├── architecture/         # ADRs and architecture docs
-│   │   └── decisions/        # 18 Architecture Decision Records
+│   │   └── decisions/        # 30 Architecture Decision Records
 │   ├── guide/                # Core guides
 │   ├── guides/               # Operational guides
 │   ├── research/             # Research documents
@@ -151,7 +151,7 @@ chimera/
 
 | Phase | Status | Key Deliverables |
 |-------|--------|------------------|
-| **0. Foundation** | ✅ **COMPLETE** | 11 CDK stacks (5,800+ LOC), 6-table DynamoDB design, VPC + networking, 18 ADRs |
+| **0. Foundation** | ✅ **COMPLETE** | 11 CDK stacks (5,800+ LOC), 6-table DynamoDB design, VPC + networking, 30 ADRs |
 | **1. Agent Runtime** | ✅ **COMPLETE** | Python agent with Strands SDK + AgentCore • 25 AWS tools • Multi-modal processing • Discovery modules • 860+ passing tests |
 | **2. Chat Gateway** | 🚧 **FRAMEWORK READY** | SSE bridge ship-ready • Vercel Chat SDK integrated • Adapter stubs (Slack, Discord, Teams) • Needs production deployment |
 | **3. Skill Ecosystem** | ✅ **COMPLETE** | Registry, discovery, installer, validator, MCP gateway • Trust engine • 7-stage security pipeline • SKILL.md v2 parser |
@@ -160,7 +160,7 @@ chimera/
 | **6. Self-Evolution** | ✅ **COMPLETE** | 7 evolution modules • Prompt A/B testing • Auto-skill generation • Model routing • Self-modifying IaC with safety harness |
 | **7. Production** | 🚧 **IN PROGRESS** | CI/CD pipeline stack exists • Observability stack complete • Needs load testing + DR validation |
 
-**Test Coverage:** 860 passing / 82 failing / 20 errors = 962 total tests across 64 test files
+**Test Coverage:** 1906 passing / 81 failing = 1987 total tests across 92 test files
 
 ## Documentation
 
@@ -179,17 +179,17 @@ chimera/
 |--------|-------|
 | **Packages** | 6 (core, agents, shared, sse-bridge, chat-gateway, cli) |
 | **CDK Infrastructure Stacks** | 11 stacks (5,800+ LOC) |
-| **TypeScript LOC** | ~48,300 lines (packages/core/src/) |
+| **TypeScript LOC** | ~73,500 lines (packages/core/src/) |
 | **Python Agent Runtime** | 317 lines (chimera_agent.py) + ~1,648 total Python LOC |
-| **AWS Tool Implementations** | 25 tools (19 TypeScript + 6 Python) |
-| **Core Modules** | 21 (activity, agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, swarm, tenant, tools, well-architected) |
-| **Test Coverage** | 962 tests (860 pass, 82 fail, 20 errors) across 64 test files |
-| **Architecture Decision Records** | 18 ADRs |
+| **AWS Tool Implementations** | 40 tools (19 TypeScript + 21 Python) |
+| **Core Modules** | 22 (activity, agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected) |
+| **Test Coverage** | 1987 tests (1906 pass, 81 fail) across 92 test files |
+| **Architecture Decision Records** | 30 ADRs |
 | **Research Documentation** | 123 docs, 118,000+ lines |
 
 **Key Components Built:**
 - ✅ Agent runtime (Strands + AgentCore in Python, 317 LOC + ~1,648 total)
-- ✅ 25 AWS service tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock, etc.)
+- ✅ 40 AWS service tools (19 TypeScript + 21 Python: EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock, etc.)
 - ✅ Discovery triad (AWS Config, Resource Explorer, Cost Explorer)
 - ✅ Multi-modal media processing (auto-detection, routing)
 - ✅ Swarm orchestration (5 components: task decomposer, role assigner, progressive refiner, blocker resolver, HITL gateway)
