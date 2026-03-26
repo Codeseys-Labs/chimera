@@ -12,8 +12,12 @@ import { extractTenantContext } from './middleware/tenant';
 import { rateLimitMiddleware, recordMetricsMiddleware } from './middleware/rate-limit';
 import authRouter from './routes/auth';
 import chatRouter from './routes/chat';
+import discordRouter from './routes/discord';
 import healthRouter from './routes/health';
+import integrationsRouter from './routes/integrations';
 import slackRouter from './routes/slack';
+import teamsRouter from './routes/teams';
+import telegramRouter from './routes/telegram';
 import tenantRouter from './routes/tenant';
 import { ErrorResponse } from './types';
 
@@ -36,16 +40,21 @@ app.route('/auth', authRouter);
 app.use('/tenants/*', extractTenantContext);
 app.route('/tenants', tenantRouter);
 
-// Handle Slack URL verification before tenant middleware
-// (Slack sends challenges without tenant context during initial setup)
-app.post('/slack/events', async (c) => {
-  const body = await c.req.json();
-  if (body?.type === 'url_verification') {
-    return c.json({ challenge: body.challenge }, 200);
+// Handle Slack URL verification before tenant middleware.
+// Slack sends challenges without tenant context during initial setup.
+// Non-verification events fall through to slackRouter via next().
+app.use('/slack/events', async (c, next) => {
+  if (c.req.method === 'POST') {
+    try {
+      const body = await c.req.json();
+      if (body?.type === 'url_verification') {
+        return c.json({ challenge: body.challenge }, 200);
+      }
+    } catch {
+      // Unparseable body — fall through to slackRouter for proper error handling
+    }
   }
-  // For non-verification events, continue to slack router
-  // This is a workaround - ideally slack router would handle this
-  return c.json({ error: 'Invalid event type' }, 400);
+  return next();
 });
 
 // Apply tenant middleware and rate limiting to all /chat/* and /slack/* routes
@@ -59,6 +68,25 @@ app.route('/chat', chatRouter);
 
 // Slack routes
 app.route('/slack', slackRouter);
+
+// Discord routes (Ed25519 signature verification handled inside the router)
+app.use('/discord/*', extractTenantContext);
+app.use('/discord/*', rateLimitMiddleware('discord-requests', 1));
+app.route('/discord', discordRouter);
+
+// Teams routes (Bot Framework JWT verification handled inside the router)
+app.use('/teams/*', extractTenantContext);
+app.use('/teams/*', rateLimitMiddleware('teams-requests', 1));
+app.route('/teams', teamsRouter);
+
+// Telegram routes (secret token verification handled inside the router)
+app.use('/telegram/*', extractTenantContext);
+app.use('/telegram/*', rateLimitMiddleware('telegram-requests', 1));
+app.route('/telegram', telegramRouter);
+
+// Integration management routes (OAuth, user pairing)
+app.use('/integrations/*', extractTenantContext);
+app.route('/integrations', integrationsRouter);
 
 // Record metrics after response (async, non-blocking)
 app.use('/chat/*', recordMetricsMiddleware(1));
