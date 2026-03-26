@@ -131,9 +131,9 @@
 		"memberIssueIds": [
 			"chimera-dc9f"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-20T23:49:18.660Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:14.718Z"
 	},
 	{
 		"id": "group-73ff1a7a",
@@ -143,9 +143,9 @@
 			"chimera-247b",
 			"chimera-7de5"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T00:03:32.576Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:15.370Z"
 	},
 	{
 		"id": "group-50953b4d",
@@ -155,9 +155,9 @@
 			"chimera-5ec5",
 			"chimera-6a22"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T00:42:09.544Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:15.944Z"
 	},
 	{
 		"id": "group-cdaf1d44",
@@ -166,9 +166,9 @@
 			"chimera-556c",
 			"chimera-29c6"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T01:06:28.858Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:16.406Z"
 	},
 	{
 		"id": "group-d1014778",
@@ -177,9 +177,9 @@
 			"chimera-30f1",
 			"chimera-50f6"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T05:39:43.898Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:16.873Z"
 	},
 	{
 		"id": "group-33460a32",
@@ -188,9 +188,9 @@
 			"chimera-2cd6",
 			"chimera-d83f"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T05:52:46.860Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:17.287Z"
 	},
 	{
 		"id": "group-b616fa11",
@@ -199,9 +199,9 @@
 			"chimera-781e",
 			"chimera-2c60"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T07:05:09.593Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:17.754Z"
 	},
 	{
 		"id": "group-5dd14a8c",
@@ -210,9 +210,9 @@
 			"chimera-b970",
 			"chimera-a52e"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T07:49:49.171Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:18.187Z"
 	},
 	{
 		"id": "group-2afe159b",
@@ -223,9 +223,9 @@
 			"chimera-f101",
 			"chimera-86a1"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T18:04:42.454Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:18.828Z"
 	},
 	{
 		"id": "group-5783178f",
@@ -239,9 +239,9 @@
 			"chimera-cade",
 			"chimera-14e9"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T18:30:51.628Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:19.829Z"
 	},
 	{
 		"id": "group-6ece3713",
@@ -252,9 +252,9 @@
 			"chimera-19a4",
 			"chimera-bd4a"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-21T20:48:37.625Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:20.409Z"
 	},
 	{
 		"id": "group-237eeed2",
@@ -266,9 +266,9 @@
 			"chimera-3fe0",
 			"chimera-e727"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-22T03:22:55.122Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:21.198Z"
 	},
 	{
 		"id": "group-2c585f8a",
@@ -283,9 +283,9 @@
 			"chimera-d161",
 			"chimera-07a1"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-23T19:18:38.444Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:22.316Z"
 	},
 	{
 		"id": "group-2bb91548",
@@ -297,9 +297,9 @@
 			"chimera-1cb2",
 			"chimera-17cb"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-23T22:23:43.361Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:23.062Z"
 	},
 	{
 		"id": "group-7f0b9fa3",
@@ -324,9 +324,9 @@
 			"chimera-69f8",
 			"chimera-7f25"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-25T07:36:27.324Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:23.790Z"
 	},
 	{
 		"id": "group-48ac384c",
@@ -350,9 +350,9 @@
 			"chimera-5771",
 			"chimera-0b38"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-25T17:32:11.324Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:25.089Z"
 	},
 	{
 		"id": "group-50930807",
@@ -362,8 +362,8 @@
 			"chimera-0f23",
 			"chimera-863a"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-25T18:56:36.681Z",
-		"completedAt": null
+		"completedAt": "2026-03-26T18:45:25.552Z"
 	}
 ]
