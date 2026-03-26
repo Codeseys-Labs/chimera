@@ -1,12 +1,14 @@
+# Chimera Agent Dockerfile
+#
+# Uses ghcr.io/astral-sh/uv:python3.11 — official Astral image with Python 3.11
+# and uv pre-installed. Purpose-built for uv-managed Python projects.
 
-
-FROM python:3.11-slim
+FROM ghcr.io/astral-sh/uv:python3.11
 
 WORKDIR /app
 
-# Install system dependencies and uv
+# Install system dependencies (git required for some Python packages)
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy Python project files
 COPY pyproject.toml .python-version uv.lock ./
