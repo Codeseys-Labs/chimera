@@ -2,9 +2,9 @@
  * Tests for Microsoft Teams Bot Framework webhook routes
  */
 
+import { Hono } from 'hono';
+import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';
-import express from 'express';
-import type { Express } from 'express';
 
 // Mock dependencies before importing the router
 jest.mock('../../adapters', () => ({
@@ -26,13 +26,14 @@ jest.mock('@chimera/core', () => ({
 }));
 
 jest.mock('../../middleware/user-resolution', () => ({
-  resolveUser: jest.fn((_req: any, _res: any, next: any) => next()),
+  resolveUser: jest.fn(async (_c: any, next: any) => { await next(); }),
 }));
 
 import teamsRouter from '../../routes/teams';
 import { getAdapter } from '../../adapters';
 import { createAgent } from '@chimera/core';
 import { resolveUser } from '../../middleware/user-resolution';
+import type { TenantContext } from '../../types';
 
 // Helper: valid Teams message activity
 function makeActivity(overrides: Record<string, unknown> = {}) {
@@ -59,32 +60,33 @@ function makeActivity(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// Helper: inject tenant context
-function mockTenantContext(tenantId: string, userId?: string) {
-  return (req: any, _res: any, next: any) => {
-    req.tenantContext = { tenantId, userId, tier: 'enterprise' };
-    next();
-  };
+function createTestApp(tenantContext?: { tenantId: string; userId?: string }) {
+  const app = new Hono();
+  if (tenantContext) {
+    app.use('/teams/*', async (c, next) => {
+      (c as any).set('tenantContext', {
+        tenantId: tenantContext.tenantId,
+        userId: tenantContext.userId,
+        tier: 'enterprise',
+      } as TenantContext);
+      await next();
+    });
+  }
+  app.route('/teams', teamsRouter);
+  return createAdaptorServer({ fetch: app.fetch });
 }
 
 describe('Teams Routes', () => {
-  let app: Express;
-
   beforeEach(() => {
     jest.clearAllMocks();
-
     // Reset token-verification env vars for each test
     delete process.env.MICROSOFT_APP_PASSWORD;
     delete process.env.MICROSOFT_APP_ID;
-
-    app = express();
-    app.use(express.json());
   });
 
   describe('POST /teams/messages — token verification', () => {
     it('should skip verification and process message when MICROSOFT_APP_PASSWORD is not set (dev mode)', async () => {
-      app.use(mockTenantContext('tenant-123', 'user-456'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123', userId: 'user-456' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -98,8 +100,7 @@ describe('Teams Routes', () => {
     it('should reject request without Authorization header when MICROSOFT_APP_PASSWORD is set', async () => {
       process.env.MICROSOFT_APP_PASSWORD = 'secret';
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -112,8 +113,7 @@ describe('Teams Routes', () => {
     it('should reject request with non-Bearer Authorization header', async () => {
       process.env.MICROSOFT_APP_PASSWORD = 'secret';
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -127,8 +127,7 @@ describe('Teams Routes', () => {
     it('should reject token with invalid JWT structure', async () => {
       process.env.MICROSOFT_APP_PASSWORD = 'secret';
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -142,7 +141,6 @@ describe('Teams Routes', () => {
     it('should reject token with invalid issuer', async () => {
       process.env.MICROSOFT_APP_PASSWORD = 'secret';
 
-      // Build a JWT with an invalid issuer
       const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
       const payload = Buffer.from(
         JSON.stringify({
@@ -153,8 +151,7 @@ describe('Teams Routes', () => {
       ).toString('base64url');
       const token = `${header}.${payload}.fakesignature`;
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -178,8 +175,7 @@ describe('Teams Routes', () => {
       ).toString('base64url');
       const token = `${header}.${payload}.fakesignature`;
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -203,8 +199,7 @@ describe('Teams Routes', () => {
       ).toString('base64url');
       const token = `${header}.${payload}.fakesignature`;
 
-      app.use(mockTenantContext('tenant-123', 'user-456'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123', userId: 'user-456' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -229,8 +224,7 @@ describe('Teams Routes', () => {
       ).toString('base64url');
       const token = `${header}.${payload}.fakesignature`;
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -244,8 +238,7 @@ describe('Teams Routes', () => {
 
   describe('POST /teams/messages — activity routing', () => {
     it('should return 200 { ok: true } for conversationUpdate activity', async () => {
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -256,8 +249,7 @@ describe('Teams Routes', () => {
     });
 
     it('should return 200 { ok: true } for typing activity', async () => {
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -268,8 +260,7 @@ describe('Teams Routes', () => {
     });
 
     it('should return 500 when tenant context is missing', async () => {
-      // No mockTenantContext — req.tenantContext will be undefined
-      app.use('/teams', teamsRouter);
+      const app = createTestApp(); // No tenantContext
 
       const response = await request(app)
         .post('/teams/messages')
@@ -280,14 +271,13 @@ describe('Teams Routes', () => {
     });
 
     it('should return 200 { ok: true } when message has no text', async () => {
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
-
       // Adapter returns empty array for missing text
       (getAdapter as jest.Mock).mockReturnValueOnce({
         parseIncoming: jest.fn().mockReturnValue([]),
         formatResponse: jest.fn(),
       });
+
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -298,15 +288,14 @@ describe('Teams Routes', () => {
     });
 
     it('should return 200 { ok: true } when adapter.parseIncoming throws', async () => {
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
-
       (getAdapter as jest.Mock).mockReturnValueOnce({
         parseIncoming: jest.fn().mockImplementation(() => {
           throw new Error('Parse error');
         }),
         formatResponse: jest.fn(),
       });
+
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -332,8 +321,7 @@ describe('Teams Routes', () => {
         formatResponse: mockFormatResponse,
       });
 
-      app.use(mockTenantContext('tenant-abc', 'user-xyz'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-abc', userId: 'user-xyz' });
 
       const activity = makeActivity({ text: 'What is the weather?' });
       const response = await request(app)
@@ -356,8 +344,7 @@ describe('Teams Routes', () => {
     });
 
     it('should prefer aadObjectId over raw from.id for userId', async () => {
-      app.use(mockTenantContext('tenant-abc'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-abc' });
 
       const activity = makeActivity({ from: { id: 'teams-raw-id', aadObjectId: 'aad-uuid' } });
       await request(app).post('/teams/messages').send(activity).expect(200);
@@ -368,8 +355,7 @@ describe('Teams Routes', () => {
     });
 
     it('should fall back to from.id when aadObjectId is absent', async () => {
-      app.use(mockTenantContext('tenant-abc'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-abc' });
 
       const activity = makeActivity({ from: { id: 'teams-raw-id' } });
       await request(app).post('/teams/messages').send(activity).expect(200);
@@ -380,14 +366,13 @@ describe('Teams Routes', () => {
     });
 
     it('should prefer resolved cognitoSub over aadObjectId when userContext is set', async () => {
-      // resolveUser is already mocked at module level; override once to inject userContext
-      (resolveUser as jest.Mock).mockImplementationOnce((req: any, _res: any, next: any) => {
-        req.userContext = { cognitoSub: 'cognito-sub-123' };
-        next();
+      // Override resolveUser mock to inject userContext via Hono context
+      (resolveUser as jest.Mock).mockImplementationOnce(async (c: any, next: any) => {
+        c.set('userContext', { cognitoSub: 'cognito-sub-123' });
+        await next();
       });
 
-      app.use(mockTenantContext('tenant-abc'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-abc' });
 
       const activity = makeActivity({ from: { id: 'teams-raw-id', aadObjectId: 'aad-uuid' } });
       await request(app).post('/teams/messages').send(activity).expect(200);
@@ -402,8 +387,7 @@ describe('Teams Routes', () => {
         invoke: jest.fn().mockRejectedValue(new Error('Bedrock timeout')),
       });
 
-      app.use(mockTenantContext('tenant-abc'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-abc' });
 
       const response = await request(app)
         .post('/teams/messages')
@@ -423,8 +407,7 @@ describe('Teams Routes', () => {
       process.env.NODE_ENV = 'production';
       delete process.env.MICROSOFT_APP_PASSWORD;
 
-      app.use(mockTenantContext('tenant-123'));
-      app.use('/teams', teamsRouter);
+      const app = createTestApp({ tenantId: 'tenant-123' });
 
       const response = await request(app)
         .post('/teams/messages')
