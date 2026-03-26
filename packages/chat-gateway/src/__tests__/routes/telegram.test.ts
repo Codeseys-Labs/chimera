@@ -2,6 +2,25 @@
  * Tests for Telegram webhook routes
  */
 
+// Mock adapters before other imports to prevent module contamination.
+// bun test runs all files in the same process; teams.test.ts mocks
+// '../../adapters' with a Teams-style adapter that corrupts telegram tests
+// without an explicit per-file mock here.
+jest.mock('../../adapters', () => ({
+  getAdapter: jest.fn().mockReturnValue({
+    parseIncoming: jest.fn().mockImplementation((body: any) => {
+      if (!body || !body.message) return [];
+      if (!body.message.text) return [];
+      return [{ role: 'user', content: body.message.text }];
+    }),
+    formatResponse: jest.fn().mockReturnValue({
+      method: 'sendMessage',
+      text: 'Hello from Chimera!',
+      parse_mode: 'Markdown',
+    }),
+  }),
+}));
+
 import { Hono } from 'hono';
 import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';

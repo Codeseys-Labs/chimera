@@ -2,6 +2,46 @@
  * Discord route tests
  */
 
+// Mock dependencies before importing the router.
+// Also prevents module contamination: bun test runs all test files in the same
+// process, so teams.test.ts mocking '../../adapters' with a Teams-style adapter
+// would corrupt these discord tests without explicit per-file mocks.
+jest.mock('@chimera/core', () => ({
+  createAgent: jest.fn().mockReturnValue({
+    invoke: jest.fn().mockResolvedValue({ output: 'Hello from Chimera!' }),
+  }),
+  createDefaultSystemPrompt: jest.fn().mockReturnValue('You are a helpful assistant.'),
+}));
+
+jest.mock('../../adapters', () => ({
+  getAdapter: jest.fn().mockReturnValue({
+    parseIncoming: jest.fn().mockImplementation((body: any) => {
+      // Slash command interaction (type 2)
+      if (body && typeof body.type === 'number' && body.type === 2) {
+        const options: Array<{ name: string; value: string }> = body.data?.options ?? [];
+        const msgOpt = options.find(
+          (o: { name: string; value: string }) => o.name === 'message' || o.name === 'prompt'
+        );
+        if (!msgOpt || !msgOpt.value) {
+          throw new Error('Slash command missing message/prompt option');
+        }
+        return [{ role: 'user', content: msgOpt.value }];
+      }
+      // Webhook message (has content or author field)
+      if (body && ('content' in body || 'author' in body)) {
+        if (body.content === undefined || typeof body.content !== 'string') {
+          throw new Error('Message missing content field');
+        }
+        return [{ role: 'user', content: body.content }];
+      }
+      throw new Error('Unsupported Discord payload format');
+    }),
+    formatResponse: jest.fn().mockReturnValue({
+      embeds: [{ description: 'Hello from Chimera!', color: 0x5865f2 }],
+    }),
+  }),
+}));
+
 import { Hono } from 'hono';
 import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';
@@ -48,6 +88,10 @@ function createTestApp(tenantContext?: Partial<TenantContext>) {
 }
 
 describe('Discord Routes', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   describe('POST /discord/interactions', () => {
     describe('PING challenge (type 1)', () => {
       it('should respond { type: 1 } to PING without DISCORD_PUBLIC_KEY set', async () => {
