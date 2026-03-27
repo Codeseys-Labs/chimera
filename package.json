@@ -105,5 +105,8 @@
   "engines": {
     "node": ">=20.0.0",
     "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1019.0"
   }
 }
