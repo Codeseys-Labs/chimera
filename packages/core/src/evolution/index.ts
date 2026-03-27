@@ -54,6 +54,15 @@ export {
   type ExperimentStatus,
 } from './experiment-runner';
 
+// Self-evolution orchestrator (full generate → commit → deploy → register flow)
+export {
+  SelfEvolutionOrchestrator,
+  createSelfEvolutionOrchestrator,
+  type EvolutionRequest,
+  type EvolutionResult,
+  type SelfEvolutionConfig,
+} from './self-evolution-orchestrator';
+
 // Self-reflection and health monitoring
 export {
   calculateHealthScore,
