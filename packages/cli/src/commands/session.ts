@@ -3,10 +3,20 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import { table } from 'table';
-import { loadConfig } from '../utils/config';
+import { loadWorkspaceConfig } from '../utils/workspace.js';
+import { apiClient } from '../lib/api-client.js';
+import { color } from '../lib/color.js';
+
+interface Session {
+  sessionId: string;
+  tenantId: string;
+  userId: string;
+  model: string;
+  status: string;
+  createdAt: string;
+}
 
 export function registerSessionCommands(program: Command): void {
   const session = program
@@ -18,32 +28,42 @@ export function registerSessionCommands(program: Command): void {
     .description('Create a new agent session')
     .option('-u, --user <userId>', 'User ID')
     .option('-m, --model <model>', 'Model ID (e.g., claude-opus-4-6)', 'claude-sonnet-4-5')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
-      const config = loadConfig();
+      const wsConfig = loadWorkspaceConfig();
 
-      if (!config.currentTenant) {
-        console.error(chalk.red('No tenant selected. Use "chimera tenant create" first.'));
+      if (!(wsConfig as any).current_tenant) {
+        const msg = 'No tenant selected. Use "chimera tenant switch <id>" first.';
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_TENANT' }));
+          process.exit(1);
+        }
+        console.error(color.red(msg));
         process.exit(1);
       }
 
       const spinner = ora('Creating session').start();
+      if (options.json) spinner.stop();
 
       try {
-        const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-        const sessionData = {
-          sessionId,
-          tenantId: config.currentTenant,
+        const created = await apiClient.post<Session>('/sessions', {
+          tenantId: (wsConfig as any).current_tenant,
           userId: options.user || 'default-user',
           model: options.model,
-          status: 'active',
-          createdAt: new Date().toISOString(),
-        };
+        });
 
-        spinner.succeed(chalk.green(`Session created: ${sessionId}`));
-        console.log(JSON.stringify(sessionData, null, 2));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to create session'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: created }));
+        } else {
+          spinner.succeed(color.green(`Session created: ${created.sessionId}`));
+          console.log(JSON.stringify(created, null, 2));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SESSION_CREATE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to create session'));
         throw error;
       }
     });
@@ -52,43 +72,82 @@ export function registerSessionCommands(program: Command): void {
     .command('list')
     .description('List active sessions')
     .option('-u, --user <userId>', 'Filter by user ID')
-    .action((options) => {
-      const config = loadConfig();
+    .option('--json', 'Output result as JSON')
+    .action(async (options) => {
+      const wsConfig = loadWorkspaceConfig();
 
-      if (!config.currentTenant) {
-        console.error(chalk.red('No tenant selected. Use "chimera tenant create" first.'));
+      if (!(wsConfig as any).current_tenant) {
+        const msg = 'No tenant selected. Use "chimera tenant switch <id>" first.';
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_TENANT' }));
+          process.exit(1);
+        }
+        console.error(color.red(msg));
         process.exit(1);
       }
 
-      console.log(chalk.yellow('Querying active sessions...'));
-      console.log(chalk.gray(`Tenant: ${config.currentTenant}`));
+      const spinner = ora('Fetching sessions').start();
+      if (options.json) spinner.stop();
 
-      if (options.user) {
-        console.log(chalk.gray(`User filter: ${options.user}`));
+      try {
+        const url = options.user ? `/sessions?userId=${encodeURIComponent(options.user)}` : '/sessions';
+        const sessions = await apiClient.get<Session[]>(url);
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: sessions }));
+          return;
+        }
+
+        spinner.succeed(color.green('Sessions retrieved'));
+
+        if (sessions.length === 0) {
+          console.log(color.yellow('No active sessions found.'));
+          return;
+        }
+
+        const rows = [
+          ['Session ID', 'User', 'Model', 'Status', 'Created'],
+          ...sessions.map((s) => [
+            s.sessionId,
+            s.userId,
+            s.model,
+            s.status,
+            new Date(s.createdAt).toLocaleString(),
+          ]),
+        ];
+        console.log(table(rows));
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SESSION_LIST_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to list sessions'));
+        throw error;
       }
-
-      // Mock data for demonstration
-      const sessions = [
-        ['Session ID', 'User', 'Model', 'Status', 'Created'],
-        ['session-123', 'user-001', 'claude-sonnet-4-5', 'active', '2026-03-20 10:00'],
-        ['session-456', 'user-002', 'claude-opus-4-6', 'active', '2026-03-20 11:30'],
-      ];
-
-      console.log(table(sessions));
     });
 
   session
     .command('terminate <session-id>')
     .description('Terminate an active session')
-    .action(async (sessionId: string) => {
+    .option('--json', 'Output result as JSON')
+    .action(async (sessionId: string, options) => {
       const spinner = ora(`Terminating session ${sessionId}`).start();
+      if (options.json) spinner.stop();
 
       try {
-        // Mock termination
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        spinner.succeed(chalk.green(`Session terminated: ${sessionId}`));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to terminate session'));
+        await apiClient.delete(`/sessions/${encodeURIComponent(sessionId)}`);
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { sessionId } }));
+        } else {
+          spinner.succeed(color.green(`Session terminated: ${sessionId}`));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SESSION_TERMINATE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to terminate session'));
         throw error;
       }
     });
