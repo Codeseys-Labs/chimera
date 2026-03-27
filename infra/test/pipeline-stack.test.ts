@@ -71,13 +71,13 @@ describe('PipelineStack', () => {
     });
 
     describe('S3 Artifact Bucket', () => {
-      it('should create artifact bucket with versioning and S3-managed encryption', () => {
+      it('should create artifact bucket with versioning and KMS-managed encryption', () => {
         template.hasResourceProperties('AWS::S3::Bucket', {
           VersioningConfiguration: { Status: 'Enabled' },
           BucketEncryption: {
             ServerSideEncryptionConfiguration: [{
               ServerSideEncryptionByDefault: {
-                SSEAlgorithm: 'AES256',
+                SSEAlgorithm: 'aws:kms',
               },
             }],
           },

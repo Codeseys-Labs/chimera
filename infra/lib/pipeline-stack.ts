@@ -127,7 +127,7 @@ export class PipelineStack extends cdk.Stack {
     this.artifactBucket = new s3.Bucket(this, 'ArtifactBucket', {
       bucketName: `chimera-pipeline-artifacts-${props.envName}-${this.account}`,
       versioned: true,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      encryption: s3.BucketEncryption.KMS_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: !isProd,

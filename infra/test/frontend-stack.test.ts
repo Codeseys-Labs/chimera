@@ -64,14 +64,11 @@ describe('FrontendStack', () => {
       });
     });
 
-    describe('OAI', () => {
-      it('should create an Origin Access Identity', () => {
-        template.resourceCountIs('AWS::CloudFront::CloudFrontOriginAccessIdentity', 1);
-        template.hasResourceProperties('AWS::CloudFront::CloudFrontOriginAccessIdentity', {
-          CloudFrontOriginAccessIdentityConfig: {
-            Comment: 'OAI for Chimera frontend - dev',
-          },
-        });
+    describe('OAC', () => {
+      it('should create an Origin Access Control (not OAI) for KMS bucket support', () => {
+        // OAC is required for SSE-KMS encrypted S3 buckets — OAI does not support SSE-KMS.
+        template.resourceCountIs('AWS::CloudFront::CloudFrontOriginAccessIdentity', 0);
+        template.resourceCountIs('AWS::CloudFront::OriginAccessControl', 1);
       });
     });
 

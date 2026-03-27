@@ -32,21 +32,17 @@ export class FrontendStack extends cdk.Stack {
 
     // ======================================================================
     // S3 Bucket for React SPA Assets
-    // Private bucket — CloudFront accesses via OAI only.
+    // Private bucket — CloudFront accesses via OAC (Origin Access Control).
+    // OAC is used instead of OAI because OAI does not support SSE-KMS.
     // ======================================================================
     this.bucket = new s3.Bucket(this, 'FrontendBucket', {
       bucketName: `chimera-frontend-${props.envName}-${this.account}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.KMS_MANAGED,
       versioned: isProd,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: !isProd,
     });
-
-    // OAI allows CloudFront to fetch objects from the private S3 bucket
-    const oai = new cloudfront.OriginAccessIdentity(this, 'FrontendOAI', {
-      comment: `OAI for Chimera frontend - ${props.envName}`,
-    });
-    this.bucket.grantRead(oai);
 
     // ======================================================================
     // Cache Policies
@@ -81,10 +77,13 @@ export class FrontendStack extends cdk.Stack {
 
     // ======================================================================
     // CloudFront Distribution
-    // Default behavior: S3 via OAI (HTML with revalidation)
-    // /assets/*: S3 via OAI (Vite-hashed assets, long cache)
+    // Default behavior: S3 via OAC (HTML with revalidation)
+    // /assets/*: S3 via OAC (Vite-hashed assets, long cache)
     // SPA fallback: 403/404 -> index.html for client-side routing
+    // OAC is required for SSE-KMS encrypted buckets (OAI does not support SSE-KMS).
     // ======================================================================
+    const s3Origin = origins.S3BucketOrigin.withOriginAccessControl(this.bucket);
+
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
       comment: `Chimera Frontend CDN - ${props.envName}`,
       enabled: true,
@@ -95,7 +94,7 @@ export class FrontendStack extends cdk.Stack {
       enableIpv6: true,
       defaultRootObject: 'index.html',
       defaultBehavior: {
-        origin: new origins.S3Origin(this.bucket, { originAccessIdentity: oai }),
+        origin: s3Origin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         compress: true,
@@ -103,7 +102,7 @@ export class FrontendStack extends cdk.Stack {
       },
       additionalBehaviors: {
         '/assets/*': {
-          origin: new origins.S3Origin(this.bucket, { originAccessIdentity: oai }),
+          origin: s3Origin,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
           compress: true,
