@@ -48,6 +48,7 @@ export type {
   StrandsTool,
   DiscoveryConfig,
   ToolRegistryOptions,
+  GatewayTargetConfig,
 } from './tool-registry';
 
 // Tool loader
