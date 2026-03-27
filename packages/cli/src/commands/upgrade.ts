@@ -6,8 +6,7 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import * as path from 'path';
-import * as fs from 'fs';
-import { spawnSync } from 'child_process';
+import { existsSync, mkdirSync } from 'fs';
 import { CodeCommitClient } from '@aws-sdk/client-codecommit';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
 import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit.js';
@@ -16,10 +15,10 @@ import { color } from '../lib/color.js';
 /**
  * Find project root by walking up directory tree looking for package.json
  */
-function findProjectRoot(): string {
+export function findProjectRoot(): string {
   let dir = process.cwd();
   while (dir !== path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) {
+    if (existsSync(path.join(dir, 'package.json'))) {
       return dir;
     }
     dir = path.dirname(dir);
@@ -30,27 +29,24 @@ function findProjectRoot(): string {
 }
 
 /**
- * Run a git command using spawnSync (safe: arguments are passed as array, no shell injection)
+ * Run a git command using Bun.$ (safe: arguments are app-controlled, no shell injection risk)
  * Throws on non-zero exit code unless ignoreError is true
  */
-function git(cwd: string, args: string[], ignoreError = false): string {
-  const result = spawnSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  if (!ignoreError && result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || `git ${args[0]} failed`);
+export async function git(cwd: string, args: string[], ignoreError = false): Promise<string> {
+  try {
+    return await Bun.$`git ${args}`.cwd(cwd).quiet().text();
+  } catch (err: any) {
+    if (ignoreError) return '';
+    throw new Error(err.stderr?.toString() || err.message || `git ${args[0]} failed`);
   }
-  return (result.stdout || '').trim();
 }
 
 /**
  * Check if git working directory has uncommitted changes
  */
-function hasUncommittedChanges(cwd: string): boolean {
+export async function hasUncommittedChanges(cwd: string): Promise<boolean> {
   try {
-    const output = git(cwd, ['status', '--porcelain']);
+    const output = await git(cwd, ['status', '--porcelain']);
     return output.length > 0;
   } catch {
     return false;
@@ -60,13 +56,15 @@ function hasUncommittedChanges(cwd: string): boolean {
 /**
  * Get GitHub repository URL from package.json
  */
-function getGitHubUrl(repoRoot: string): string {
+export async function getGitHubUrl(repoRoot: string): Promise<string> {
   const packageJsonPath = path.join(repoRoot, 'package.json');
-  if (!fs.existsSync(packageJsonPath)) {
+  if (!(await Bun.file(packageJsonPath).exists())) {
     throw new Error('package.json not found in project root');
   }
 
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  const packageJson = (await Bun.file(packageJsonPath).json()) as {
+    repository?: { url?: string };
+  };
   if (!packageJson.repository || !packageJson.repository.url) {
     throw new Error('No repository URL found in package.json');
   }
@@ -85,8 +83,9 @@ async function upgradeFromGitHub(
   region: string,
   repoName: string,
   githubUrl: string,
+  dryRun = false,
 ): Promise<void> {
-  if (hasUncommittedChanges(repoRoot)) {
+  if (await hasUncommittedChanges(repoRoot)) {
     throw new Error(
       'You have uncommitted changes. Please commit or stash them before upgrading:\n' +
         '  git add .\n' +
@@ -101,46 +100,75 @@ async function upgradeFromGitHub(
   console.log(color.gray(`  Received ${ccFiles.length} files from CodeCommit`));
 
   try {
-    git(repoRoot, ['remote', 'get-url', 'origin']);
-    git(repoRoot, ['remote', 'set-url', 'origin', githubUrl]);
+    await git(repoRoot, ['remote', 'get-url', 'origin']);
+    await git(repoRoot, ['remote', 'set-url', 'origin', githubUrl]);
     console.log(color.gray('  Updated GitHub remote (origin)'));
   } catch {
-    git(repoRoot, ['remote', 'add', 'origin', githubUrl]);
+    await git(repoRoot, ['remote', 'add', 'origin', githubUrl]);
     console.log(color.gray('  Added GitHub remote (origin)'));
   }
 
   console.log(color.gray('  Fetching from GitHub...'));
-  git(repoRoot, ['fetch', 'origin', 'main']);
+  await git(repoRoot, ['fetch', 'origin', 'main']);
 
-  const originalBranch = git(repoRoot, ['branch', '--show-current']);
+  const originalBranch = await git(repoRoot, ['branch', '--show-current']);
   const upgradeBranch = `upgrade-${Date.now()}`;
   console.log(color.gray(`  Creating upgrade branch: ${upgradeBranch}`));
-  git(repoRoot, ['checkout', '-b', upgradeBranch]);
+  await git(repoRoot, ['checkout', '-b', upgradeBranch]);
 
   try {
     console.log(color.gray('  Applying CodeCommit state to upgrade branch...'));
+    let changedCount = 0;
+    const totalCount = ccFiles.length;
     for (const file of ccFiles) {
       const localPath = path.join(repoRoot, file.path);
-      const localDir = path.dirname(localPath);
-      if (!fs.existsSync(localDir)) {
-        fs.mkdirSync(localDir, { recursive: true });
+      const localFile = Bun.file(localPath);
+      if (await localFile.exists()) {
+        const localContent = Buffer.from(await localFile.arrayBuffer());
+        if (localContent.equals(file.content)) continue;
+      } else {
+        mkdirSync(path.dirname(localPath), { recursive: true });
       }
-      fs.writeFileSync(localPath, file.content);
+      await Bun.write(localPath, file.content);
+      changedCount++;
     }
+    console.log(
+      color.gray(
+        `  Applied ${changedCount} changed file(s) (skipped ${totalCount - changedCount} unchanged)`,
+      ),
+    );
 
-    git(repoRoot, ['add', '-A']);
+    await git(repoRoot, ['add', '-A']);
     try {
-      git(repoRoot, ['commit', '-m', 'CodeCommit state (agent edits)']);
+      await git(repoRoot, ['commit', '-m', 'CodeCommit state (agent edits)']);
     } catch {
       console.log(color.gray('  No changes from CodeCommit (already up to date)'));
     }
 
+    if (dryRun) {
+      console.log(color.gray('  Dry run: computing diff against upstream GitHub...'));
+      const diffStat = await git(repoRoot, ['diff', '--stat', 'HEAD', 'origin/main'], true);
+      if (diffStat.trim()) {
+        console.log(color.yellow('\nFiles that would change:'));
+        console.log(diffStat);
+      } else {
+        console.log(color.green('\nNo changes from upstream GitHub (already up to date)'));
+      }
+      return;
+    }
+
     console.log(color.gray('  Merging upstream GitHub changes...'));
     try {
-      git(repoRoot, ['merge', 'origin/main', '--no-edit', '-m', 'Upgrade: merge upstream GitHub changes']);
+      await git(repoRoot, [
+        'merge',
+        'origin/main',
+        '--no-edit',
+        '-m',
+        'Upgrade: merge upstream GitHub changes',
+      ]);
       console.log(color.gray('  Merge successful (no conflicts)'));
     } catch (error: any) {
-      const status = git(repoRoot, ['status'], true);
+      const status = await git(repoRoot, ['status'], true);
 
       if (status.includes('Unmerged paths') || status.includes('both modified')) {
         console.error(color.yellow('\nMerge conflicts detected during upgrade.'));
@@ -158,18 +186,25 @@ async function upgradeFromGitHub(
     }
 
     console.log(color.gray('  Pushing merged result to CodeCommit...'));
-    await pushToCodeCommit(
-      client,
-      repoName,
-      repoRoot,
-      'main',
-      'Upgrade: merge upstream GitHub changes',
-    );
-    console.log(color.gray('  Push successful'));
+    try {
+      await pushToCodeCommit(
+        client,
+        repoName,
+        repoRoot,
+        'main',
+        'Upgrade: merge upstream GitHub changes',
+      );
+      console.log(color.gray('  Push successful'));
+    } catch (pushError: any) {
+      console.error(color.yellow('\n  Push to CodeCommit failed — rolling back local changes'));
+      throw new Error(
+        `CodeCommit push failed (local state will be restored): ${pushError.message}`,
+      );
+    }
   } finally {
     console.log(color.gray(`  Returning to original branch: ${originalBranch}`));
-    git(repoRoot, ['checkout', originalBranch], true);
-    git(repoRoot, ['branch', '-D', upgradeBranch], true);
+    await git(repoRoot, ['checkout', originalBranch], true);
+    await git(repoRoot, ['branch', '-D', upgradeBranch], true);
   }
 }
 
@@ -178,6 +213,7 @@ export function registerUpgradeCommand(program: Command): void {
     .command('upgrade')
     .description('Apply upstream GitHub changes to CodeCommit while preserving agent edits')
     .option('--github-url <url>', 'GitHub repository URL (defaults to package.json repository field)')
+    .option('--dry-run', 'Show what changes would be applied without merging')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting upgrade operation').start();
@@ -189,14 +225,22 @@ export function registerUpgradeCommand(program: Command): void {
         const repositoryName = wsConfig?.workspace?.repository;
         if (!region || !repositoryName) {
           if (options.json) {
-            console.log(JSON.stringify({ status: 'error', error: 'No workspace configuration found', code: 'NO_CONFIG' }));
+            console.log(
+              JSON.stringify({
+                status: 'error',
+                error: 'No workspace configuration found',
+                code: 'NO_CONFIG',
+              }),
+            );
             process.exit(1);
           }
           spinner.fail(color.red('No workspace configuration found'));
           console.error(color.red('Run chimera init to configure your workspace'));
           process.exit(1);
         }
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        if (wsConfig?.aws?.profile) {
+          process.env.AWS_PROFILE = wsConfig.aws.profile;
+        }
         if (!options.json) spinner.succeed(color.green('Workspace: ' + repositoryName + ' in ' + region));
 
         if (!options.json) spinner.start('Locating project root...');
@@ -204,16 +248,29 @@ export function registerUpgradeCommand(program: Command): void {
         if (!options.json) spinner.succeed(color.green(`Project root: ${repoRoot}`));
 
         if (!options.json) spinner.start('Resolving GitHub upstream URL...');
-        const githubUrl = options.githubUrl || getGitHubUrl(repoRoot);
+        const githubUrl = options.githubUrl || (await getGitHubUrl(repoRoot));
         if (!options.json) spinner.succeed(color.green(`GitHub upstream: ${githubUrl}`));
 
-        if (!options.json) spinner.start('Upgrading from GitHub...');
-        await upgradeFromGitHub(repoRoot, region, repositoryName, githubUrl);
-        if (!options.json) spinner.succeed(color.green('Upgrade complete'));
+        if (options.dryRun) {
+          if (!options.json) spinner.start('Checking for upstream changes (dry run)...');
+        } else {
+          if (!options.json) spinner.start('Upgrading from GitHub...');
+        }
+        await upgradeFromGitHub(repoRoot, region, repositoryName, githubUrl, options.dryRun);
+        if (options.dryRun) {
+          if (!options.json) spinner.succeed(color.green('Dry run complete'));
+        } else {
+          if (!options.json) spinner.succeed(color.green('Upgrade complete'));
+        }
 
         if (options.json) {
-          console.log(JSON.stringify({ status: 'ok', data: { githubUrl, repository: repositoryName } }));
-        } else {
+          console.log(
+            JSON.stringify({
+              status: 'ok',
+              data: { githubUrl, repository: repositoryName, dryRun: options.dryRun ?? false },
+            }),
+          );
+        } else if (!options.dryRun) {
           console.log(color.green('\n✓ CodeCommit upgraded with latest upstream changes'));
           console.log(color.gray('\nWhat happened:'));
           console.log(color.gray('  1. Fetched latest from GitHub (upstream)'));
@@ -224,7 +281,9 @@ export function registerUpgradeCommand(program: Command): void {
         }
       } catch (error: any) {
         if (options.json) {
-          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'UPGRADE_FAILED' }));
+          console.log(
+            JSON.stringify({ status: 'error', error: error.message, code: 'UPGRADE_FAILED' }),
+          );
           process.exit(1);
         }
         spinner.fail(color.red('Upgrade failed'));
