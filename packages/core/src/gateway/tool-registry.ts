@@ -17,6 +17,26 @@ import type { AWSClientFactory } from '../aws-tools';
 import type { ToolIdentifier } from './tier-config';
 import { isToolAvailable } from './tier-config';
 
+/**
+ * Configuration for registering a tool group as an AgentCore Gateway target.
+ *
+ * Each config describes one Lambda target to deploy and register with the Gateway.
+ * Tool identifiers within a target share a common minimum subscription tier.
+ */
+export interface GatewayTargetConfig {
+  /** Target name for Gateway registration (e.g., 'chimera-tools-tier1') */
+  targetName: string;
+  /** Tool identifiers included in this target */
+  identifiers: ToolIdentifier[];
+  /**
+   * Minimum tenant tier required to access this target.
+   * null means available to all tenants (discovery tools).
+   */
+  minimumTier: TenantTier | null;
+  /** Human-readable description of tools in this target */
+  description: string;
+}
+
 // Type imports for discovery tools (these don't trigger module loading)
 import type {
   ConfigAggregatorConfig,
@@ -267,5 +287,53 @@ export class ToolRegistry {
    */
   isInitialized(): boolean {
     return this.initialized;
+  }
+
+  /**
+   * Get configurations for registering tool groups as AgentCore Gateway targets.
+   *
+   * Returns one config per tool tier group (tier1, tier2, tier3, discovery).
+   * Each config describes a Lambda target to deploy and register with the Gateway,
+   * enabling the Python agent to discover tools dynamically at runtime instead
+   * of hardcoding ~90 tool imports.
+   *
+   * Used by GatewayRegistrationStack (infra/lib/gateway-registration-stack.ts)
+   * to create and register the correct set of Lambda targets per tier.
+   *
+   * @returns Array of gateway target configurations (4 entries — one per tier group)
+   */
+  static getGatewayTargetConfigs(): GatewayTargetConfig[] {
+    return [
+      {
+        targetName: 'chimera-tools-tier1',
+        identifiers: ['lambda', 'ec2', 's3', 'cloudwatch', 'sqs'],
+        minimumTier: 'basic',
+        description: 'Core compute and storage tools — available to all tenants',
+      },
+      {
+        targetName: 'chimera-tools-tier2',
+        identifiers: ['rds', 'redshift', 'athena', 'glue', 'opensearch'],
+        minimumTier: 'advanced',
+        description: 'Database and analytics tools — advanced tier and above',
+      },
+      {
+        targetName: 'chimera-tools-tier3',
+        identifiers: [
+          'stepfunctions', 'bedrock', 'sagemaker', 'rekognition',
+          'textract', 'transcribe', 'codebuild', 'codecommit', 'codepipeline',
+        ],
+        minimumTier: 'premium',
+        description: 'Orchestration and ML tools — premium tier only',
+      },
+      {
+        targetName: 'chimera-tools-discovery',
+        identifiers: [
+          'config-scanner', 'cost-analyzer', 'tag-organizer',
+          'resource-explorer', 'stack-inventory', 'resource-index',
+        ],
+        minimumTier: null,
+        description: 'Discovery tools — available to all tenants regardless of tier',
+      },
+    ];
   }
 }
