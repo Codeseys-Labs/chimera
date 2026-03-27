@@ -37,6 +37,7 @@ export interface WorkspaceConfig {
   auth?: {
     cognito_domain?: string;
     callback_url?: string;
+    admin_email?: string;
   };
   /** Docker Hub credentials — DEPRECATED in chimera.toml; move to ~/.chimera/credentials */
   docker?: {
@@ -55,6 +56,9 @@ export interface CredentialsConfig {
     id_token?: string;
     refresh_token?: string;
     expires_at?: string;
+  };
+  admin?: {
+    password?: string;
   };
 }
 

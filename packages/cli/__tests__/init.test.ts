@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { listAwsProfiles, writeAwsProfile } from '../src/commands/init';
+import { listAwsProfiles, writeAwsProfile, generatePassword, isValidEmail } from '../src/commands/init';
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'chimera-init-test-'));
@@ -173,5 +173,53 @@ describe('writeAwsProfile', () => {
     } finally {
       rmrf(tmpDir);
     }
+  });
+});
+
+describe('generatePassword', () => {
+  it('generates a 16-character password', () => {
+    const pwd = generatePassword();
+    expect(pwd.length).toBe(16);
+  });
+
+  it('contains at least one uppercase letter', () => {
+    const pwd = generatePassword();
+    expect(/[A-Z]/.test(pwd)).toBe(true);
+  });
+
+  it('contains at least one lowercase letter', () => {
+    const pwd = generatePassword();
+    expect(/[a-z]/.test(pwd)).toBe(true);
+  });
+
+  it('contains at least one digit', () => {
+    const pwd = generatePassword();
+    expect(/[0-9]/.test(pwd)).toBe(true);
+  });
+
+  it('contains at least one symbol', () => {
+    const pwd = generatePassword();
+    expect(/[^A-Za-z0-9]/.test(pwd)).toBe(true);
+  });
+
+  it('generates unique passwords on each call', () => {
+    const passwords = new Set(Array.from({ length: 10 }, () => generatePassword()));
+    expect(passwords.size).toBeGreaterThan(1);
+  });
+});
+
+describe('isValidEmail', () => {
+  it('accepts valid email addresses', () => {
+    expect(isValidEmail('user@example.com')).toBe(true);
+    expect(isValidEmail('admin+tag@sub.domain.org')).toBe(true);
+    expect(isValidEmail('a@b.io')).toBe(true);
+  });
+
+  it('rejects invalid email addresses', () => {
+    expect(isValidEmail('notanemail')).toBe(false);
+    expect(isValidEmail('@nodomain.com')).toBe(false);
+    expect(isValidEmail('missing@tld')).toBe(false);
+    expect(isValidEmail('')).toBe(false);
+    expect(isValidEmail('spaces in@email.com')).toBe(false);
   });
 });
