@@ -108,7 +108,7 @@ export function createAthenaTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            queryExecutionId: execution?.QueryExecutionId!,
+            queryExecutionId: execution?.QueryExecutionId,
             query: execution?.Query,
             state: execution?.Status?.State,
             stateChangeReason: execution?.Status?.StateChangeReason,
