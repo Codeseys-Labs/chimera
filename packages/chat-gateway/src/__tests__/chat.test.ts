@@ -25,9 +25,9 @@ let app: any = null;
 
 beforeAll(() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     request = require('supertest');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     app = require('../server').default;
   } catch {
     // HTTP tests will be skipped via early returns
