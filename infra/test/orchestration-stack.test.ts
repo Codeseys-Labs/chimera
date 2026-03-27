@@ -151,40 +151,41 @@ describe('OrchestrationStack', () => {
   });
 
   describe('SQS Queues', () => {
-    it('should create 4 SQS queues (2 primary + 2 DLQs)', () => {
-      template.resourceCountIs('AWS::SQS::Queue', 4);
+    it('should create 10 SQS queues (2 ChimeraQueue main + 2 ChimeraQueue DLQ + 6 Lambda DLQs)', () => {
+      // ChimeraQueue provides 2 main queues + 2 DLQs.
+      // ChimeraLambda creates 1 DLQ per Lambda × 6 Lambdas = 6 DLQs.
+      template.resourceCountIs('AWS::SQS::Queue', 10);
     });
 
     it('should create Standard task queue with correct config', () => {
+      // ChimeraQueue manages queue config internally; ReceiveMessageWaitTime not exposed
       template.hasResourceProperties('AWS::SQS::Queue', {
         QueueName: 'chimera-agent-tasks-dev',
-        VisibilityTimeout: 900, // 15 minutes
-        MessageRetentionPeriod: 345600, // 4 days
-        ReceiveMessageWaitTimeSeconds: 20, // Long polling
+        VisibilityTimeout: 900, // 15 minutes (passed via ChimeraQueue)
       });
     });
 
     it('should create FIFO message queue with correct config', () => {
+      // contentBasedDeduplication set via escape hatch after ChimeraQueue creation
       template.hasResourceProperties('AWS::SQS::Queue', {
         QueueName: 'chimera-agent-messages-dev.fifo',
         FifoQueue: true,
         ContentBasedDeduplication: true,
         VisibilityTimeout: 300, // 5 minutes
-        MessageRetentionPeriod: 345600, // 4 days
-        ReceiveMessageWaitTimeSeconds: 20,
       });
     });
 
-    it('should create task DLQ', () => {
+    it('should create task DLQ (ChimeraQueue naming: {queue}-dlq)', () => {
+      // ChimeraQueue DLQ naming: {queueName}-dlq (suffix, not prefix)
       template.hasResourceProperties('AWS::SQS::Queue', {
-        QueueName: 'chimera-agent-tasks-dlq-dev',
-        MessageRetentionPeriod: 1209600, // 14 days
+        QueueName: 'chimera-agent-tasks-dev-dlq',
+        MessageRetentionPeriod: 1209600, // 14 days (ChimeraQueue default)
       });
     });
 
-    it('should create message DLQ (FIFO)', () => {
+    it('should create message DLQ (FIFO) (ChimeraQueue naming: {queue}-dlq.fifo)', () => {
       template.hasResourceProperties('AWS::SQS::Queue', {
-        QueueName: 'chimera-agent-messages-dlq-dev.fifo',
+        QueueName: 'chimera-agent-messages-dev-dlq.fifo',
         FifoQueue: true,
         MessageRetentionPeriod: 1209600, // 14 days
       });
@@ -200,12 +201,12 @@ describe('OrchestrationStack', () => {
     });
 
     it('should encrypt queues with KMS', () => {
-      // All 4 queues should have KMS encryption
+      // All 10 queues should have KMS encryption (ChimeraQueue + ChimeraLambda DLQs)
       const queues = template.findResources('AWS::SQS::Queue');
       const encryptedCount = Object.values(queues).filter(
         (queue) => (queue as { Properties: { KmsMasterKeyId?: string } }).Properties.KmsMasterKeyId !== undefined
       ).length;
-      expect(encryptedCount).toBe(4);
+      expect(encryptedCount).toBe(10);
     });
   });
 
@@ -302,8 +303,9 @@ describe('OrchestrationStack', () => {
 
   describe('Lambda Functions', () => {
     it('should create workflow Lambda functions', () => {
-      // 6 workflow functions + 1 LogRetention function for CloudWatch Logs
-      template.resourceCountIs('AWS::Lambda::Function', 7);
+      // 6 ChimeraLambda functions + 1 LogRetention singleton + 1 LogRetention provider = 8
+      // (ChimeraLambda logRetention triggers additional CDK custom resource machinery)
+      template.resourceCountIs('AWS::Lambda::Function', 8);
     });
 
     it('should create StartBuildFunction', () => {

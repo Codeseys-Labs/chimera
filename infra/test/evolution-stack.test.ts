@@ -17,6 +17,9 @@ import { EvolutionStack } from '../lib/evolution-stack';
 
 // Timeout configured in infra/bunfig.toml: [test] timeout = 30000
 
+// TableV2 (GlobalTable) requires an environment-bound stack
+const ENV = { account: '123456789012', region: 'us-east-1' };
+
 describe('EvolutionStack', () => {
   let stack: EvolutionStack;
   let template: Template;
@@ -24,13 +27,14 @@ describe('EvolutionStack', () => {
   // Synthesize once — CDK synthesis of a large stack is expensive
   beforeAll(() => {
     const app = new cdk.App();
-    const auditStack = new cdk.Stack(app, 'AuditStack');
+    const auditStack = new cdk.Stack(app, 'AuditStack', { env: ENV });
     const auditTable = new dynamodb.Table(auditStack, 'AuditTable', {
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
     });
 
     stack = new EvolutionStack(app, 'TestEvolutionStack', {
+      env: ENV,
       envName: 'dev',
       auditTable,
     });
@@ -39,16 +43,14 @@ describe('EvolutionStack', () => {
 
   describe('DynamoDB: Evolution State Table', () => {
     it('should create evolution state table with correct key schema', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
+      // ChimeraTable uses TableV2 → AWS::DynamoDB::GlobalTable
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
         TableName: 'chimera-evolution-state-dev',
         KeySchema: [
           { AttributeName: 'PK', KeyType: 'HASH' },
           { AttributeName: 'SK', KeyType: 'RANGE' },
         ],
         BillingMode: 'PAY_PER_REQUEST',
-        PointInTimeRecoverySpecification: {
-          PointInTimeRecoveryEnabled: true,
-        },
         StreamSpecification: {
           StreamViewType: 'NEW_AND_OLD_IMAGES',
         },
@@ -59,8 +61,21 @@ describe('EvolutionStack', () => {
       });
     });
 
+    it('should have PITR enabled (in Replicas for GlobalTable)', () => {
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+        TableName: 'chimera-evolution-state-dev',
+        Replicas: Match.arrayWith([
+          Match.objectLike({
+            PointInTimeRecoverySpecification: {
+              PointInTimeRecoveryEnabled: true,
+            },
+          }),
+        ]),
+      });
+    });
+
     it('should create GSI1-lifecycle index for memory lifecycle queries', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
         TableName: 'chimera-evolution-state-dev',
         GlobalSecondaryIndexes: Match.arrayWith([
           Match.objectLike({
@@ -76,7 +91,7 @@ describe('EvolutionStack', () => {
     });
 
     it('should create GSI2-unprocessed-feedback index for batch processing', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
         TableName: 'chimera-evolution-state-dev',
         GlobalSecondaryIndexes: Match.arrayWith([
           Match.objectLike({
@@ -92,7 +107,7 @@ describe('EvolutionStack', () => {
     });
 
     it('should have DESTROY removal policy in dev', () => {
-      const tables = template.findResources('AWS::DynamoDB::Table', {
+      const tables = template.findResources('AWS::DynamoDB::GlobalTable', {
         Properties: { TableName: 'chimera-evolution-state-dev' },
       });
       const tableResource = Object.values(tables)[0] as any;
@@ -101,13 +116,14 @@ describe('EvolutionStack', () => {
   });
 
   describe('S3: Evolution Artifacts Bucket', () => {
-    it('should create artifacts bucket with versioning and encryption', () => {
+    it('should create artifacts bucket with versioning and KMS encryption', () => {
+      // ChimeraBucket upgrades from AES256 to KMS
       template.hasResourceProperties('AWS::S3::Bucket', {
         VersioningConfiguration: { Status: 'Enabled' },
         BucketEncryption: {
           ServerSideEncryptionConfiguration: [
             {
-              ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' },
+              ServerSideEncryptionByDefault: { SSEAlgorithm: 'aws:kms' },
             },
           ],
         },
@@ -481,12 +497,13 @@ describe('EvolutionStack', () => {
 
     beforeAll(() => {
       const prodApp = new cdk.App();
-      const prodAuditStack = new cdk.Stack(prodApp, 'ProdAuditStack');
+      const prodAuditStack = new cdk.Stack(prodApp, 'ProdAuditStack', { env: ENV });
       const prodAuditTable = new dynamodb.Table(prodAuditStack, 'ProdAuditTable', {
         partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
         sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       });
       prodStack = new EvolutionStack(prodApp, 'ProdEvolutionStack', {
+        env: ENV,
         envName: 'prod',
         auditTable: prodAuditTable,
       });
@@ -494,7 +511,7 @@ describe('EvolutionStack', () => {
     });
 
     it('should use RETAIN removal policy for table in prod', () => {
-      const tables = prodTemplate.findResources('AWS::DynamoDB::Table', {
+      const tables = prodTemplate.findResources('AWS::DynamoDB::GlobalTable', {
         Properties: { TableName: 'chimera-evolution-state-prod' },
       });
       const tableResource = Object.values(tables)[0] as any;
