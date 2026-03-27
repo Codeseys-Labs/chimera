@@ -1,19 +1,21 @@
 /**
- * Workspace-local configuration management via chimera.toml
+ * Workspace-local configuration management via chimera.toml (ADR-030)
  *
  * Reads workspace configuration from chimera.toml, walking up the directory
- * tree like package.json. Falls back to ~/.chimera/config.json for backward
- * compatibility when no chimera.toml is found.
+ * tree like package.json. chimera.toml is the single source of truth — no
+ * fallback to ~/.chimera/config.json (removed per ADR-030).
+ *
+ * Credentials (Docker Hub tokens, auth tokens) belong in ~/.chimera/credentials,
+ * NOT in chimera.toml.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import TOML from 'smol-toml';
 
 export interface WorkspaceConfig {
   aws?: { profile?: string; region?: string };
-  workspace?: { environment?: string; repository?: string };
+  workspace?: { name?: string; environment?: string; repository?: string };
   deployment?: {
     account_id?: string;
     status?: string;
@@ -27,19 +29,40 @@ export interface WorkspaceConfig {
     cognito_user_pool_id?: string;
     cognito_client_id?: string;
   };
-  /** Optional Docker Hub credentials for avoiding pull rate limits.
-   *  If present, `chimera deploy` stores these in Secrets Manager and
-   *  wires the secret into the CodeBuild Docker stage so buildspec-docker.yml
-   *  can `docker login` before pulling base images.
-   */
+  tenants?: {
+    default_tier?: string;
+    max_tenants?: number;
+  };
+  auth?: {
+    cognito_domain?: string;
+    callback_url?: string;
+  };
+  /** Docker Hub credentials — DEPRECATED in chimera.toml; move to ~/.chimera/credentials */
   docker?: {
     username?: string;
     token?: string;
   };
 }
 
+export interface CredentialsConfig {
+  docker?: {
+    username?: string;
+    token?: string;
+  };
+  auth?: {
+    access_token?: string;
+    id_token?: string;
+    refresh_token?: string;
+    expires_at?: string;
+  };
+}
+
 const TOML_FILENAME = 'chimera.toml';
-const LEGACY_CONFIG_FILE = path.join(os.homedir(), '.chimera', 'config.json');
+const CREDENTIALS_FILE = path.join(
+  process.env['HOME'] ?? process.env['USERPROFILE'] ?? '~',
+  '.chimera',
+  'credentials',
+);
 
 /**
  * Walk up from startDir looking for chimera.toml.
@@ -47,7 +70,6 @@ const LEGACY_CONFIG_FILE = path.join(os.homedir(), '.chimera', 'config.json');
  */
 export function findWorkspaceConfig(startDir?: string): string | null {
   let current = path.resolve(startDir ?? process.cwd());
-
   let parent = path.dirname(current);
 
   while (parent !== current) {
@@ -69,8 +91,8 @@ export function findWorkspaceConfig(startDir?: string): string | null {
 }
 
 /**
- * Load workspace configuration.
- * Priority: chimera.toml (walk up from startDir) > ~/.chimera/config.json > {}
+ * Load workspace configuration from chimera.toml.
+ * Returns {} when no chimera.toml is found (no legacy JSON fallback — ADR-030).
  */
 export function loadWorkspaceConfig(startDir?: string): WorkspaceConfig {
   const tomlPath = findWorkspaceConfig(startDir);
@@ -79,17 +101,6 @@ export function loadWorkspaceConfig(startDir?: string): WorkspaceConfig {
     try {
       const raw = fs.readFileSync(tomlPath, 'utf8');
       return TOML.parse(raw) as WorkspaceConfig;
-    } catch {
-      return {};
-    }
-  }
-
-  // Fall back to legacy ~/.chimera/config.json
-  if (fs.existsSync(LEGACY_CONFIG_FILE)) {
-    try {
-      const raw = fs.readFileSync(LEGACY_CONFIG_FILE, 'utf8');
-      const legacy = JSON.parse(raw) as Record<string, unknown>;
-      return mapLegacyConfig(legacy);
     } catch {
       return {};
     }
@@ -115,55 +126,30 @@ export function saveWorkspaceConfig(config: WorkspaceConfig, dir?: string): void
 }
 
 /**
- * Map legacy ~/.chimera/config.json fields to WorkspaceConfig shape.
+ * Load credentials from ~/.chimera/credentials (TOML format).
+ * Returns {} when the file does not exist.
  */
-function mapLegacyConfig(legacy: Record<string, unknown>): WorkspaceConfig {
-  const config: WorkspaceConfig = {};
-
-  const awsProfile = legacy['awsProfile'] as string | undefined;
-  const awsRegion = legacy['awsRegion'] as string | undefined;
-  if (awsProfile !== undefined || awsRegion !== undefined) {
-    config.aws = {};
-    if (awsProfile !== undefined) config.aws.profile = awsProfile;
-    if (awsRegion !== undefined) config.aws.region = awsRegion;
+export function loadCredentials(): CredentialsConfig {
+  if (!fs.existsSync(CREDENTIALS_FILE)) {
+    return {};
   }
-
-  const dep = legacy['deployment'] as Record<string, unknown> | undefined;
-  if (dep) {
-    const repoName = dep['repositoryName'] as string | undefined;
-    if (repoName !== undefined) {
-      config.workspace = { repository: repoName };
-    }
-
-    const accountId = dep['accountId'] as string | undefined;
-    const status = dep['status'] as string | undefined;
-    const lastDeployed = dep['lastDeployed'] as string | undefined;
-
-    if (accountId !== undefined || status !== undefined || lastDeployed !== undefined) {
-      config.deployment = {};
-      if (accountId !== undefined) config.deployment.account_id = accountId;
-      if (status !== undefined) config.deployment.status = status;
-      if (lastDeployed !== undefined) config.deployment.last_deployed = lastDeployed;
-    }
-
-    const apiUrl = dep['apiUrl'] as string | undefined;
-    const webSocketUrl = dep['webSocketUrl'] as string | undefined;
-    const cognitoUserPoolId = dep['cognitoUserPoolId'] as string | undefined;
-    const cognitoClientId = dep['cognitoClientId'] as string | undefined;
-
-    if (
-      apiUrl !== undefined ||
-      webSocketUrl !== undefined ||
-      cognitoUserPoolId !== undefined ||
-      cognitoClientId !== undefined
-    ) {
-      config.endpoints = {};
-      if (apiUrl !== undefined) config.endpoints.api_url = apiUrl;
-      if (webSocketUrl !== undefined) config.endpoints.websocket_url = webSocketUrl;
-      if (cognitoUserPoolId !== undefined) config.endpoints.cognito_user_pool_id = cognitoUserPoolId;
-      if (cognitoClientId !== undefined) config.endpoints.cognito_client_id = cognitoClientId;
-    }
+  try {
+    const raw = fs.readFileSync(CREDENTIALS_FILE, 'utf8');
+    return TOML.parse(raw) as CredentialsConfig;
+  } catch {
+    return {};
   }
+}
 
-  return config;
+/**
+ * Save credentials to ~/.chimera/credentials (TOML format, mode 0600).
+ * Ensures the ~/.chimera directory exists before writing.
+ */
+export function saveCredentials(credentials: CredentialsConfig): void {
+  const credDir = path.dirname(CREDENTIALS_FILE);
+  if (!fs.existsSync(credDir)) {
+    fs.mkdirSync(credDir, { recursive: true });
+  }
+  const content = TOML.stringify(credentials as Parameters<typeof TOML.stringify>[0]);
+  fs.writeFileSync(CREDENTIALS_FILE, content, { encoding: 'utf8', mode: 0o600 });
 }
