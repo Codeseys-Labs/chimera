@@ -3,10 +3,18 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import { table } from 'table';
-import { loadConfig } from '../utils/config';
+import { loadWorkspaceConfig } from '../utils/workspace.js';
+import { apiClient } from '../lib/api-client.js';
+import { color } from '../lib/color.js';
+
+interface Skill {
+  name: string;
+  version: string;
+  category: string;
+  status: string;
+}
 
 export function registerSkillCommands(program: Command): void {
   const skill = program
@@ -17,54 +25,96 @@ export function registerSkillCommands(program: Command): void {
     .command('list')
     .description('List installed skills')
     .option('--category <category>', 'Filter by category')
-    .action((options) => {
-      const config = loadConfig();
+    .option('--json', 'Output result as JSON')
+    .action(async (options) => {
+      const wsConfig = loadWorkspaceConfig();
 
-      if (!config.currentTenant) {
-        console.error(chalk.red('No tenant selected. Use "chimera tenant create" first.'));
+      if (!(wsConfig as any).current_tenant) {
+        const msg = 'No tenant selected. Use "chimera tenant switch <id>" first.';
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_TENANT' }));
+          process.exit(1);
+        }
+        console.error(color.red(msg));
         process.exit(1);
       }
 
-      console.log(chalk.yellow('Querying installed skills...'));
-      console.log(chalk.gray(`Tenant: ${config.currentTenant}`));
+      const spinner = ora('Fetching skills').start();
+      if (options.json) spinner.stop();
 
-      if (options.category) {
-        console.log(chalk.gray(`Category filter: ${options.category}`));
+      try {
+        const url = options.category
+          ? `/skills?category=${encodeURIComponent(options.category)}`
+          : '/skills';
+        const skills = await apiClient.get<Skill[]>(url);
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: skills }));
+          return;
+        }
+
+        spinner.succeed(color.green('Skills retrieved'));
+
+        if (skills.length === 0) {
+          console.log(color.yellow('No skills installed.'));
+          return;
+        }
+
+        const rows = [
+          ['Skill Name', 'Version', 'Category', 'Status'],
+          ...skills.map((s) => [s.name, s.version, s.category, s.status]),
+        ];
+        console.log(table(rows));
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SKILL_LIST_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to list skills'));
+        throw error;
       }
-
-      // Mock data for demonstration
-      const skills = [
-        ['Skill Name', 'Version', 'Category', 'Status'],
-        ['web-search', '1.0.0', 'research', 'enabled'],
-        ['code-review', '2.1.0', 'development', 'enabled'],
-        ['data-analysis', '1.5.0', 'analytics', 'disabled'],
-      ];
-
-      console.log(table(skills));
     });
 
   skill
     .command('install <skill-name>')
     .description('Install a skill from the marketplace')
     .option('-v, --version <version>', 'Skill version', 'latest')
+    .option('--json', 'Output result as JSON')
     .action(async (skillName: string, options) => {
-      const config = loadConfig();
+      const wsConfig = loadWorkspaceConfig();
 
-      if (!config.currentTenant) {
-        console.error(chalk.red('No tenant selected. Use "chimera tenant create" first.'));
+      if (!(wsConfig as any).current_tenant) {
+        const msg = 'No tenant selected. Use "chimera tenant switch <id>" first.';
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_TENANT' }));
+          process.exit(1);
+        }
+        console.error(color.red(msg));
         process.exit(1);
       }
 
       const spinner = ora(`Installing skill: ${skillName}@${options.version}`).start();
+      if (options.json) spinner.stop();
 
       try {
-        // Mock installation
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const installed = await apiClient.post<Skill>('/skills', {
+          name: skillName,
+          version: options.version,
+          tenantId: (wsConfig as any).current_tenant,
+        });
 
-        spinner.succeed(chalk.green(`Skill installed: ${skillName}@${options.version}`));
-        console.log(chalk.gray('Run "chimera skill enable <skill-name>" to activate'));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to install skill'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: installed }));
+        } else {
+          spinner.succeed(color.green(`Skill installed: ${skillName}@${options.version}`));
+          console.log(color.gray('Run "chimera skill enable <skill-name>" to activate'));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SKILL_INSTALL_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to install skill'));
         throw error;
       }
     });
@@ -72,15 +122,26 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('enable <skill-name>')
     .description('Enable an installed skill')
-    .action(async (skillName: string) => {
+    .option('--json', 'Output result as JSON')
+    .action(async (skillName: string, options) => {
       const spinner = ora(`Enabling skill: ${skillName}`).start();
+      if (options.json) spinner.stop();
 
       try {
-        // Mock enable
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        spinner.succeed(chalk.green(`Skill enabled: ${skillName}`));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to enable skill'));
+        // Enable via PATCH /skills/:name or similar — endpoint TBD per API spec
+        await apiClient.post(`/skills/${encodeURIComponent(skillName)}/enable`, {});
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { name: skillName, status: 'enabled' } }));
+        } else {
+          spinner.succeed(color.green(`Skill enabled: ${skillName}`));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SKILL_ENABLE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to enable skill'));
         throw error;
       }
     });
@@ -88,15 +149,25 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('disable <skill-name>')
     .description('Disable a skill')
-    .action(async (skillName: string) => {
+    .option('--json', 'Output result as JSON')
+    .action(async (skillName: string, options) => {
       const spinner = ora(`Disabling skill: ${skillName}`).start();
+      if (options.json) spinner.stop();
 
       try {
-        // Mock disable
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        spinner.succeed(chalk.green(`Skill disabled: ${skillName}`));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to disable skill'));
+        await apiClient.post(`/skills/${encodeURIComponent(skillName)}/disable`, {});
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { name: skillName, status: 'disabled' } }));
+        } else {
+          spinner.succeed(color.green(`Skill disabled: ${skillName}`));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SKILL_DISABLE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to disable skill'));
         throw error;
       }
     });
@@ -105,15 +176,25 @@ export function registerSkillCommands(program: Command): void {
     .command('uninstall <skill-name>')
     .description('Uninstall a skill')
     .option('--force', 'Skip confirmation')
-    .action(async (skillName: string) => {
+    .option('--json', 'Output result as JSON')
+    .action(async (skillName: string, options) => {
       const spinner = ora(`Uninstalling skill: ${skillName}`).start();
+      if (options.json) spinner.stop();
 
       try {
-        // Mock uninstall
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        spinner.succeed(chalk.green(`Skill uninstalled: ${skillName}`));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to uninstall skill'));
+        await apiClient.delete(`/skills/${encodeURIComponent(skillName)}`);
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { name: skillName } }));
+        } else {
+          spinner.succeed(color.green(`Skill uninstalled: ${skillName}`));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SKILL_UNINSTALL_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to uninstall skill'));
         throw error;
       }
     });

@@ -3,7 +3,6 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import { table } from 'table';
 import {
@@ -15,7 +14,8 @@ import {
   CodePipelineClient,
   GetPipelineStateCommand,
 } from '@aws-sdk/client-codepipeline';
-import { loadWorkspaceConfig } from '../utils/workspace';
+import { loadWorkspaceConfig } from '../utils/workspace.js';
+import { color } from '../lib/color.js';
 
 interface StackInfo {
   name: string;
@@ -87,7 +87,6 @@ async function getPipelineStatus(
       return 'No executions';
     }
 
-    // Get latest execution status from first stage
     const latestExecution = response.stageStates[0].latestExecution;
     return latestExecution?.status || 'Unknown';
   } catch (error: any) {
@@ -103,19 +102,19 @@ async function getPipelineStatus(
  */
 function formatStatus(status: string): string {
   if (status.includes('COMPLETE')) {
-    return chalk.green(status);
+    return color.green(status);
   } else if (status.includes('PROGRESS')) {
-    return chalk.yellow(status);
+    return color.yellow(status);
   } else if (status.includes('FAILED')) {
-    return chalk.red(status);
+    return color.red(status);
   } else if (status === 'Succeeded') {
-    return chalk.green(status);
+    return color.green(status);
   } else if (status === 'InProgress') {
-    return chalk.yellow(status);
+    return color.yellow(status);
   } else if (status === 'Failed') {
-    return chalk.red(status);
+    return color.red(status);
   }
-  return chalk.gray(status);
+  return color.gray(status);
 }
 
 export function registerStatusCommand(program: Command): void {
@@ -125,8 +124,10 @@ export function registerStatusCommand(program: Command): void {
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--pipeline', 'Show pipeline execution status')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Checking deployment status').start();
+      if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
@@ -135,28 +136,58 @@ export function registerStatusCommand(program: Command): void {
         if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 
         if (!wsConfig?.aws?.region && !options.region) {
-          spinner.warn(chalk.yellow('No workspace configuration found'));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: 'No workspace configuration found', code: 'NO_CONFIG' }));
+          } else {
+            spinner.warn(color.yellow('No workspace configuration found'));
+          }
           return;
         }
 
         const client = new CloudFormationClient({ region });
 
-        // Get stack statuses
-        spinner.text = 'Fetching CloudFormation stack status...';
+        if (!options.json) spinner.text = 'Fetching CloudFormation stack status...';
         const stacks = await getChimeraStacks(client, env);
 
         if (stacks.length === 0) {
-          spinner.warn(chalk.yellow('No stacks found'));
-          console.log(chalk.gray(`No Chimera stacks found in ${region}`));
-          console.log(chalk.gray('Run "chimera deploy" to deploy infrastructure'));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'ok', data: { stacks: [], region, env } }));
+          } else {
+            spinner.warn(color.yellow('No stacks found'));
+            console.log(color.gray(`No Chimera stacks found in ${region}`));
+            console.log(color.gray('Run "chimera deploy" to deploy infrastructure'));
+          }
           return;
         }
 
-        spinner.succeed(chalk.green('Stack status retrieved'));
+        let pipelineStatus: string | undefined;
+        if (options.pipeline) {
+          if (!options.json) spinner.text = 'Checking pipeline status...';
+          const pipelineClient = new CodePipelineClient({ region });
+          const pipelineName = `Chimera-${env}-Pipeline`;
+          pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
+        }
 
-        // Display stack table
+        if (options.json) {
+          console.log(JSON.stringify({
+            status: 'ok',
+            data: {
+              stacks: stacks.map(s => ({
+                name: s.name,
+                status: s.status,
+                lastUpdated: s.lastUpdated,
+              })),
+              pipelineStatus,
+              endpoints: wsConfig?.endpoints,
+            },
+          }));
+          return;
+        }
+
+        spinner.succeed(color.green('Stack status retrieved'));
+
         const tableData = [
-          [chalk.bold('Stack'), chalk.bold('Status'), chalk.bold('Last Updated')],
+          [color.bold('Stack'), color.bold('Status'), color.bold('Last Updated')],
           ...stacks.map((stack) => [
             stack.name,
             formatStatus(stack.status),
@@ -166,41 +197,39 @@ export function registerStatusCommand(program: Command): void {
 
         console.log('\n' + table(tableData));
 
-        // Get pipeline status if requested
-        if (options.pipeline) {
-          spinner.start('Checking pipeline status...');
-          const pipelineClient = new CodePipelineClient({ region });
+        if (options.pipeline && pipelineStatus !== undefined) {
+          spinner.succeed(color.green('Pipeline status retrieved'));
           const pipelineName = `Chimera-${env}-Pipeline`;
-          const pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
-          spinner.succeed(chalk.green('Pipeline status retrieved'));
-
-          console.log(chalk.bold('\nPipeline Status:'));
+          console.log(color.bold('\nPipeline Status:'));
           console.log(`  ${pipelineName}: ${formatStatus(pipelineStatus)}`);
         }
 
-        // Display summary
         const allComplete = stacks.every((s) => s.status.includes('COMPLETE'));
         const anyFailed = stacks.some((s) => s.status.includes('FAILED'));
         const anyInProgress = stacks.some((s) => s.status.includes('PROGRESS'));
 
-        console.log(chalk.bold('\nSummary:'));
+        console.log(color.bold('\nSummary:'));
         if (allComplete) {
-          console.log(chalk.green(`  ✓ All ${stacks.length} stacks deployed successfully`));
+          console.log(color.green(`  ✓ All ${stacks.length} stacks deployed successfully`));
         } else if (anyFailed) {
-          console.log(chalk.red(`  ✗ ${stacks.filter((s) => s.status.includes('FAILED')).length} stack(s) failed`));
+          console.log(color.red(`  ✗ ${stacks.filter((s) => s.status.includes('FAILED')).length} stack(s) failed`));
         } else if (anyInProgress) {
-          console.log(chalk.yellow(`  ⋯ ${stacks.filter((s) => s.status.includes('PROGRESS')).length} stack(s) in progress`));
+          console.log(color.yellow(`  ⋯ ${stacks.filter((s) => s.status.includes('PROGRESS')).length} stack(s) in progress`));
         }
 
         if (wsConfig?.endpoints?.api_url) {
-          console.log(chalk.gray(`\n  API Endpoint: ${wsConfig.endpoints.api_url}`));
+          console.log(color.gray(`\n  API Endpoint: ${wsConfig.endpoints.api_url}`));
         }
         if (wsConfig?.endpoints?.websocket_url) {
-          console.log(chalk.gray(`  WebSocket:    ${wsConfig.endpoints.websocket_url}`));
+          console.log(color.gray(`  WebSocket:    ${wsConfig.endpoints.websocket_url}`));
         }
       } catch (error: any) {
-        spinner.fail(chalk.red('Status check failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'STATUS_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Status check failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       }
     });

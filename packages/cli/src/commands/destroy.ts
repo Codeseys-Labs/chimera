@@ -1,11 +1,11 @@
 /**
  * Deployment lifecycle commands - destroy, cleanup, and redeploy
+ *
+ * CDK runs via `npx cdk` (spawned by Bun.$) to preserve Node.js module resolution.
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
@@ -23,11 +23,11 @@ import {
   type WriteRequest,
 } from '@aws-sdk/client-dynamodb';
 import * as os from 'os';
-import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
+import { color } from '../lib/color.js';
 
 /**
  * Find project root by walking up directory tree looking for package.json
- * Pure Node.js approach - no git binary required
  */
 function findProjectRoot(): string {
   let dir = process.cwd();
@@ -42,13 +42,11 @@ function findProjectRoot(): string {
 
 /**
  * Clean up failed CloudFormation stacks in ROLLBACK_COMPLETE state
- * Shared by both cleanup and redeploy commands
  */
 async function cleanupFailedStacks(
   client: CloudFormationClient,
   envName: string,
 ): Promise<number> {
-  // List stacks in ROLLBACK_COMPLETE state
   const command = new ListStacksCommand({
     StackStatusFilter: [StackStatus.ROLLBACK_COMPLETE],
   });
@@ -56,12 +54,10 @@ async function cleanupFailedStacks(
   const response = await client.send(command);
   const prefix = `Chimera-${envName}-`;
 
-  // Filter to Chimera stacks for this environment
   const failedStacks = (response.StackSummaries || [])
     .filter(stack => stack.StackName && stack.StackName.startsWith(prefix))
     .map(stack => stack.StackName!);
 
-  // Delete each failed stack
   for (const stackName of failedStacks) {
     await client.send(new DeleteStackCommand({ StackName: stackName }));
   }
@@ -85,7 +81,6 @@ async function exportDataArchive(options: { env: string; region: string; exportP
   const cfClient = new CloudFormationClient({ region: options.region });
   const ddbClient = new DynamoDBClient({ region: options.region });
 
-  // Find all live Chimera stacks for this environment
   const listResp = await cfClient.send(new ListStacksCommand({
     StackStatusFilter: [
       StackStatus.CREATE_COMPLETE,
@@ -100,7 +95,6 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     .filter(s => s.StackName?.startsWith(prefix))
     .map(s => s.StackName!);
 
-  // Collect DynamoDB table physical IDs across all stacks
   const tables: string[] = [];
   for (const stackName of stacks) {
     const resourcesResp = await cfClient.send(
@@ -117,7 +111,6 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     }
   }
 
-  // Scan and export each table
   for (const tableName of tables) {
     const items: Record<string, AttributeValue>[] = [];
     let lastKey: Record<string, AttributeValue> | undefined;
@@ -139,7 +132,6 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     );
   }
 
-  // Write manifest
   const manifest = { tables, timestamp: new Date().toISOString(), env: options.env, region: options.region };
   fs.writeFileSync(
     path.join(archiveDir, 'manifest.json'),
@@ -147,7 +139,6 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     'utf8'
   );
 
-  // Record path of last archive for use by reseed/deploy
   const lastArchiveFile = path.join(os.homedir(), '.chimera', 'last-archive.json');
   fs.writeFileSync(
     lastArchiveFile,
@@ -187,14 +178,12 @@ export async function reseedFromArchive(archivePath: string, region: string): Pr
 
     const items: Record<string, AttributeValue>[] = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-    // BatchWriteItem limit: 25 items per call
     for (let i = 0; i < items.length; i += 25) {
       const batch = items.slice(i, i + 25);
       let requestItems: Record<string, WriteRequest[]> = {
         [tableName]: batch.map((item) => ({ PutRequest: { Item: item } })),
       };
 
-      // Retry unprocessed items with exponential backoff (max 5 retries, 100ms base delay)
       const MAX_RETRIES = 5;
       let delay = 100;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -215,7 +204,7 @@ export async function reseedFromArchive(archivePath: string, region: string): Pr
 }
 
 export function registerDestroyCommands(program: Command): void {
-  // chimera destroy - Tear down all CloudFormation stacks using CDK
+  // chimera destroy — Tear down all CloudFormation stacks
   program
     .command('destroy')
     .description('Tear down all Chimera stacks from the AWS account')
@@ -224,8 +213,10 @@ export function registerDestroyCommands(program: Command): void {
     .option('--force', 'Skip confirmation prompt')
     .option('--retain-data', 'Export DynamoDB table data to a local archive before destroying')
     .option('--export-path <path>', 'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting Chimera destruction').start();
+      if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
@@ -234,93 +225,92 @@ export function registerDestroyCommands(program: Command): void {
         if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 
         if (!wsConfig.deployment) {
-          spinner.warn(chalk.yellow('No deployment configuration found'));
-          console.log(chalk.gray('Nothing to destroy'));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'ok', data: { message: 'Nothing to destroy' } }));
+          } else {
+            spinner.warn(color.yellow('No deployment configuration found'));
+            console.log(color.gray('Nothing to destroy'));
+          }
           return;
         }
 
-        // Confirmation prompt (unless --force flag provided)
-        if (!options.force) {
+        if (!options.force && !options.json) {
           spinner.stop();
-
-          // Dynamic import of inquirer for confirmation
           const inquirer = await import('inquirer');
           const answers = await inquirer.default.prompt([
             {
               type: 'confirm',
               name: 'confirmed',
-              message: chalk.yellow('⚠️  WARNING: This will delete all Chimera infrastructure. Continue?'),
+              message: color.yellow('⚠️  WARNING: This will delete all Chimera infrastructure. Continue?'),
               default: false,
             },
           ]);
 
           if (!answers.confirmed) {
-            console.log(chalk.gray('Destruction cancelled'));
+            console.log(color.gray('Destruction cancelled'));
             return;
           }
 
           spinner.start('Destroying infrastructure');
         }
 
-        // Export data archive before destroying if --retain-data is set
+        let archivePath: string | undefined;
         if (options.retainData) {
-          spinner.text = 'Exporting data archive...';
-          const archivePath = await exportDataArchive({
-            env,
-            region,
-            exportPath: options.exportPath,
-          });
-          spinner.succeed(chalk.green(`Data archived to ${archivePath}`));
-          console.log(chalk.gray('  Archive path saved to ~/.chimera/last-archive.json for reseeding'));
-          spinner.start('Destroying infrastructure');
-        }
-
-        // Find project root
-        const repoRoot = findProjectRoot();
-
-        // Sanitize environment name to prevent command injection
-        const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
-
-        // Destroy stacks in reverse dependency order (must use npx — bunx breaks CDK instanceof checks)
-        // safeEnv is sanitized: only [a-zA-Z0-9-] characters allowed
-        for (const stackSuffix of STACK_DESTROY_ORDER) {
-          const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
-          spinner.text = `Destroying ${stackName}...`;
-          try {
-            execSync(
-              `cd infra && npx cdk destroy ${stackName} --force --context environment=${safeEnv}`,
-              {
-                cwd: repoRoot,
-                stdio: ['pipe', 'pipe', 'pipe'],
-              }
-            );
-          } catch {
-            // Stack may not exist or already deleted — continue with remaining stacks
+          if (!options.json) spinner.text = 'Exporting data archive...';
+          archivePath = await exportDataArchive({ env, region, exportPath: options.exportPath });
+          if (!options.json) {
+            spinner.succeed(color.green(`Data archived to ${archivePath}`));
+            console.log(color.gray('  Archive path saved to ~/.chimera/last-archive.json for reseeding'));
+            spinner.start('Destroying infrastructure');
           }
         }
 
-        spinner.succeed(chalk.green('All CloudFormation stacks destroyed'));
+        const repoRoot = findProjectRoot();
+        const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
 
-        // Clear deployment config
+        for (const stackSuffix of STACK_DESTROY_ORDER) {
+          const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
+          if (!options.json) spinner.text = `Destroying ${stackName}...`;
+          try {
+            // npx spawns Node.js — CDK module resolution works correctly
+            await Bun.$`npx cdk destroy ${stackName} --force --context environment=${safeEnv}`
+              .cwd(`${repoRoot}/infra`)
+              .quiet()
+              .nothrow();
+          } catch { /* Stack may not exist — continue */ }
+        }
+
+        if (!options.json) spinner.succeed(color.green('All CloudFormation stacks destroyed'));
+
         const cur = loadWorkspaceConfig();
         saveWorkspaceConfig({ ...cur, deployment: undefined });
 
-        console.log(chalk.green('\n✓ Infrastructure destroyed'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { env, region, archivePath } }));
+        } else {
+          console.log(color.green('\n✓ Infrastructure destroyed'));
+        }
       } catch (error: any) {
-        spinner.fail(chalk.red('Destruction failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'DESTROY_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Destruction failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       }
     });
 
-  // chimera cleanup - Delete stacks stuck in ROLLBACK_COMPLETE state
+  // chimera cleanup — Delete stacks stuck in ROLLBACK_COMPLETE state
   program
     .command('cleanup')
     .description('Delete Chimera stacks stuck in ROLLBACK_COMPLETE state')
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting cleanup').start();
+      if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
@@ -330,32 +320,42 @@ export function registerDestroyCommands(program: Command): void {
 
         const client = new CloudFormationClient({ region });
 
-        spinner.text = 'Scanning for failed stacks...';
+        if (!options.json) spinner.text = 'Scanning for failed stacks...';
         const deletedCount = await cleanupFailedStacks(client, env);
 
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { deletedCount, env, region } }));
+          return;
+        }
+
         if (deletedCount === 0) {
-          spinner.succeed(chalk.green('No failed stacks found'));
-          console.log(chalk.gray('All stacks are in a healthy state'));
+          spinner.succeed(color.green('No failed stacks found'));
+          console.log(color.gray('All stacks are in a healthy state'));
         } else {
-          spinner.succeed(chalk.green(`Cleaned up ${deletedCount} failed stack(s)`));
-          console.log(chalk.green(`\n✓ Deleted ${deletedCount} stack(s) in ROLLBACK_COMPLETE state`));
+          spinner.succeed(color.green(`Cleaned up ${deletedCount} failed stack(s)`));
+          console.log(color.green(`\n✓ Deleted ${deletedCount} stack(s) in ROLLBACK_COMPLETE state`));
         }
       } catch (error: any) {
-        spinner.fail(chalk.red('Cleanup failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'CLEANUP_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Cleanup failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       }
     });
 
-  // chimera redeploy - Clean up failed stacks then retry CDK deployment
+  // chimera redeploy — Clean up failed stacks then retry CDK deployment
   program
     .command('redeploy')
     .description('Clean up failed stacks then retry CDK deployment')
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--reseed <path>', 'Reseed DynamoDB tables from exported data archive')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
-      console.log(chalk.bold('Chimera Redeploy\n'));
+      if (!options.json) console.log(color.bold('Chimera Redeploy\n'));
 
       try {
         const wsConfig = loadWorkspaceConfig();
@@ -365,59 +365,62 @@ export function registerDestroyCommands(program: Command): void {
 
         const client = new CloudFormationClient({ region });
 
-        // Step 1: Clean up failed stacks
-        console.log(chalk.bold('1. Cleaning up failed stacks\n'));
+        if (!options.json) console.log(color.bold('1. Cleaning up failed stacks\n'));
         const spinner = ora('Scanning for failed stacks...').start();
+        if (options.json) spinner.stop();
+
         const deletedCount = await cleanupFailedStacks(client, env);
 
-        if (deletedCount === 0) {
-          spinner.succeed(chalk.green('No failed stacks found'));
-        } else {
-          spinner.succeed(chalk.green(`Cleaned up ${deletedCount} failed stack(s)`));
+        if (!options.json) {
+          if (deletedCount === 0) {
+            spinner.succeed(color.green('No failed stacks found'));
+          } else {
+            spinner.succeed(color.green(`Cleaned up ${deletedCount} failed stack(s)`));
+          }
         }
 
-        // Step 2: Deploy infrastructure
-        console.log(chalk.bold('\n2. Deploying infrastructure\n'));
-        spinner.start('Running CDK deploy (this may take 15-30 minutes)...');
+        if (!options.json) console.log(color.bold('\n2. Deploying infrastructure\n'));
+        if (!options.json) spinner.start('Running CDK deploy (this may take 15-30 minutes)...');
 
-        // Find project root
         const repoRoot = findProjectRoot();
-
-        // Sanitize environment name to prevent command injection
         const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
 
-        // Run CDK deploy
-        execSync(
-          `cd infra && npx cdk deploy --all --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`,
-          {
-            cwd: repoRoot,
-            stdio: 'inherit',
-          }
-        );
+        // npx spawns Node.js — CDK module resolution works correctly
+        await Bun.$`npx cdk deploy --all --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`
+          .cwd(`${repoRoot}/infra`);
 
-        spinner.succeed(chalk.green('Deployment complete'));
+        if (!options.json) spinner.succeed(color.green('Deployment complete'));
 
-        // Step 3: Reseed from archive (optional)
         if (options.reseed) {
-          console.log(chalk.bold('\n3. Reseeding DynamoDB tables\n'));
+          if (!options.json) console.log(color.bold('\n3. Reseeding DynamoDB tables\n'));
           const reseedPath = path.resolve(options.reseed);
           if (!fs.existsSync(reseedPath)) {
             throw new Error(`Reseed archive not found: ${reseedPath}`);
           }
-          spinner.start('Reimporting archived data...');
+          if (!options.json) spinner.start('Reimporting archived data...');
           await reseedFromArchive(reseedPath, region);
-          spinner.succeed(chalk.green(`Data reseeded from ${reseedPath}`));
+          if (!options.json) spinner.succeed(color.green(`Data reseeded from ${reseedPath}`));
         }
 
-        // Update config
         const cur = loadWorkspaceConfig();
-        saveWorkspaceConfig({ ...cur, deployment: { ...cur.deployment, status: 'deployed', last_deployed: new Date().toISOString() } });
+        saveWorkspaceConfig({
+          ...cur,
+          deployment: { ...cur.deployment, status: 'deployed', last_deployed: new Date().toISOString() },
+        });
 
-        console.log(chalk.green('\n✓ Redeploy complete'));
-        console.log(chalk.gray('\nNext step: Run "chimera status" to verify deployment health'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { env, region, deletedCount } }));
+        } else {
+          console.log(color.green('\n✓ Redeploy complete'));
+          console.log(color.gray('\nNext step: Run "chimera status" to verify deployment health'));
+        }
       } catch (error: any) {
-        console.error(chalk.red('\n✗ Redeploy failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'REDEPLOY_FAILED' }));
+          process.exit(1);
+        }
+        console.error(color.red('\n✗ Redeploy failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       }
     });

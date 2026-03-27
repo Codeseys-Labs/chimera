@@ -4,14 +4,14 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { CodeCommitClient } from '@aws-sdk/client-codecommit';
-import { loadWorkspaceConfig } from '../utils/workspace';
-import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit';
+import { loadWorkspaceConfig } from '../utils/workspace.js';
+import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit.js';
+import { color } from '../lib/color.js';
 
 /**
  * Find project root by walking up directory tree looking for package.json
@@ -71,7 +71,6 @@ function getGitHubUrl(repoRoot: string): string {
     throw new Error('No repository URL found in package.json');
   }
 
-  // Convert git+https://github.com/user/repo.git to https://github.com/user/repo
   let url = packageJson.repository.url as string;
   url = url.replace(/^git\+/, '');
   url = url.replace(/\.git$/, '');
@@ -80,17 +79,6 @@ function getGitHubUrl(repoRoot: string): string {
 
 /**
  * Upgrade CodeCommit with latest upstream changes from GitHub
- *
- * Flow:
- * 1. Verify local repo is clean (no uncommitted changes)
- * 2. Fetch CodeCommit state via SDK (no git remote needed)
- * 3. Fetch GitHub upstream via standard git (no credential helper needed for GitHub)
- * 4. Create upgrade branch, apply CodeCommit state, commit
- * 5. Merge upstream GitHub changes into upgrade branch
- * 6. Push merged result to CodeCommit via CreateCommit API (no git remote needed)
- * 7. Return to original branch and clean up
- *
- * Pure AWS SDK for CodeCommit - no git-remote-codecommit or pip dependencies
  */
 async function upgradeFromGitHub(
   repoRoot: string,
@@ -98,7 +86,6 @@ async function upgradeFromGitHub(
   repoName: string,
   githubUrl: string,
 ): Promise<void> {
-  // Step 1: Check for uncommitted changes
   if (hasUncommittedChanges(repoRoot)) {
     throw new Error(
       'You have uncommitted changes. Please commit or stash them before upgrading:\n' +
@@ -109,33 +96,29 @@ async function upgradeFromGitHub(
 
   const client = new CodeCommitClient({ region });
 
-  // Step 2: Fetch CodeCommit state via SDK (replaces: git fetch codecommit main)
-  console.log(chalk.gray('  Fetching CodeCommit state via SDK...'));
+  console.log(color.gray('  Fetching CodeCommit state via SDK...'));
   const ccFiles = await getFilesFromCodeCommit(client, repoName, 'main');
-  console.log(chalk.gray(`  Received ${ccFiles.length} files from CodeCommit`));
+  console.log(color.gray(`  Received ${ccFiles.length} files from CodeCommit`));
 
-  // Step 3: Set up GitHub remote and fetch (standard git, no credential helper needed)
   try {
     git(repoRoot, ['remote', 'get-url', 'origin']);
     git(repoRoot, ['remote', 'set-url', 'origin', githubUrl]);
-    console.log(chalk.gray('  Updated GitHub remote (origin)'));
+    console.log(color.gray('  Updated GitHub remote (origin)'));
   } catch {
     git(repoRoot, ['remote', 'add', 'origin', githubUrl]);
-    console.log(chalk.gray('  Added GitHub remote (origin)'));
+    console.log(color.gray('  Added GitHub remote (origin)'));
   }
 
-  console.log(chalk.gray('  Fetching from GitHub...'));
+  console.log(color.gray('  Fetching from GitHub...'));
   git(repoRoot, ['fetch', 'origin', 'main']);
 
-  // Step 4: Record current branch, create upgrade branch
   const originalBranch = git(repoRoot, ['branch', '--show-current']);
   const upgradeBranch = `upgrade-${Date.now()}`;
-  console.log(chalk.gray(`  Creating upgrade branch: ${upgradeBranch}`));
+  console.log(color.gray(`  Creating upgrade branch: ${upgradeBranch}`));
   git(repoRoot, ['checkout', '-b', upgradeBranch]);
 
   try {
-    // Step 5: Write CodeCommit files to disk (CodeCommit state with agent edits)
-    console.log(chalk.gray('  Applying CodeCommit state to upgrade branch...'));
+    console.log(color.gray('  Applying CodeCommit state to upgrade branch...'));
     for (const file of ccFiles) {
       const localPath = path.join(repoRoot, file.path);
       const localDir = path.dirname(localPath);
@@ -145,41 +128,36 @@ async function upgradeFromGitHub(
       fs.writeFileSync(localPath, file.content);
     }
 
-    // Commit CC state so git can merge it with GitHub changes
     git(repoRoot, ['add', '-A']);
     try {
       git(repoRoot, ['commit', '-m', 'CodeCommit state (agent edits)']);
     } catch {
-      // Nothing to commit — CC and local are already identical
-      console.log(chalk.gray('  No changes from CodeCommit (already up to date)'));
+      console.log(color.gray('  No changes from CodeCommit (already up to date)'));
     }
 
-    // Step 6: Merge upstream GitHub changes
-    console.log(chalk.gray('  Merging upstream GitHub changes...'));
+    console.log(color.gray('  Merging upstream GitHub changes...'));
     try {
       git(repoRoot, ['merge', 'origin/main', '--no-edit', '-m', 'Upgrade: merge upstream GitHub changes']);
-      console.log(chalk.gray('  Merge successful (no conflicts)'));
+      console.log(color.gray('  Merge successful (no conflicts)'));
     } catch (error: any) {
-      // Check if merge conflict occurred
       const status = git(repoRoot, ['status'], true);
 
       if (status.includes('Unmerged paths') || status.includes('both modified')) {
-        console.error(chalk.yellow('\nMerge conflicts detected during upgrade.'));
-        console.error(chalk.gray('To resolve:'));
-        console.error(chalk.gray('  1. Review conflicts: git status'));
-        console.error(chalk.gray('  2. Edit conflicted files to resolve'));
-        console.error(chalk.gray('  3. Stage resolved files: git add <files>'));
-        console.error(chalk.gray('  4. Complete merge: git commit'));
-        console.error(chalk.gray(`  5. Push to CodeCommit: chimera sync`));
-        console.error(chalk.gray(`  6. Return to original branch: git checkout ${originalBranch}`));
+        console.error(color.yellow('\nMerge conflicts detected during upgrade.'));
+        console.error(color.gray('To resolve:'));
+        console.error(color.gray('  1. Review conflicts: git status'));
+        console.error(color.gray('  2. Edit conflicted files to resolve'));
+        console.error(color.gray('  3. Stage resolved files: git add <files>'));
+        console.error(color.gray('  4. Complete merge: git commit'));
+        console.error(color.gray(`  5. Push to CodeCommit: chimera sync`));
+        console.error(color.gray(`  6. Return to original branch: git checkout ${originalBranch}`));
         throw new Error('Merge conflicts require manual resolution');
       }
 
       throw error;
     }
 
-    // Step 7: Push merged result to CodeCommit via SDK (replaces: git push codecommit)
-    console.log(chalk.gray('  Pushing merged result to CodeCommit...'));
+    console.log(color.gray('  Pushing merged result to CodeCommit...'));
     await pushToCodeCommit(
       client,
       repoName,
@@ -187,10 +165,9 @@ async function upgradeFromGitHub(
       'main',
       'Upgrade: merge upstream GitHub changes',
     );
-    console.log(chalk.gray('  Push successful'));
+    console.log(color.gray('  Push successful'));
   } finally {
-    // Step 8: Return to original branch and clean up upgrade branch
-    console.log(chalk.gray(`  Returning to original branch: ${originalBranch}`));
+    console.log(color.gray(`  Returning to original branch: ${originalBranch}`));
     git(repoRoot, ['checkout', originalBranch], true);
     git(repoRoot, ['branch', '-D', upgradeBranch], true);
   }
@@ -201,46 +178,57 @@ export function registerUpgradeCommand(program: Command): void {
     .command('upgrade')
     .description('Apply upstream GitHub changes to CodeCommit while preserving agent edits')
     .option('--github-url <url>', 'GitHub repository URL (defaults to package.json repository field)')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting upgrade operation').start();
+      if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
         const region = wsConfig?.aws?.region;
         const repositoryName = wsConfig?.workspace?.repository;
         if (!region || !repositoryName) {
-          spinner.fail(chalk.red('No workspace configuration found'));
-          console.error(chalk.red('Run chimera init to configure your workspace'));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: 'No workspace configuration found', code: 'NO_CONFIG' }));
+            process.exit(1);
+          }
+          spinner.fail(color.red('No workspace configuration found'));
+          console.error(color.red('Run chimera init to configure your workspace'));
           process.exit(1);
         }
         if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
-        spinner.succeed(chalk.green('Workspace: ' + repositoryName + ' in ' + region));
+        if (!options.json) spinner.succeed(color.green('Workspace: ' + repositoryName + ' in ' + region));
 
-        // Find project root
-        spinner.start('Locating project root...');
+        if (!options.json) spinner.start('Locating project root...');
         const repoRoot = findProjectRoot();
-        spinner.succeed(chalk.green(`Project root: ${repoRoot}`));
+        if (!options.json) spinner.succeed(color.green(`Project root: ${repoRoot}`));
 
-        // Get GitHub URL
-        spinner.start('Resolving GitHub upstream URL...');
+        if (!options.json) spinner.start('Resolving GitHub upstream URL...');
         const githubUrl = options.githubUrl || getGitHubUrl(repoRoot);
-        spinner.succeed(chalk.green(`GitHub upstream: ${githubUrl}`));
+        if (!options.json) spinner.succeed(color.green(`GitHub upstream: ${githubUrl}`));
 
-        // Upgrade from GitHub
-        spinner.start('Upgrading from GitHub...');
+        if (!options.json) spinner.start('Upgrading from GitHub...');
         await upgradeFromGitHub(repoRoot, region, repositoryName, githubUrl);
-        spinner.succeed(chalk.green('Upgrade complete'));
+        if (!options.json) spinner.succeed(color.green('Upgrade complete'));
 
-        console.log(chalk.green('\n✓ CodeCommit upgraded with latest upstream changes'));
-        console.log(chalk.gray('\nWhat happened:'));
-        console.log(chalk.gray('  1. Fetched latest from GitHub (upstream)'));
-        console.log(chalk.gray('  2. Fetched current state from CodeCommit (agent edits)'));
-        console.log(chalk.gray('  3. Merged upstream changes with agent edits'));
-        console.log(chalk.gray('  4. Pushed merged result to CodeCommit'));
-        console.log(chalk.gray('\nNext: Run "chimera sync" to sync your local workspace'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { githubUrl, repository: repositoryName } }));
+        } else {
+          console.log(color.green('\n✓ CodeCommit upgraded with latest upstream changes'));
+          console.log(color.gray('\nWhat happened:'));
+          console.log(color.gray('  1. Fetched latest from GitHub (upstream)'));
+          console.log(color.gray('  2. Fetched current state from CodeCommit (agent edits)'));
+          console.log(color.gray('  3. Merged upstream changes with agent edits'));
+          console.log(color.gray('  4. Pushed merged result to CodeCommit'));
+          console.log(color.gray('\nNext: Run "chimera sync" to sync your local workspace'));
+        }
       } catch (error: any) {
-        spinner.fail(chalk.red('Upgrade failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'UPGRADE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Upgrade failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       }
     });

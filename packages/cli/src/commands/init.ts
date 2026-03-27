@@ -3,12 +3,12 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import inquirer from 'inquirer';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { saveWorkspaceConfig, findWorkspaceConfig, WorkspaceConfig } from '../utils/workspace';
+import { saveWorkspaceConfig, findWorkspaceConfig, WorkspaceConfig } from '../utils/workspace.js';
+import { color } from '../lib/color.js';
 
 export const AWS_CREDENTIALS_PATH = path.join(os.homedir(), '.aws', 'credentials');
 export const AWS_CONFIG_PATH = path.join(os.homedir(), '.aws', 'config');
@@ -28,7 +28,6 @@ export function listAwsProfiles(
 ): string[] {
   const profiles = new Set<string>();
 
-  // credentials: sections like [profile_name]
   if (fs.existsSync(credentialsPath)) {
     const lines = fs.readFileSync(credentialsPath, 'utf8').split('\n');
     for (const line of lines) {
@@ -39,14 +38,12 @@ export function listAwsProfiles(
     }
   }
 
-  // config: sections like [default] or [profile name]
   if (fs.existsSync(configPath)) {
     const lines = fs.readFileSync(configPath, 'utf8').split('\n');
     for (const line of lines) {
       const m = PROFILE_SECTION_RE.exec(line.trim());
       if (m) {
         const raw = m[1].trim();
-        // Strip leading "profile " prefix used in config file
         const name = raw.startsWith('profile ') ? raw.slice('profile '.length).trim() : raw;
         profiles.add(name);
       }
@@ -59,7 +56,6 @@ export function listAwsProfiles(
 /**
  * Append a new profile block to the AWS credentials file.
  * Creates the ~/.aws directory (mode 0700) and file (mode 0600) if missing.
- * Optional credentialsPath override is used by tests.
  */
 export function writeAwsProfile(
   profileName: string,
@@ -89,9 +85,9 @@ export function registerInitCommand(program: Command): void {
     .option('--region <region>', 'AWS region (skip prompt)')
     .option('--env <env>', 'Environment name (skip prompt)')
     .option('--repo <repo>', 'CodeCommit repository name (skip prompt)')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       try {
-        // Check for existing chimera.toml
         const existing = findWorkspaceConfig(process.cwd());
         if (existing) {
           const { overwrite } = await inquirer.prompt([
@@ -103,12 +99,18 @@ export function registerInitCommand(program: Command): void {
             },
           ]);
           if (!overwrite) {
-            console.log(chalk.yellow('Aborted.'));
+            if (options.json) {
+              console.log(JSON.stringify({ status: 'error', error: 'Aborted', code: 'ABORTED' }));
+            } else {
+              console.log(color.yellow('Aborted.'));
+            }
             return;
           }
         }
 
-        console.log(chalk.blue('\nChimera Workspace Setup\n'));
+        if (!options.json) {
+          console.log(color.blue('\nChimera Workspace Setup\n'));
+        }
 
         // ── AWS Profile ─────────────────────────────────────────────────────
         let profile: string = options.profile ?? '';
@@ -137,7 +139,6 @@ export function registerInitCommand(program: Command): void {
           }
 
           if (!profile) {
-            // No existing profiles, or user chose to create a new one
             const answers = await inquirer.prompt([
               {
                 type: 'input',
@@ -172,7 +173,9 @@ export function registerInitCommand(program: Command): void {
               answers.secretAccessKey as string
             );
             profile = answers.profileName as string;
-            console.log(chalk.green(`Profile "${profile}" written to ${AWS_CREDENTIALS_PATH}`));
+            if (!options.json) {
+              console.log(color.green(`Profile "${profile}" written to ${AWS_CREDENTIALS_PATH}`));
+            }
           }
         }
 
@@ -253,21 +256,34 @@ export function registerInitCommand(program: Command): void {
 
         saveWorkspaceConfig(config, process.cwd());
 
-        console.log(chalk.green('\nchimera.toml created successfully\n'));
-        console.log(`  Profile:     ${chalk.cyan(profile)}`);
-        console.log(`  Region:      ${chalk.cyan(region)}`);
-        console.log(`  Environment: ${chalk.cyan(environment)}`);
-        console.log(`  Repository:  ${chalk.cyan(repository)}`);
-        console.log(chalk.yellow('\nRemember to add chimera.toml to your .gitignore'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { profile, region, environment, repository } }));
+        } else {
+          console.log(color.green('\nchimera.toml created successfully\n'));
+          console.log(`  Profile:     ${color.cyan(profile)}`);
+          console.log(`  Region:      ${color.cyan(region)}`);
+          console.log(`  Environment: ${color.cyan(environment)}`);
+          console.log(`  Repository:  ${color.cyan(repository)}`);
+          console.log(color.yellow('\nRemember to add chimera.toml to your .gitignore'));
+        }
       } catch (err: unknown) {
         const isTtyError =
           err instanceof Error &&
           (err.constructor.name === 'ExitPromptError' || err.message.includes('User force closed'));
         if (isTtyError) {
-          console.log(chalk.yellow('\nAborted.'));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: 'Aborted', code: 'ABORTED' }));
+          } else {
+            console.log(color.yellow('\nAborted.'));
+          }
           return;
         }
-        console.error(chalk.red('Error:'), err instanceof Error ? err.message : String(err));
+        if (options.json) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'INIT_FAILED' }));
+          process.exit(1);
+        }
+        console.error(color.red('Error:'), err instanceof Error ? err.message : String(err));
         process.exit(1);
       }
     });

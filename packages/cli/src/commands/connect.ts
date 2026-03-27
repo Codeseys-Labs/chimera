@@ -1,15 +1,16 @@
 /**
- * Connect command - Save deployed API endpoints to local config
+ * Connect / Endpoints command — save deployed API endpoints to local config.
+ * "chimera connect" is deprecated; use "chimera endpoints" instead.
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import {
   CloudFormationClient,
   DescribeStacksCommand,
 } from '@aws-sdk/client-cloudformation';
-import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
+import { color } from '../lib/color.js';
 
 /**
  * Get CloudFormation stack outputs
@@ -42,70 +43,114 @@ async function getStackOutputs(
   }
 }
 
+async function runEndpoints(options: {
+  region?: string;
+  env?: string;
+  json?: boolean;
+}): Promise<void> {
+  const spinner = ora('Connecting to Chimera deployment').start();
+  if (options.json) spinner.stop();
+
+  try {
+    const wsConfig = loadWorkspaceConfig();
+    const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+    const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
+    if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+
+    const client = new CloudFormationClient({ region });
+
+    if (!options.json) spinner.text = 'Fetching API Gateway endpoints...';
+    const apiStackName = `Chimera-${env}-Api`;
+    const apiOutputs = await getStackOutputs(client, apiStackName);
+
+    const apiUrl = apiOutputs.ApiUrl || apiOutputs.RestApiUrl;
+    const webSocketUrl = apiOutputs.WebSocketUrl || apiOutputs.WebSocketApiUrl;
+
+    if (!apiUrl) {
+      throw new Error('API Gateway URL not found in stack outputs');
+    }
+
+    if (!options.json) spinner.succeed(color.green('API Gateway endpoints retrieved'));
+
+    if (!options.json) spinner.start('Fetching Cognito configuration...');
+    const securityStackName = `Chimera-${env}-Security`;
+    const securityOutputs = await getStackOutputs(client, securityStackName);
+
+    const cognitoUserPoolId = securityOutputs.UserPoolId;
+    const cognitoClientId = securityOutputs.WebClientId || securityOutputs.UserPoolClientId;
+
+    if (!cognitoUserPoolId) {
+      throw new Error('Cognito User Pool ID not found in stack outputs');
+    }
+
+    if (!options.json) spinner.succeed(color.green('Cognito configuration retrieved'));
+
+    const currentConfig = loadWorkspaceConfig();
+    saveWorkspaceConfig({
+      ...currentConfig,
+      endpoints: {
+        api_url: apiUrl,
+        websocket_url: webSocketUrl,
+        cognito_user_pool_id: cognitoUserPoolId,
+        cognito_client_id: cognitoClientId,
+      },
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        status: 'ok',
+        data: {
+          api_url: apiUrl,
+          websocket_url: webSocketUrl,
+          cognito_user_pool_id: cognitoUserPoolId,
+          cognito_client_id: cognitoClientId,
+        },
+      }));
+    } else {
+      console.log(color.green('\n✓ Connected to Chimera deployment'));
+      console.log(color.gray('\nEndpoints:'));
+      console.log(color.gray(`  API Gateway:  ${apiUrl}`));
+      if (webSocketUrl) {
+        console.log(color.gray(`  WebSocket:    ${webSocketUrl}`));
+      }
+      console.log(color.gray(`  Cognito Pool: ${cognitoUserPoolId}`));
+      if (cognitoClientId) {
+        console.log(color.gray(`  Client ID:    ${cognitoClientId}`));
+      }
+      console.log(color.gray('\nConfiguration saved to chimera.toml'));
+    }
+  } catch (error: any) {
+    if (options.json) {
+      console.log(JSON.stringify({ status: 'error', error: error.message, code: 'CONNECTION_FAILED' }));
+      process.exit(1);
+    }
+    spinner.fail(color.red('Connection failed'));
+    console.error(color.red(error.message));
+    process.exit(1);
+  }
+}
+
 export function registerConnectCommand(program: Command): void {
+  // Main command: chimera endpoints
   program
-    .command('connect')
-    .description('Connect to deployed Chimera instance (saves API endpoints to local config)')
+    .command('endpoints')
+    .description('Fetch deployed API endpoints and save to local config (chimera.toml)')
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
-    .action(async (options) => {
-      const spinner = ora('Connecting to Chimera deployment').start();
+    .option('--json', 'Output result as JSON')
+    .action((options) => runEndpoints(options));
 
-      try {
-        const wsConfig = loadWorkspaceConfig();
-        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
-        const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
-
-        const client = new CloudFormationClient({ region });
-
-        // Get API stack outputs
-        spinner.text = 'Fetching API Gateway endpoints...';
-        const apiStackName = `Chimera-${env}-Api`;
-        const apiOutputs = await getStackOutputs(client, apiStackName);
-
-        const apiUrl = apiOutputs.ApiUrl || apiOutputs.RestApiUrl;
-        const webSocketUrl = apiOutputs.WebSocketUrl || apiOutputs.WebSocketApiUrl;
-
-        if (!apiUrl) {
-          throw new Error('API Gateway URL not found in stack outputs');
-        }
-
-        spinner.succeed(chalk.green('API Gateway endpoints retrieved'));
-
-        // Get Security stack outputs
-        spinner.start('Fetching Cognito configuration...');
-        const securityStackName = `Chimera-${env}-Security`;
-        const securityOutputs = await getStackOutputs(client, securityStackName);
-
-        const cognitoUserPoolId = securityOutputs.UserPoolId;
-        const cognitoClientId = securityOutputs.WebClientId || securityOutputs.UserPoolClientId;
-
-        if (!cognitoUserPoolId) {
-          throw new Error('Cognito User Pool ID not found in stack outputs');
-        }
-
-        spinner.succeed(chalk.green('Cognito configuration retrieved'));
-
-        // Update config
-        const currentConfig = loadWorkspaceConfig();
-        saveWorkspaceConfig({ ...currentConfig, endpoints: { api_url: apiUrl, websocket_url: webSocketUrl, cognito_user_pool_id: cognitoUserPoolId, cognito_client_id: cognitoClientId } });
-
-        console.log(chalk.green('\n✓ Connected to Chimera deployment'));
-        console.log(chalk.gray('\nEndpoints:'));
-        console.log(chalk.gray(`  API Gateway:  ${apiUrl}`));
-        if (webSocketUrl) {
-          console.log(chalk.gray(`  WebSocket:    ${webSocketUrl}`));
-        }
-        console.log(chalk.gray(`  Cognito Pool: ${cognitoUserPoolId}`));
-        if (cognitoClientId) {
-          console.log(chalk.gray(`  Client ID:    ${cognitoClientId}`));
-        }
-        console.log(chalk.gray('\nConfiguration saved to chimera.toml'));
-      } catch (error: any) {
-        spinner.fail(chalk.red('Connection failed'));
-        console.error(chalk.red(error.message));
-        process.exit(1);
+  // Deprecated alias: chimera connect
+  program
+    .command('connect')
+    .description('(deprecated) Use "chimera endpoints" instead')
+    .option('--region <region>', 'AWS region')
+    .option('--env <environment>', 'Environment name')
+    .option('--json', 'Output result as JSON')
+    .action((options) => {
+      if (!options.json) {
+        console.warn(color.yellow('"connect" is deprecated, use "endpoints"'));
       }
+      return runEndpoints(options);
     });
 }

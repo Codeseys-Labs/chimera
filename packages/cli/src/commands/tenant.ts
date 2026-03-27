@@ -3,12 +3,22 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import { table } from 'table';
-import { formatOutput, TenantConfig } from '../utils/output';
-import { loadConfig, saveConfig } from '../utils/config';
+import { formatOutput } from '../utils/output.js';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
+import { apiClient } from '../lib/api-client.js';
+import { color } from '../lib/color.js';
+
+interface Tenant {
+  tenantId: string;
+  name: string;
+  tier: string;
+  region: string;
+  status: string;
+  createdAt: string;
+}
 
 export function registerTenantCommands(program: Command): void {
   const tenant = program
@@ -21,14 +31,15 @@ export function registerTenantCommands(program: Command): void {
     .option('-n, --name <name>', 'Tenant name')
     .option('-t, --tier <tier>', 'Subscription tier (basic|advanced|premium)', 'basic')
     .option('--region <region>', 'AWS region', 'us-east-1')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Creating tenant').start();
+      if (options.json) spinner.stop();
 
       try {
-        // Interactive prompts if options not provided
         let { name, tier, region } = options;
 
-        if (!name) {
+        if (!name && !options.json) {
           const answers = await inquirer.prompt([
             {
               type: 'input',
@@ -55,29 +66,37 @@ export function registerTenantCommands(program: Command): void {
           region = answers.region;
         }
 
-        // Generate tenant ID
-        const tenantId = `tenant-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        if (!name) {
+          const msg = 'Tenant name is required. Use -n flag or run without --json for interactive mode.';
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: msg, code: 'MISSING_NAME' }));
+            process.exit(1);
+          }
+          throw new Error(msg);
+        }
 
-        const tenantConfig: TenantConfig = {
-          tenantId,
+        const created = await apiClient.post<Tenant>('/tenants', {
           name,
           tier,
-          region,
-          createdAt: new Date().toISOString(),
-          status: 'active',
-        };
+          deploymentModel: region,
+        });
 
-        // Save to config
-        const config = loadConfig();
-        config.tenants = config.tenants || [];
-        config.tenants.push(tenantConfig);
-        config.currentTenant = tenantId;
-        saveConfig(config);
+        // Track current tenant in workspace config
+        const wsConfig = loadWorkspaceConfig();
+        saveWorkspaceConfig({ ...wsConfig, current_tenant: created.tenantId } as any);
 
-        spinner.succeed(chalk.green(`Tenant created: ${tenantId}`));
-        console.log(formatOutput(tenantConfig));
-      } catch (error) {
-        spinner.fail(chalk.red('Failed to create tenant'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: created }));
+        } else {
+          spinner.succeed(color.green(`Tenant created: ${created.tenantId}`));
+          console.log(formatOutput(created));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'TENANT_CREATE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to create tenant'));
         throw error;
       }
     });
@@ -85,85 +104,107 @@ export function registerTenantCommands(program: Command): void {
   tenant
     .command('list')
     .description('List all tenants')
-    .action(() => {
-      const config = loadConfig();
-      const tenants = config.tenants || [];
+    .option('--json', 'Output result as JSON')
+    .action(async (options) => {
+      const spinner = ora('Fetching tenants').start();
+      if (options.json) spinner.stop();
 
-      if (tenants.length === 0) {
-        console.log(chalk.yellow('No tenants found. Create one with "chimera tenant create"'));
-        return;
+      try {
+        const tenants = await apiClient.get<Tenant[]>('/tenants');
+        const wsConfig = loadWorkspaceConfig() as any;
+        const currentTenantId = wsConfig?.current_tenant as string | undefined;
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: tenants }));
+          return;
+        }
+
+        spinner.succeed(color.green('Tenants retrieved'));
+
+        if (tenants.length === 0) {
+          console.log(color.yellow('No tenants found. Create one with "chimera tenant create"'));
+          return;
+        }
+
+        const rows = [
+          ['ID', 'Name', 'Tier', 'Region', 'Status', 'Created'],
+          ...tenants.map((t) => [
+            t.tenantId === currentTenantId ? color.green(`${t.tenantId} *`) : t.tenantId,
+            t.name,
+            t.tier,
+            t.region,
+            t.status,
+            new Date(t.createdAt).toLocaleString(),
+          ]),
+        ];
+
+        console.log(table(rows));
+        console.log(color.gray('* = current tenant'));
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'TENANT_LIST_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to list tenants'));
+        throw error;
       }
-
-      const data = [
-        ['ID', 'Name', 'Tier', 'Region', 'Status', 'Created'],
-        ...tenants.map((t) => [
-          t.tenantId === config.currentTenant ? chalk.green(`${t.tenantId} *`) : t.tenantId,
-          t.name,
-          t.tier,
-          t.region,
-          t.status,
-          new Date(t.createdAt).toLocaleString(),
-        ]),
-      ];
-
-      console.log(table(data));
-      console.log(chalk.gray(`* = current tenant`));
     });
 
   tenant
     .command('switch <tenant-id>')
-    .description('Switch to a different tenant')
+    .description('Switch to a different tenant (updates current tenant in chimera.toml)')
     .action((tenantId: string) => {
-      const config = loadConfig();
-      const tenant = config.tenants?.find((t) => t.tenantId === tenantId);
-
-      if (!tenant) {
-        console.error(chalk.red(`Tenant not found: ${tenantId}`));
-        process.exit(1);
-      }
-
-      config.currentTenant = tenantId;
-      saveConfig(config);
-
-      console.log(chalk.green(`Switched to tenant: ${tenant.name} (${tenantId})`));
+      const wsConfig = loadWorkspaceConfig();
+      saveWorkspaceConfig({ ...wsConfig, current_tenant: tenantId } as any);
+      console.log(color.green(`Switched to tenant: ${tenantId}`));
     });
 
   tenant
     .command('delete <tenant-id>')
     .description('Delete a tenant')
     .option('--force', 'Skip confirmation')
+    .option('--json', 'Output result as JSON')
     .action(async (tenantId: string, options) => {
-      const config = loadConfig();
-      const tenant = config.tenants?.find((t) => t.tenantId === tenantId);
-
-      if (!tenant) {
-        console.error(chalk.red(`Tenant not found: ${tenantId}`));
-        process.exit(1);
-      }
-
-      if (!options.force) {
+      if (!options.force && !options.json) {
         const { confirm } = await inquirer.prompt([
           {
             type: 'confirm',
             name: 'confirm',
-            message: `Delete tenant "${tenant.name}" (${tenantId})? This cannot be undone.`,
+            message: `Delete tenant "${tenantId}"? This cannot be undone.`,
             default: false,
           },
         ]);
 
         if (!confirm) {
-          console.log(chalk.yellow('Deletion cancelled'));
+          console.log(color.yellow('Deletion cancelled'));
           return;
         }
       }
 
-      config.tenants = config.tenants?.filter((t) => t.tenantId !== tenantId) || [];
+      const spinner = ora(`Deleting tenant ${tenantId}`).start();
+      if (options.json) spinner.stop();
 
-      if (config.currentTenant === tenantId) {
-        config.currentTenant = config.tenants[0]?.tenantId || null;
+      try {
+        await apiClient.delete(`/tenants/${encodeURIComponent(tenantId)}`);
+
+        // Clear current tenant if we just deleted it
+        const wsConfig = loadWorkspaceConfig() as any;
+        if (wsConfig?.current_tenant === tenantId) {
+          saveWorkspaceConfig({ ...wsConfig, current_tenant: undefined } as any);
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { tenantId } }));
+        } else {
+          spinner.succeed(color.green(`Tenant deleted: ${tenantId}`));
+        }
+      } catch (error: any) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'TENANT_DELETE_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Failed to delete tenant'));
+        throw error;
       }
-
-      saveConfig(config);
-      console.log(chalk.green(`Tenant deleted: ${tenantId}`));
     });
 }

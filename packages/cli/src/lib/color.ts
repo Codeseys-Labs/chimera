@@ -1,15 +1,21 @@
- /**
- * Minimal ANSI color utilities — no runtime dependency, Bun built-in safe.
- * Replaces the `chalk` package throughout packages/cli.
+/**
+ * Thin ANSI color wrapper — no runtime dependency, zero overhead.
+ * Respects NO_COLOR env var and non-TTY output (e.g. CI/pipes).
  */
 
+const ESC = '\x1b[';
+const isTTY = process.env.NO_COLOR == null && Boolean(process.stdout.isTTY);
+const c = (code: string, s: string) => (isTTY ? `${ESC}${code}m${s}${ESC}0m` : s);
+
 export const color = {
-  green:     (s: string) => `\x1b[32m${s}\x1b[0m`,
-  red:       (s: string) => `\x1b[31m${s}\x1b[0m`,
-  yellow:    (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue:      (s: string) => `\x1b[34m${s}\x1b[0m`,
-  gray:      (s: string) => `\x1b[90m${s}\x1b[0m`,
-  bold:      (s: string) => `\x1b[1m${s}\x1b[0m`,
-  dim:       (s: string) => `\x1b[2m${s}\x1b[0m`,
-  underline: (s: string) => `\x1b[4m${s}\x1b[0m`,
+  reset:     (s: string) => c('0', s),
+  bold:      (s: string) => c('1', s),
+  dim:       (s: string) => c('2', s),
+  underline: (s: string) => c('4', s),
+  red:       (s: string) => c('31', s),
+  green:     (s: string) => c('32', s),
+  yellow:    (s: string) => c('33', s),
+  blue:      (s: string) => c('34', s),
+  cyan:      (s: string) => c('36', s),
+  gray:      (s: string) => c('90', s),
 };

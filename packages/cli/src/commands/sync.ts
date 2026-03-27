@@ -4,13 +4,14 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as readline from 'readline';
 import { CodeCommitClient } from '@aws-sdk/client-codecommit';
-import { loadWorkspaceConfig } from '../utils/workspace';
-import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit';
+import { loadWorkspaceConfig } from '../utils/workspace.js';
+import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit.js';
+import { color } from '../lib/color.js';
 
 /**
  * Find project root by walking up directory tree looking for package.json
@@ -29,26 +30,47 @@ function findProjectRoot(): string {
 }
 
 /**
+ * Prompt the user to confirm before overwriting local files.
+ * Returns true if the user confirms (or --yes was passed).
+ */
+async function confirmOverwrite(fileCount: number, yes: boolean): Promise<boolean> {
+  if (yes) return true;
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(
+      `Sync will overwrite ${fileCount} local file(s). Continue? [y/N] `,
+      (answer) => {
+        rl.close();
+        resolve(answer.trim().toLowerCase() === 'y');
+      },
+    );
+  });
+}
+
+/**
  * Sync local changes with CodeCommit (bidirectional)
- *
- * Flow:
- * 1. Pull: Fetch all files from CodeCommit via SDK and write to local disk
- * 2. Push: Push local state back to CodeCommit via CreateCommit API
- *
- * Pure AWS SDK approach - no git remote, credential helper, or pip dependencies
- * Works with any AWS credential type: IAM roles, assumed roles, SSO, etc.
  */
 async function syncWithCodeCommit(
   repoRoot: string,
   region: string,
   repoName: string,
+  yes: boolean,
 ): Promise<void> {
   const client = new CodeCommitClient({ region });
 
   // Step 1: Pull — fetch all files from CodeCommit and write to local disk
-  console.log(chalk.gray('  Pulling files from CodeCommit...'));
+  console.log(color.gray('  Pulling files from CodeCommit...'));
   const ccFiles = await getFilesFromCodeCommit(client, repoName, 'main');
-  console.log(chalk.gray(`  Received ${ccFiles.length} files from CodeCommit`));
+  console.log(color.gray(`  Received ${ccFiles.length} files from CodeCommit`));
+
+  if (ccFiles.length > 0) {
+    const confirmed = await confirmOverwrite(ccFiles.length, yes);
+    if (!confirmed) {
+      console.log(color.yellow('  Sync cancelled'));
+      return;
+    }
+  }
 
   for (const file of ccFiles) {
     const localPath = path.join(repoRoot, file.path);
@@ -58,12 +80,12 @@ async function syncWithCodeCommit(
     }
     fs.writeFileSync(localPath, file.content);
   }
-  console.log(chalk.gray('  Local workspace updated'));
+  console.log(color.gray('  Local workspace updated'));
 
   // Step 2: Push — send local state back to CodeCommit
-  console.log(chalk.gray('  Pushing local state to CodeCommit...'));
+  console.log(color.gray('  Pushing local state to CodeCommit...'));
   await pushToCodeCommit(client, repoName, repoRoot, 'main', 'Sync: local workspace');
-  console.log(chalk.gray('  Push complete'));
+  console.log(color.gray('  Push complete'));
 }
 
 export function registerSyncCommand(program: Command): void {
@@ -72,39 +94,58 @@ export function registerSyncCommand(program: Command): void {
     .description(
       'Bidirectional sync between local workspace and CodeCommit (merge agent edits with local changes)',
     )
-    .action(async () => {
+    .option('--yes', 'Skip overwrite confirmation prompt')
+    .option('--json', 'Output result as JSON')
+    .action(async (options) => {
       const spinner = ora('Starting sync operation').start();
+      if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
         const region = wsConfig?.aws?.region;
         const repositoryName = wsConfig?.workspace?.repository;
         if (!region || !repositoryName) {
-          spinner.fail(chalk.red('No workspace configuration found'));
-          console.error(chalk.red('Run chimera init to configure your workspace'));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: 'No workspace configuration found', code: 'NO_CONFIG' }));
+            process.exit(1);
+          }
+          spinner.fail(color.red('No workspace configuration found'));
+          console.error(color.red('Run chimera init to configure your workspace'));
           process.exit(1);
         }
         if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
-        spinner.succeed(chalk.green('Workspace: ' + repositoryName + ' in ' + region));
+        if (!options.json) spinner.succeed(color.green('Workspace: ' + repositoryName + ' in ' + region));
 
-        // Find project root
-        spinner.start('Locating project root...');
+        if (!options.json) spinner.start('Locating project root...');
         const repoRoot = findProjectRoot();
-        spinner.succeed(chalk.green(`Project root: ${repoRoot}`));
+        if (!options.json) spinner.succeed(color.green(`Project root: ${repoRoot}`));
 
-        // Sync with CodeCommit
-        spinner.start('Syncing with CodeCommit...');
-        await syncWithCodeCommit(repoRoot, region, repositoryName);
-        spinner.succeed(chalk.green('Sync complete'));
+        if (!options.json) spinner.start('Syncing with CodeCommit...');
+        if (options.json) {
+          // In JSON mode, suppress interactive prompt
+          await syncWithCodeCommit(repoRoot, region, repositoryName, true);
+        } else {
+          spinner.stop();
+          await syncWithCodeCommit(repoRoot, region, repositoryName, options.yes ?? false);
+          spinner.succeed(color.green('Sync complete'));
+        }
 
-        console.log(chalk.green('\n✓ Local workspace synced with CodeCommit'));
-        console.log(chalk.gray('\nWhat happened:'));
-        console.log(chalk.gray('  1. Fetched latest agent edits from CodeCommit'));
-        console.log(chalk.gray('  2. Applied agent edits to local workspace'));
-        console.log(chalk.gray('  3. Pushed merged result back to CodeCommit'));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'ok', data: { repository: repositoryName, region } }));
+        } else {
+          console.log(color.green('\n✓ Local workspace synced with CodeCommit'));
+          console.log(color.gray('\nWhat happened:'));
+          console.log(color.gray('  1. Fetched latest agent edits from CodeCommit'));
+          console.log(color.gray('  2. Applied agent edits to local workspace'));
+          console.log(color.gray('  3. Pushed merged result back to CodeCommit'));
+        }
       } catch (error: any) {
-        spinner.fail(chalk.red('Sync failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'SYNC_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Sync failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       }
     });
