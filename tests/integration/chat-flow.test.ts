@@ -5,7 +5,7 @@
  * Requires: Chat SDK (ECS Fargate) + SSE bridge
  */
 
-import { describe, test, expect, beforeAll } from '@jest/globals';
+import { describe, test, expect, beforeAll } from 'bun:test';
 import { TestClient } from '../helpers/test-client';
 
 const TEST_CONFIG = {

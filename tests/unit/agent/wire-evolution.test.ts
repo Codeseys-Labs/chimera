@@ -5,6 +5,7 @@
  * self-reflection persistence to DynamoDB.
  */
 
+import { describe, it, expect, mock, spyOn } from 'bun:test';
 import { ChimeraAgent, type AgentConfig } from '../../../packages/core/src/agent';
 import { ModelRouter } from '../../../packages/core/src/evolution/model-router';
 import { PromptOptimizer } from '../../../packages/core/src/evolution/prompt-optimizer';
@@ -14,25 +15,25 @@ import type { ModelSelection, PromptABExperiment } from '../../../packages/core/
 describe('ChimeraAgent Evolution Wiring', () => {
   // Helper to create mock model
   const createMockModel = () => ({
-    converse: jest.fn().mockResolvedValue({
+    converse: mock(() => Promise.resolve({
       stopReason: 'end_turn',
       output: {
         message: {
           content: [{ text: 'Mock response' }],
         },
       },
-    }),
+    })),
   });
 
   describe('ModelRouter integration', () => {
     it('should consult ModelRouter for model selection', async () => {
       const mockModelRouter = {
-        selectModel: jest.fn().mockResolvedValue({
+        selectModel: mock(() => Promise.resolve({
           selectedModel: 'us.amazon.nova-lite-v1:0',
           taskCategory: 'simple_qa',
           routingWeights: {},
-        } as ModelSelection),
-        recordOutcome: jest.fn().mockResolvedValue(undefined),
+        } as ModelSelection)),
+        recordOutcome: mock(() => Promise.resolve(undefined)),
       } as unknown as ModelRouter;
 
       const config: AgentConfig = {
@@ -55,12 +56,12 @@ describe('ChimeraAgent Evolution Wiring', () => {
 
     it('should record outcome to ModelRouter after invocation', async () => {
       const mockModelRouter = {
-        selectModel: jest.fn().mockResolvedValue({
+        selectModel: mock(() => Promise.resolve({
           selectedModel: 'us.anthropic.claude-sonnet-4-6-v1:0',
           taskCategory: 'analysis',
           routingWeights: {},
-        } as ModelSelection),
-        recordOutcome: jest.fn().mockResolvedValue(undefined),
+        } as ModelSelection)),
+        recordOutcome: mock(() => Promise.resolve(undefined)),
       } as unknown as ModelRouter;
 
       const config: AgentConfig = {
@@ -82,7 +83,7 @@ describe('ChimeraAgent Evolution Wiring', () => {
         qualityScore: expect.any(Number),
       });
 
-      const qualityScore = (mockModelRouter.recordOutcome as jest.Mock).mock.calls[0][0].qualityScore;
+      const qualityScore = (mockModelRouter.recordOutcome as any).mock.calls[0][0].qualityScore;
       expect(qualityScore).toBeGreaterThanOrEqual(0);
       expect(qualityScore).toBeLessThanOrEqual(1);
     });
@@ -104,15 +105,15 @@ describe('ChimeraAgent Evolution Wiring', () => {
   describe('PromptOptimizer integration', () => {
     it('should select prompt variant from PromptOptimizer', async () => {
       const mockPromptOptimizer = {
-        selectPromptVariant: jest.fn().mockResolvedValue('b'),
-        getExperiment: jest.fn().mockResolvedValue({
+        selectPromptVariant: mock(() => Promise.resolve('b')),
+        getExperiment: mock(() => Promise.resolve({
           experimentId: 'exp-123',
           variantAPromptS3: 'prompts/control.txt',
           variantBPromptS3: 'prompts/improved.txt',
           status: 'running',
-        } as PromptABExperiment),
-        loadPrompt: jest.fn().mockResolvedValue('Improved system prompt'),
-        recordVariantOutcome: jest.fn().mockResolvedValue(undefined),
+        } as PromptABExperiment)),
+        loadPrompt: mock(() => Promise.resolve('Improved system prompt')),
+        recordVariantOutcome: mock(() => Promise.resolve(undefined)),
       } as unknown as PromptOptimizer;
 
       const config: AgentConfig = {
@@ -138,15 +139,15 @@ describe('ChimeraAgent Evolution Wiring', () => {
 
     it('should record variant outcome after invocation', async () => {
       const mockPromptOptimizer = {
-        selectPromptVariant: jest.fn().mockResolvedValue('a'),
-        getExperiment: jest.fn().mockResolvedValue({
+        selectPromptVariant: mock(() => Promise.resolve('a')),
+        getExperiment: mock(() => Promise.resolve({
           experimentId: 'exp-456',
           variantAPromptS3: 'prompts/control.txt',
           variantBPromptS3: 'prompts/improved.txt',
           status: 'running',
-        } as PromptABExperiment),
-        loadPrompt: jest.fn().mockResolvedValue('Control system prompt'),
-        recordVariantOutcome: jest.fn().mockResolvedValue(undefined),
+        } as PromptABExperiment)),
+        loadPrompt: mock(() => Promise.resolve('Control system prompt')),
+        recordVariantOutcome: mock(() => Promise.resolve(undefined)),
       } as unknown as PromptOptimizer;
 
       const config: AgentConfig = {
@@ -172,10 +173,10 @@ describe('ChimeraAgent Evolution Wiring', () => {
 
     it('should fallback to static prompt if experiment not found', async () => {
       const mockPromptOptimizer = {
-        selectPromptVariant: jest.fn().mockResolvedValue('a'),
-        getExperiment: jest.fn().mockResolvedValue(null),
-        loadPrompt: jest.fn().mockResolvedValue('Should not be called'),
-        recordVariantOutcome: jest.fn().mockResolvedValue(undefined),
+        selectPromptVariant: mock(() => Promise.resolve('a')),
+        getExperiment: mock(() => Promise.resolve(null)),
+        loadPrompt: mock(() => Promise.resolve('Should not be called')),
+        recordVariantOutcome: mock(() => Promise.resolve(undefined)),
       } as unknown as PromptOptimizer;
 
       const config: AgentConfig = {
@@ -197,7 +198,7 @@ describe('ChimeraAgent Evolution Wiring', () => {
   describe('Self-reflection persistence', () => {
     it('should persist reflection data to DynamoDB', async () => {
       const mockDdbClient = {
-        send: jest.fn().mockResolvedValue({}),
+        send: mock(() => Promise.resolve({})),
       };
 
       const config: AgentConfig = {
@@ -227,16 +228,16 @@ describe('ChimeraAgent Evolution Wiring', () => {
 
     it('should include model and prompt metadata in reflection', async () => {
       const mockDdbClient = {
-        send: jest.fn().mockResolvedValue({}),
+        send: mock(() => Promise.resolve({})),
       };
 
       const mockModelRouter = {
-        selectModel: jest.fn().mockResolvedValue({
+        selectModel: mock(() => Promise.resolve({
           selectedModel: 'us.anthropic.claude-opus-4-6-v1:0',
           taskCategory: 'research',
           routingWeights: {},
-        } as ModelSelection),
-        recordOutcome: jest.fn().mockResolvedValue(undefined),
+        } as ModelSelection)),
+        recordOutcome: mock(() => Promise.resolve(undefined)),
       } as unknown as ModelRouter;
 
       const config: AgentConfig = {
@@ -276,7 +277,7 @@ describe('ChimeraAgent Evolution Wiring', () => {
   describe('Feedback capture', () => {
     it('should capture thumbs_up feedback', async () => {
       const mockDdbClient = {
-        send: jest.fn().mockResolvedValue({}),
+        send: mock(() => Promise.resolve({})),
       };
 
       const config: AgentConfig = {
@@ -304,7 +305,7 @@ describe('ChimeraAgent Evolution Wiring', () => {
 
     it('should capture correction feedback with value', async () => {
       const mockDdbClient = {
-        send: jest.fn().mockResolvedValue({}),
+        send: mock(() => Promise.resolve({})),
       };
 
       const config: AgentConfig = {
@@ -328,7 +329,7 @@ describe('ChimeraAgent Evolution Wiring', () => {
     });
 
     it('should warn if DynamoDB not configured', async () => {
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
       const config: AgentConfig = {
         systemPrompt: createDefaultSystemPrompt(),

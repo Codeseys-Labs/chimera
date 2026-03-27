@@ -4,20 +4,21 @@
  * Tests for multi-modal media processing with AWS services
  */
 
+import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { MediaProcessor, createMediaProcessor } from '../media-processor';
 import type { MediaProcessorConfig, MediaInput } from '../types';
 
 // Mock AWS SDK clients
 const mockTranscribeClient = {
-  send: jest.fn(),
+  send: mock(() => Promise.resolve({})),
 } as any;
 
 const mockRekognitionClient = {
-  send: jest.fn(),
+  send: mock(() => Promise.resolve({})),
 } as any;
 
 const mockTextractClient = {
-  send: jest.fn(),
+  send: mock(() => Promise.resolve({})),
 } as any;
 
 const mockConfig: MediaProcessorConfig = {
@@ -34,7 +35,9 @@ describe('MediaProcessor', () => {
 
   beforeEach(() => {
     processor = createMediaProcessor(mockConfig);
-    jest.clearAllMocks();
+    mockTranscribeClient.send.mockReset();
+    mockRekognitionClient.send.mockReset();
+    mockTextractClient.send.mockReset();
   });
 
   describe('detectMediaType', () => {

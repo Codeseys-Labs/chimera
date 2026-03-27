@@ -2,44 +2,53 @@
  * Discord route tests
  */
 
+import { mock, describe, it, expect, beforeEach } from 'bun:test';
+
 // Mock dependencies before importing the router.
 // Also prevents module contamination: bun test runs all test files in the same
 // process, so teams.test.ts mocking '../../adapters' with a Teams-style adapter
 // would corrupt these discord tests without explicit per-file mocks.
-jest.mock('@chimera/core', () => ({
-  createAgent: jest.fn().mockReturnValue({
-    invoke: jest.fn().mockResolvedValue({ output: 'Hello from Chimera!' }),
-  }),
-  createDefaultSystemPrompt: jest.fn().mockReturnValue('You are a helpful assistant.'),
+const mockCreateAgent = mock(() => ({
+  invoke: mock(() => Promise.resolve({ output: 'Hello from Chimera!' })),
+}));
+const mockCreateDefaultSystemPrompt = mock(() => 'You are a helpful assistant.');
+
+mock.module('@chimera/core', () => ({
+  createAgent: mockCreateAgent,
+  createDefaultSystemPrompt: mockCreateDefaultSystemPrompt,
 }));
 
-jest.mock('../../adapters', () => ({
-  getAdapter: jest.fn().mockReturnValue({
-    parseIncoming: jest.fn().mockImplementation((body: any) => {
-      // Slash command interaction (type 2)
-      if (body && typeof body.type === 'number' && body.type === 2) {
-        const options: Array<{ name: string; value: string }> = body.data?.options ?? [];
-        const msgOpt = options.find(
-          (o: { name: string; value: string }) => o.name === 'message' || o.name === 'prompt'
-        );
-        if (!msgOpt || !msgOpt.value) {
-          throw new Error('Slash command missing message/prompt option');
-        }
-        return [{ role: 'user', content: msgOpt.value }];
-      }
-      // Webhook message (has content or author field)
-      if (body && ('content' in body || 'author' in body)) {
-        if (body.content === undefined || typeof body.content !== 'string') {
-          throw new Error('Message missing content field');
-        }
-        return [{ role: 'user', content: body.content }];
-      }
-      throw new Error('Unsupported Discord payload format');
-    }),
-    formatResponse: jest.fn().mockReturnValue({
-      embeds: [{ description: 'Hello from Chimera!', color: 0x5865f2 }],
-    }),
-  }),
+const mockParseIncoming = mock((body: any) => {
+  // Slash command interaction (type 2)
+  if (body && typeof body.type === 'number' && body.type === 2) {
+    const options: Array<{ name: string; value: string }> = body.data?.options ?? [];
+    const msgOpt = options.find(
+      (o: { name: string; value: string }) => o.name === 'message' || o.name === 'prompt'
+    );
+    if (!msgOpt || !msgOpt.value) {
+      throw new Error('Slash command missing message/prompt option');
+    }
+    return [{ role: 'user', content: msgOpt.value }];
+  }
+  // Webhook message (has content or author field)
+  if (body && ('content' in body || 'author' in body)) {
+    if (body.content === undefined || typeof body.content !== 'string') {
+      throw new Error('Message missing content field');
+    }
+    return [{ role: 'user', content: body.content }];
+  }
+  throw new Error('Unsupported Discord payload format');
+});
+const mockFormatResponse = mock(() => ({
+  embeds: [{ description: 'Hello from Chimera!', color: 0x5865f2 }],
+}));
+const mockGetAdapter = mock(() => ({
+  parseIncoming: mockParseIncoming,
+  formatResponse: mockFormatResponse,
+}));
+
+mock.module('../../adapters', () => ({
+  getAdapter: mockGetAdapter,
 }));
 
 import { Hono } from 'hono';
@@ -89,7 +98,42 @@ function createTestApp(tenantContext?: Partial<TenantContext>) {
 
 describe('Discord Routes', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockCreateAgent.mockReset();
+    mockCreateDefaultSystemPrompt.mockReset();
+    mockParseIncoming.mockReset();
+    mockFormatResponse.mockReset();
+    mockGetAdapter.mockReset();
+    // Restore defaults
+    mockCreateAgent.mockImplementation(() => ({
+      invoke: mock(() => Promise.resolve({ output: 'Hello from Chimera!' })),
+    }));
+    mockCreateDefaultSystemPrompt.mockImplementation(() => 'You are a helpful assistant.');
+    mockParseIncoming.mockImplementation((body: any) => {
+      if (body && typeof body.type === 'number' && body.type === 2) {
+        const options: Array<{ name: string; value: string }> = body.data?.options ?? [];
+        const msgOpt = options.find(
+          (o: { name: string; value: string }) => o.name === 'message' || o.name === 'prompt'
+        );
+        if (!msgOpt || !msgOpt.value) {
+          throw new Error('Slash command missing message/prompt option');
+        }
+        return [{ role: 'user', content: msgOpt.value }];
+      }
+      if (body && ('content' in body || 'author' in body)) {
+        if (body.content === undefined || typeof body.content !== 'string') {
+          throw new Error('Message missing content field');
+        }
+        return [{ role: 'user', content: body.content }];
+      }
+      throw new Error('Unsupported Discord payload format');
+    });
+    mockFormatResponse.mockImplementation(() => ({
+      embeds: [{ description: 'Hello from Chimera!', color: 0x5865f2 }],
+    }));
+    mockGetAdapter.mockImplementation(() => ({
+      parseIncoming: mockParseIncoming,
+      formatResponse: mockFormatResponse,
+    }));
   });
 
   describe('POST /discord/interactions', () => {

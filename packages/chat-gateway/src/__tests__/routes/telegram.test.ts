@@ -2,40 +2,51 @@
  * Tests for Telegram webhook routes
  */
 
+import { mock, describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
 // Mock adapters before other imports to prevent module contamination.
 // bun test runs all files in the same process; teams.test.ts mocks
 // '../../adapters' with a Teams-style adapter that corrupts telegram tests
 // without an explicit per-file mock here.
-jest.mock('../../adapters', () => ({
-  getAdapter: jest.fn().mockReturnValue({
-    parseIncoming: jest.fn().mockImplementation((body: any) => {
-      if (!body || !body.message) return [];
-      if (!body.message.text) return [];
-      return [{ role: 'user', content: body.message.text }];
-    }),
-    formatResponse: jest.fn().mockReturnValue({
-      method: 'sendMessage',
-      text: 'Hello from Chimera!',
-      parse_mode: 'Markdown',
-    }),
-  }),
+const mockParseIncoming = mock((body: any) => {
+  if (!body || !body.message) return [];
+  if (!body.message.text) return [];
+  return [{ role: 'user', content: body.message.text }];
+});
+const mockFormatResponse = mock(() => ({
+  method: 'sendMessage',
+  text: 'Hello from Chimera!',
+  parse_mode: 'Markdown',
+}));
+const mockGetAdapter = mock(() => ({
+  parseIncoming: mockParseIncoming,
+  formatResponse: mockFormatResponse,
+}));
+
+mock.module('../../adapters', () => ({
+  getAdapter: mockGetAdapter,
+}));
+
+// Mock @chimera/core before importing route to avoid BEDROCK_MODELS export issue
+const mockInvoke = mock(() => Promise.resolve({ output: 'Hello from Chimera!' }));
+const mockCreateAgent = mock(() => ({ invoke: mockInvoke }));
+const mockCreateDefaultSystemPrompt = mock(() => 'You are a helpful assistant.');
+const mockResolveUser = mock(() => Promise.resolve(null));
+const mockUpdatePairing = mock(() => Promise.resolve({}));
+const MockUserPairingService = mock(() => ({
+  resolveUser: mockResolveUser,
+  updatePairing: mockUpdatePairing,
+}));
+
+mock.module('@chimera/core', () => ({
+  createAgent: mockCreateAgent,
+  createDefaultSystemPrompt: mockCreateDefaultSystemPrompt,
+  UserPairingService: MockUserPairingService,
 }));
 
 import { Hono } from 'hono';
 import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';
-
-// Mock @chimera/core before importing route to avoid BEDROCK_MODELS export issue
-jest.mock('@chimera/core', () => ({
-  createAgent: jest.fn().mockReturnValue({
-    invoke: jest.fn().mockResolvedValue({ output: 'Hello from Chimera!' }),
-  }),
-  createDefaultSystemPrompt: jest.fn().mockReturnValue('You are a helpful assistant.'),
-  UserPairingService: jest.fn().mockImplementation(() => ({
-    resolveUser: jest.fn().mockResolvedValue(null),
-    updatePairing: jest.fn().mockResolvedValue({}),
-  })),
-}));
 
 import telegramRouter from '../../routes/telegram';
 import type { TenantContext } from '../../types';
