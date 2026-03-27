@@ -7,7 +7,7 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import * as path from 'path';
-import { mkdirSync, existsSync } from 'fs';
+import * as fs from 'fs';
 import {
   CloudFormationClient,
   ListStacksCommand,
@@ -32,7 +32,7 @@ import { color } from '../lib/color.js';
 function findProjectRoot(): string {
   let dir = process.cwd();
   while (dir !== path.dirname(dir)) {
-    if (existsSync(path.join(dir, 'package.json'))) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) {
       return dir;
     }
     dir = path.dirname(dir);
@@ -76,7 +76,7 @@ async function exportDataArchive(options: { env: string; region: string; exportP
   const archiveDir = options.exportPath
     ? path.resolve(options.exportPath)
     : defaultDir;
-  mkdirSync(archiveDir, { recursive: true });
+  fs.mkdirSync(archiveDir, { recursive: true });
 
   const cfClient = new CloudFormationClient({ region: options.region });
   const ddbClient = new DynamoDBClient({ region: options.region });
@@ -125,22 +125,25 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     } while (lastKey);
 
     const safeTableName = tableName.replace(/[^a-zA-Z0-9-]/g, '_');
-    await Bun.write(
+    fs.writeFileSync(
       path.join(archiveDir, `${safeTableName}.json`),
       JSON.stringify(items, null, 2),
+      'utf8'
     );
   }
 
   const manifest = { tables, timestamp: new Date().toISOString(), env: options.env, region: options.region };
-  await Bun.write(
+  fs.writeFileSync(
     path.join(archiveDir, 'manifest.json'),
     JSON.stringify(manifest, null, 2),
+    'utf8'
   );
 
   const lastArchiveFile = path.join(os.homedir(), '.chimera', 'last-archive.json');
-  await Bun.write(
+  fs.writeFileSync(
     lastArchiveFile,
     JSON.stringify({ path: archiveDir, timestamp: manifest.timestamp, env: options.env }),
+    'utf8'
   );
 
   return archiveDir;
@@ -162,18 +165,18 @@ const STACK_DESTROY_ORDER = [
  */
 export async function reseedFromArchive(archivePath: string, region: string): Promise<void> {
   const manifestPath = path.join(archivePath, 'manifest.json');
-  if (!await Bun.file(manifestPath).exists()) {
+  if (!fs.existsSync(manifestPath)) {
     throw new Error(`Archive manifest not found at ${manifestPath}`);
   }
-  const manifest = await Bun.file(manifestPath).json<{ tables: string[] }>();
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const ddbClient = new DynamoDBClient({ region });
 
-  for (const tableName of manifest.tables) {
+  for (const tableName of manifest.tables as string[]) {
     const safeTableName = tableName.replace(/[^a-zA-Z0-9-]/g, '_');
     const filePath = path.join(archivePath, `${safeTableName}.json`);
-    if (!await Bun.file(filePath).exists()) continue;
+    if (!fs.existsSync(filePath)) continue;
 
-    const items: Record<string, AttributeValue>[] = await Bun.file(filePath).json();
+    const items: Record<string, AttributeValue>[] = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
     for (let i = 0; i < items.length; i += 25) {
       const batch = items.slice(i, i + 25);
@@ -391,7 +394,7 @@ export function registerDestroyCommands(program: Command): void {
         if (options.reseed) {
           if (!options.json) console.log(color.bold('\n3. Reseeding DynamoDB tables\n'));
           const reseedPath = path.resolve(options.reseed);
-          if (!await Bun.file(reseedPath).exists()) {
+          if (!fs.existsSync(reseedPath)) {
             throw new Error(`Reseed archive not found: ${reseedPath}`);
           }
           if (!options.json) spinner.start('Reimporting archived data...');
