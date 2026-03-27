@@ -25,6 +25,7 @@ export interface WorkspaceConfig {
   };
   endpoints?: {
     api_url?: string;
+    chat_url?: string;
     websocket_url?: string;
     cognito_user_pool_id?: string;
     cognito_client_id?: string;
