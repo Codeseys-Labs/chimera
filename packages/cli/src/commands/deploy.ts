@@ -1,13 +1,14 @@
 /**
  * Deployment commands - AWS CodeCommit + CodePipeline orchestration
+ *
+ * CDK runs via `npx cdk` (spawned by Bun.$) to preserve Node.js module resolution.
+ * "bunx cdk" would break CDK instanceof checks — npx always runs CDK under Node.
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync, spawnSync } from 'child_process';
 import {
   CodeCommitClient,
   CreateRepositoryCommand,
@@ -17,33 +18,31 @@ import {
   CloudFormationClient,
   DescribeStacksCommand,
 } from '@aws-sdk/client-cloudformation';
-import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace';
+import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
 import {
   resolveSourcePath,
   cleanupSource,
   type SourceLocation,
-} from '../utils/source';
-import { pushToCodeCommit } from '../utils/codecommit';
+} from '../utils/source.js';
+import { pushToCodeCommit } from '../utils/codecommit.js';
+import { color } from '../lib/color.js';
 
 
 /**
- * Get AWS account ID from STS
+ * Get AWS account ID from STS.
+ * Command is fully app-controlled — safe to use Bun.$ template literal.
  */
 async function getAccountId(): Promise<string> {
   try {
-    const output = execSync('aws sts get-caller-identity --query Account --output text', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return output.trim();
+    return await Bun.$`aws sts get-caller-identity --query Account --output text`.quiet().text();
   } catch {
     throw new Error('Failed to get AWS account ID. Ensure AWS credentials are configured.');
   }
 }
 
 /**
- * Find project root by walking up directory tree looking for package.json
- * Returns null if not found (caller decides whether to error or use alternative source)
+ * Find project root by walking up directory tree looking for package.json.
+ * Returns null if not found.
  */
 function findProjectRoot(): string | null {
   let dir = process.cwd();
@@ -64,13 +63,11 @@ async function ensureCodeCommitRepo(
   repoName: string,
 ): Promise<string> {
   try {
-    // Check if repo exists
     const getRepoCommand = new GetRepositoryCommand({ repositoryName: repoName });
     const repo = await client.send(getRepoCommand);
     return repo.repositoryMetadata?.cloneUrlHttp || '';
   } catch (error: any) {
     if (error.name === 'RepositoryDoesNotExistException') {
-      // Create new repo
       const createCommand = new CreateRepositoryCommand({
         repositoryName: repoName,
         repositoryDescription: 'AWS Chimera multi-tenant agent platform source repository',
@@ -84,7 +81,6 @@ async function ensureCodeCommitRepo(
 
 /**
  * Check if Pipeline stack exists in CloudFormation
- * Returns true if stack exists (in any state except DELETE_COMPLETE)
  */
 async function pipelineStackExists(
   client: CloudFormationClient,
@@ -94,47 +90,32 @@ async function pipelineStackExists(
     const stackName = `Chimera-${environment}-Pipeline`;
     const command = new DescribeStacksCommand({ StackName: stackName });
     const response = await client.send(command);
-
-    // Stack exists if we got a response with at least one stack
-    // (and status is not DELETE_COMPLETE)
     const stack = response.Stacks?.[0];
     return !!stack && stack.StackStatus !== 'DELETE_COMPLETE';
   } catch (error: any) {
-    // Stack does not exist if we get ValidationError
     if (error.name === 'ValidationError') {
       return false;
     }
-    // Re-throw unexpected errors
     throw error;
   }
 }
 
 
 /**
- * Deploy only the Pipeline CDK stack — CodePipeline buildspec deploys the rest
- * Note: CLI deploys Pipeline stack, which watches CodeCommit and auto-deploys all other stacks
+ * Deploy only the Pipeline CDK stack via npx (not bunx).
+ * npx spawns a separate Node.js process — CDK module resolution works correctly.
+ * safeEnv is sanitized to [a-zA-Z0-9-] — safe for Bun.$ template interpolation.
  */
-function deployCdkStacks(repoRoot: string, region: string, environment: string): void {
-  // Validate inputs to prevent injection
+async function deployCdkStacks(repoRoot: string, environment: string): Promise<void> {
   const safeEnv = environment.replace(/[^a-zA-Z0-9-]/g, '');
-  const safeRegion = region.replace(/[^a-z0-9-]/g, '');
-
-  // Deploy only the Pipeline stack — CodePipeline buildspec deploys the rest
-  // Pass correct context key 'environment' (not 'envName') to match chimera.ts
-  execSync(
-    `cd infra && npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`,
-    {
-      cwd: repoRoot,
-      stdio: 'inherit',
-    }
-  );
+  await Bun.$`npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`
+    .cwd(`${repoRoot}/infra`);
 }
 
 /**
  * Register all deployment-related commands
  */
 export function registerDeployCommands(program: Command): void {
-  // Main deploy command
   program
     .command('deploy')
     .description('Deploy Chimera to AWS account (creates CodeCommit repo, pushes source, triggers pipeline)')
@@ -152,8 +133,11 @@ export function registerDeployCommands(program: Command): void {
     .option('--remote <url>', 'Custom git remote URL to clone (implies --source git)')
     .option('--branch <branch>', 'Branch to checkout when using --source git')
     .option('--tag <tag>', 'Tag to checkout when using --source git')
+    .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
+      if (options.json) spinner.stop();
+
       let sourceLocation: SourceLocation | undefined;
       let sourcePath: string | null = null;
 
@@ -164,15 +148,12 @@ export function registerDeployCommands(program: Command): void {
         const repoName = options.repoName ?? wsConfig?.workspace?.repository ?? 'chimera';
         if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 
-        // Step 1: Get AWS account ID
-        spinner.text = 'Verifying AWS credentials...';
+        if (!options.json) spinner.text = 'Verifying AWS credentials...';
         const accountId = await getAccountId();
-        spinner.succeed(chalk.green(`AWS Account: ${accountId}`));
+        if (!options.json) spinner.succeed(color.green(`AWS Account: ${accountId}`));
 
-        // Step 2: Determine source location
-        spinner.start('Determining source location...');
+        if (!options.json) spinner.start('Determining source location...');
         if (options.source === 'auto' && options.remote) {
-          // --remote provided with auto mode: switch to git-clone
           sourceLocation = {
             type: 'git-clone',
             remote: options.remote,
@@ -180,22 +161,15 @@ export function registerDeployCommands(program: Command): void {
             tag: options.tag,
           };
           const ref = options.branch ?? options.tag;
-          spinner.succeed(
-            chalk.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`),
-          );
+          if (!options.json) spinner.succeed(color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`));
         } else if (options.source === 'auto') {
-          // Default to GitHub release archive
           sourceLocation = {
             type: 'github-release',
             owner: options.githubOwner,
             repo: options.githubRepo,
             tag: options.githubTag,
           };
-          spinner.succeed(
-            chalk.green(
-              `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
-            ),
-          );
+          if (!options.json) spinner.succeed(color.green(`Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`));
         } else if (options.source === 'git') {
           if (!options.remote) {
             throw new Error('--source git requires --remote <url>');
@@ -207,9 +181,7 @@ export function registerDeployCommands(program: Command): void {
             tag: options.tag,
           };
           const ref = options.branch ?? options.tag;
-          spinner.succeed(
-            chalk.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`),
-          );
+          if (!options.json) spinner.succeed(color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`));
         } else if (options.source === 'local') {
           const localRoot = findProjectRoot();
           if (!localRoot) {
@@ -218,7 +190,7 @@ export function registerDeployCommands(program: Command): void {
             );
           }
           sourceLocation = { type: 'local', path: localRoot };
-          spinner.succeed(chalk.green(`Source: Local project (${localRoot})`));
+          if (!options.json) spinner.succeed(color.green(`Source: Local project (${localRoot})`));
         } else if (options.source === 'github') {
           sourceLocation = {
             type: 'github-release',
@@ -226,76 +198,78 @@ export function registerDeployCommands(program: Command): void {
             repo: options.githubRepo,
             tag: options.githubTag,
           };
-          spinner.succeed(
-            chalk.green(
-              `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`,
-            ),
-          );
+          if (!options.json) spinner.succeed(color.green(`Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`));
         } else {
           throw new Error(`Invalid source mode: ${options.source}. Use auto, local, github, or git.`);
         }
 
-        // Step 3: Resolve source to filesystem path
-        spinner.start('Preparing source code...');
+        if (!options.json) spinner.start('Preparing source code...');
         sourcePath = await resolveSourcePath(sourceLocation);
-        spinner.succeed(chalk.green(`Source ready: ${sourcePath}`));
+        if (!options.json) spinner.succeed(color.green(`Source ready: ${sourcePath}`));
 
         let sourceCommitSha: string | undefined;
         try {
-          const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: sourcePath!, encoding: 'utf8' });
-          if (gitResult.status === 0) sourceCommitSha = (gitResult.stdout as string).trim();
-        } catch {}
+          sourceCommitSha = await Bun.$`git rev-parse HEAD`.cwd(sourcePath!).quiet().text();
+        } catch { /* not a git repo — skip */ }
 
-        // Step 4: Create or get CodeCommit repository
-        spinner.start('Setting up CodeCommit repository...');
+        if (!options.json) spinner.start('Setting up CodeCommit repository...');
         const codecommitClient = new CodeCommitClient({ region });
         await ensureCodeCommitRepo(codecommitClient, repoName);
-        spinner.succeed(chalk.green(`CodeCommit repository ready: ${repoName}`));
+        if (!options.json) spinner.succeed(color.green(`CodeCommit repository ready: ${repoName}`));
 
-        // Step 5: Push source to CodeCommit (using batched CreateCommit API)
-        spinner.start('Pushing source code to CodeCommit...');
+        if (!options.json) spinner.start('Pushing source code to CodeCommit...');
         const codecommitCommitId = await pushToCodeCommit(codecommitClient, repoName, sourcePath, 'main');
-        spinner.succeed(chalk.green('Source code pushed to CodeCommit'));
+        if (!options.json) spinner.succeed(color.green('Source code pushed to CodeCommit'));
 
-        // Step 6: Check if Pipeline stack exists
-        spinner.start('Checking Pipeline stack status...');
+        if (!options.json) spinner.start('Checking Pipeline stack status...');
         const cfnClient = new CloudFormationClient({ region });
         const stackExists = await pipelineStackExists(cfnClient, env);
 
         if (stackExists) {
-          // Pipeline stack exists - skip local CDK, CodePipeline will handle deployment
-          spinner.succeed(
-            chalk.green('Pipeline stack exists - CodePipeline will handle deployment'),
-          );
-          console.log(
-            chalk.gray(
-              '\nCodePipeline will automatically deploy infrastructure updates from the pushed code.',
-            ),
-          );
-          console.log(
-            chalk.gray('Monitor deployment progress in the AWS CodePipeline console.'),
-          );
+          if (!options.json) {
+            spinner.succeed(color.green('Pipeline stack exists - CodePipeline will handle deployment'));
+            console.log(color.gray('\nCodePipeline will automatically deploy infrastructure updates from the pushed code.'));
+            console.log(color.gray('Monitor deployment progress in the AWS CodePipeline console.'));
+          }
         } else {
-          // First-time deployment - run local CDK to bootstrap Pipeline stack
-          spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
-          deployCdkStacks(sourcePath, region, env);
-          spinner.succeed(chalk.green('Pipeline stack deployed - future pushes will auto-deploy'));
+          if (!options.json) spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
+          await deployCdkStacks(sourcePath, env);
+          if (!options.json) spinner.succeed(color.green('Pipeline stack deployed - future pushes will auto-deploy'));
         }
 
-        // Step 7: Save deployment config
         const updatedConfig = loadWorkspaceConfig();
-        saveWorkspaceConfig({ ...updatedConfig, deployment: { ...updatedConfig.deployment, account_id: accountId, status: 'deployed', last_deployed: new Date().toISOString(), source_commit: sourceCommitSha, codecommit_commit: codecommitCommitId } });
+        saveWorkspaceConfig({
+          ...updatedConfig,
+          deployment: {
+            ...updatedConfig.deployment,
+            account_id: accountId,
+            status: 'deployed',
+            last_deployed: new Date().toISOString(),
+            source_commit: sourceCommitSha,
+            codecommit_commit: codecommitCommitId,
+          },
+        });
 
-        console.log(chalk.green('\n✓ Deployment complete!'));
-        console.log(chalk.gray('\nNext steps:'));
-        console.log(chalk.gray('  1. Run "chimera connect" to save API endpoints'));
-        console.log(chalk.gray('  2. Run "chimera status" to check deployment health'));
+        if (options.json) {
+          console.log(JSON.stringify({
+            status: 'ok',
+            data: { accountId, repoName, env, region, stackExists, sourceCommitSha, codecommitCommitId },
+          }));
+        } else {
+          console.log(color.green('\n✓ Deployment complete!'));
+          console.log(color.gray('\nNext steps:'));
+          console.log(color.gray('  1. Run "chimera endpoints" to save API endpoints'));
+          console.log(color.gray('  2. Run "chimera status" to check deployment health'));
+        }
       } catch (error: any) {
-        spinner.fail(chalk.red('Deployment failed'));
-        console.error(chalk.red(error.message));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'DEPLOY_FAILED' }));
+          process.exit(1);
+        }
+        spinner.fail(color.red('Deployment failed'));
+        console.error(color.red(error.message));
         process.exit(1);
       } finally {
-        // Clean up temporary source directories
         if (sourcePath && sourceLocation) {
           cleanupSource(sourcePath, sourceLocation);
         }
