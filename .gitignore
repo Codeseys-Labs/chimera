@@ -73,6 +73,7 @@ htmlcov/
 # Compiled binaries
 # ============================================
 packages/cli/chimera
+/chimera
 
 # ============================================
 # Large generated files
