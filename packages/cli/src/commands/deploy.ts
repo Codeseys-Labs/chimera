@@ -259,7 +259,8 @@ export function registerDeployCommands(program: Command): void {
           console.log(color.green('\n✓ Deployment complete!'));
           console.log(color.gray('\nNext steps:'));
           console.log(color.gray('  1. Run "chimera endpoints" to save API endpoints'));
-          console.log(color.gray('  2. Run "chimera status" to check deployment health'));
+          console.log(color.gray('  2. Run "chimera setup" to provision the admin user'));
+          console.log(color.gray('  3. Run "chimera login" to authenticate'));
         }
       } catch (error: any) {
         if (options.json) {
