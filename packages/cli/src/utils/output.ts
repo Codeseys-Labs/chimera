@@ -2,7 +2,7 @@
  * Output formatting utilities
  */
 
-import chalk from 'chalk';
+import { color } from '../lib/color';
 
 export interface TenantConfig {
   tenantId: string;
@@ -24,40 +24,40 @@ export function formatOutput(data: unknown): string {
  * Format success message
  */
 export function formatSuccess(message: string): string {
-  return chalk.green(`✓ ${message}`);
+  return color.green(`✓ ${message}`);
 }
 
 /**
  * Format error message
  */
 export function formatError(message: string): string {
-  return chalk.red(`✗ ${message}`);
+  return color.red(`✗ ${message}`);
 }
 
 /**
  * Format warning message
  */
 export function formatWarning(message: string): string {
-  return chalk.yellow(`⚠ ${message}`);
+  return color.yellow(`⚠ ${message}`);
 }
 
 /**
  * Format info message
  */
 export function formatInfo(message: string): string {
-  return chalk.blue(`ℹ ${message}`);
+  return color.blue(`ℹ ${message}`);
 }
 
 /**
  * Format header
  */
 export function formatHeader(text: string): string {
-  return chalk.bold.underline(text);
+  return color.bold(color.underline(text));
 }
 
 /**
  * Format key-value pair
  */
 export function formatKeyValue(key: string, value: string): string {
-  return `${chalk.bold(key)}: ${value}`;
+  return `${color.bold(key)}: ${value}`;
 }
