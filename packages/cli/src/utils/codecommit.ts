@@ -14,7 +14,7 @@ import {
   GetFileCommand,
   PutFileEntry,
 } from '@aws-sdk/client-codecommit';
-import chalk from 'chalk';
+import { color } from '../lib/color';
 
 // CodeCommit batch limits
 export const BATCH_MAX_BYTES = 5 * 1024 * 1024; // 5MB per commit (leave 1MB buffer from 6MB limit)
@@ -140,12 +140,12 @@ export async function pushToCodeCommit(
   branchName: string = 'main',
   commitMessage?: string,
 ): Promise<string | undefined> {
-  console.log(chalk.gray('  Scanning repository files...'));
+  console.log(color.gray('  Scanning repository files...'));
   const allFiles = collectFiles(repoRoot, repoRoot);
-  console.log(chalk.gray(`  Found ${allFiles.length} files`));
+  console.log(color.gray(`  Found ${allFiles.length} files`));
 
   const batches = batchFiles(allFiles);
-  console.log(chalk.gray(`  Organized into ${batches.length} commit batch(es)`));
+  console.log(color.gray(`  Organized into ${batches.length} commit batch(es)`));
 
   let parentCommitId: string | undefined;
   try {
@@ -153,10 +153,10 @@ export async function pushToCodeCommit(
       new GetBranchCommand({ repositoryName: repoName, branchName }),
     );
     parentCommitId = branchInfo.branch?.commitId;
-    console.log(chalk.gray(`  Branch '${branchName}' exists, will update from tip`));
+    console.log(color.gray(`  Branch '${branchName}' exists, will update from tip`));
   } catch (error: any) {
     if (error.name === 'BranchDoesNotExistException') {
-      console.log(chalk.gray(`  Branch '${branchName}' does not exist, will create`));
+      console.log(color.gray(`  Branch '${branchName}' does not exist, will create`));
     } else {
       throw error;
     }
@@ -170,7 +170,7 @@ export async function pushToCodeCommit(
       batches.length === 1 ? baseMsg : `${baseMsg} (batch ${batchNum}/${batches.length})`;
 
     console.log(
-      chalk.gray(`  Creating commit ${batchNum}/${batches.length} (${batch.length} files)...`),
+      color.gray(`  Creating commit ${batchNum}/${batches.length} (${batch.length} files)...`),
     );
 
     const putFiles: PutFileEntry[] = batch.map((file) => ({
@@ -198,7 +198,7 @@ export async function pushToCodeCommit(
 
       if (isNoChangesError) {
         console.log(
-          chalk.gray(`  Batch ${batchNum}/${batches.length} skipped (no changes from parent)`),
+          color.gray(`  Batch ${batchNum}/${batches.length} skipped (no changes from parent)`),
         );
       } else {
         throw error;
@@ -206,7 +206,7 @@ export async function pushToCodeCommit(
     }
   }
 
-  console.log(chalk.gray('  All commits created successfully'));
+  console.log(color.gray('  All commits created successfully'));
   return parentCommitId;
 }
 

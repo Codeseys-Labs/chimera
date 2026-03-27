@@ -1,5 +1,10 @@
 /**
  * Configuration management utilities
+ *
+ * @deprecated These utilities read from ~/.chimera/config.json (legacy JSON format).
+ * Migrate command callers to loadWorkspaceConfig() / saveWorkspaceConfig() in
+ * workspace.ts (chimera.toml, ADR-030). Once all callers are migrated, this
+ * module will be deleted.
  */
 
 import * as fs from 'fs';
@@ -40,6 +45,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 /**
  * Load Chimera CLI configuration from ~/.chimera/config.json
+ * @deprecated Migrate to loadWorkspaceConfig() from workspace.ts (ADR-030)
  */
 export function loadConfig(): ChimeraConfig {
   try {
@@ -50,17 +56,16 @@ export function loadConfig(): ChimeraConfig {
     const data = fs.readFileSync(CONFIG_FILE, 'utf8');
     return JSON.parse(data);
   } catch {
-    // Return default config on error
     return { currentTenant: null };
   }
 }
 
 /**
  * Save Chimera CLI configuration to ~/.chimera/config.json
+ * @deprecated Migrate to saveWorkspaceConfig() from workspace.ts (ADR-030)
  */
 export function saveConfig(config: ChimeraConfig): void {
   try {
-    // Ensure config directory exists
     if (!fs.existsSync(CONFIG_DIR)) {
       fs.mkdirSync(CONFIG_DIR, { recursive: true });
     }
@@ -73,6 +78,7 @@ export function saveConfig(config: ChimeraConfig): void {
 
 /**
  * Get current tenant from config
+ * @deprecated Migrate callers to use loadWorkspaceConfig() (ADR-030)
  */
 export function getCurrentTenant(): TenantConfigEntry | null {
   const config = loadConfig();
