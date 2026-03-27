@@ -32,7 +32,8 @@
     "node_modules",
     "dist",
     "**/*.spec.ts",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "load/**"
   ],
   "references": [
     { "path": "../packages/shared" },
