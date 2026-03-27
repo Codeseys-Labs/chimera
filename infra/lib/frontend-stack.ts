@@ -55,8 +55,9 @@ export class FrontendStack extends cdk.Stack {
       defaultTtl: cdk.Duration.seconds(0),
       maxTtl: cdk.Duration.seconds(0),
       minTtl: cdk.Duration.seconds(0),
-      enableAcceptEncodingGzip: true,
-      enableAcceptEncodingBrotli: true,
+      // enableAcceptEncodingGzip/Brotli are invalid when caching is disabled (all TTLs=0)
+      enableAcceptEncodingGzip: false,
+      enableAcceptEncodingBrotli: false,
       headerBehavior: cloudfront.CacheHeaderBehavior.none(),
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
