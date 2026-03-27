@@ -153,7 +153,7 @@ export function createRDSTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier!,
+            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
             status: response.DBInstance?.DBInstanceStatus,
             endpoint: response.DBInstance?.Endpoint?.Address,
           },
@@ -199,7 +199,7 @@ export function createRDSTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier!,
+            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
             status: response.DBInstance?.DBInstanceStatus,
           },
           metadata: {
@@ -238,7 +238,7 @@ export function createRDSTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier!,
+            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
             status: response.DBInstance?.DBInstanceStatus,
           },
           metadata: {
@@ -279,7 +279,7 @@ export function createRDSTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier!,
+            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
             status: response.DBInstance?.DBInstanceStatus,
           },
           metadata: {
@@ -330,7 +330,7 @@ export function createRDSTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier!,
+            dbInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
             status: response.DBInstance?.DBInstanceStatus,
           },
           metadata: {

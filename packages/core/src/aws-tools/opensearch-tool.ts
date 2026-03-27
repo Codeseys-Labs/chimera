@@ -161,7 +161,7 @@ export function createOpenSearchTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            domainName: response.DomainStatus?.DomainName!,
+            domainName: response.DomainStatus?.DomainName,
             arn: response.DomainStatus?.ARN,
             domainId: response.DomainStatus?.DomainId,
           },
@@ -201,7 +201,7 @@ export function createOpenSearchTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            domainName: response.DomainStatus?.DomainName!,
+            domainName: response.DomainStatus?.DomainName,
             domainId: response.DomainStatus?.DomainId,
           },
           metadata: {

@@ -12,6 +12,7 @@ import {
   Message,
   SessionState,
 } from './types';
+import { InMemoryClient } from './in-memory-client';
 
 /**
  * Memory client interface
@@ -118,7 +119,6 @@ export class MemoryClientFactory {
    * Create in-memory client (testing)
    */
   static createInMemoryClient(namespace: string): MemoryClient {
-    const { InMemoryClient } = require('./in-memory-client');
     return new InMemoryClient(namespace);
   }
 }
