@@ -48,6 +48,32 @@ export function getBaseUrl(config?: Record<string, unknown>): string {
   return endpoints?.api_url ?? '';
 }
 
+/**
+ * Returns the base URL to use for a given path.
+ * /chat/* routes go to chat_url (ECS ALB) if configured; falls back to api_url with a warning.
+ */
+export function getUrlForPath(urlPath: string): string {
+  const wsConfig = loadWorkspaceConfig() as Record<string, unknown>;
+  const endpoints = wsConfig.endpoints as { api_url?: string; chat_url?: string } | undefined;
+
+  if (urlPath.startsWith('/chat/')) {
+    if (endpoints?.chat_url) {
+      return `${endpoints.chat_url}${urlPath}`;
+    }
+    // Fallback: warn and use api_url (will likely 403 but degrades gracefully)
+    if (endpoints?.api_url) {
+      process.stderr.write(
+        'Warning: chat_url not configured. Run "chimera endpoints" to set the Chat ALB URL. Falling back to api_url.\n',
+      );
+      return `${endpoints.api_url}${urlPath}`;
+    }
+    return urlPath;
+  }
+
+  const baseUrl = endpoints?.api_url ?? '';
+  return baseUrl ? `${baseUrl}${urlPath}` : urlPath;
+}
+
 async function getAuthHeaders(credentialsFile?: string): Promise<Record<string, string>> {
   const creds = await loadCredentials(credentialsFile);
   if (!creds) {
@@ -63,8 +89,7 @@ async function getAuthHeaders(credentialsFile?: string): Promise<Record<string, 
 }
 
 async function request<T>(method: string, urlPath: string, body?: unknown, credentialsFile?: string): Promise<T> {
-  const baseUrl = getBaseUrl();
-  const url = baseUrl ? `${baseUrl}${urlPath}` : urlPath;
+  const url = getUrlForPath(urlPath);
 
   const headers = await getAuthHeaders(credentialsFile);
 
@@ -87,8 +112,7 @@ async function request<T>(method: string, urlPath: string, body?: unknown, crede
 }
 
 async function requestStream(method: string, urlPath: string, body?: unknown, credentialsFile?: string): Promise<Response> {
-  const baseUrl = getBaseUrl();
-  const url = baseUrl ? `${baseUrl}${urlPath}` : urlPath;
+  const url = getUrlForPath(urlPath);
 
   const headers = await getAuthHeaders(credentialsFile);
   headers['Accept'] = 'text/event-stream';

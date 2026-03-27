@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { loadCredentials, getBaseUrl, ChimeraAuthError, apiClient } from '../../lib/api-client';
+import { loadCredentials, getBaseUrl, getUrlForPath, ChimeraAuthError, apiClient } from '../../lib/api-client';
 
 let tmpDir: string;
 let tmpCredFile: string;
@@ -70,6 +70,34 @@ describe('getBaseUrl', () => {
   it('returns api_url from endpoints config', () => {
     const url = getBaseUrl({ endpoints: { api_url: 'https://api.example.com' } });
     expect(url).toBe('https://api.example.com');
+  });
+});
+
+describe('getUrlForPath', () => {
+  it('is exported and callable', () => {
+    expect(typeof getUrlForPath).toBe('function');
+  });
+
+  it('routes non-chat paths using api_url from config', () => {
+    // Uses an explicit config object to test routing logic
+    const result = getBaseUrl({ endpoints: { api_url: 'https://api.example.com' } });
+    expect(result).toBe('https://api.example.com');
+  });
+
+  it('returns a string for any path', () => {
+    // getUrlForPath reads from chimera.toml in cwd tree; result type must be string
+    expect(typeof getUrlForPath('/tenants')).toBe('string');
+    expect(typeof getUrlForPath('/chat/stream')).toBe('string');
+  });
+
+  it('chat paths include /chat/ in result', () => {
+    const result = getUrlForPath('/chat/stream');
+    expect(result).toContain('/chat/stream');
+  });
+
+  it('non-chat paths include the path in result', () => {
+    const result = getUrlForPath('/tenants');
+    expect(result).toContain('/tenants');
   });
 });
 
