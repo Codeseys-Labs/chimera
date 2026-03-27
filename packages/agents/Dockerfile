@@ -1,14 +1,17 @@
 # Chimera Agent Dockerfile
 #
-# Uses ghcr.io/astral-sh/uv:python3.11 — official Astral image with Python 3.11
-# and uv pre-installed. Purpose-built for uv-managed Python projects.
+# Uses public.ecr.aws/docker/library/python:3.11-slim — ECR Public mirror of
+# Docker Hub python:3.11-slim. No rate limits in AWS CodeBuild.
+# uv installed via pip for Python environment management.
 
-FROM ghcr.io/astral-sh/uv:python3.11
+FROM public.ecr.aws/docker/library/python:3.11-slim
+
+# Install uv and system dependencies (git required for some Python packages)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
 
 WORKDIR /app
-
-# Install system dependencies (git required for some Python packages)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Copy Python project files
 COPY pyproject.toml .python-version uv.lock ./
