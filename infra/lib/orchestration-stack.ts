@@ -9,8 +9,9 @@ import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Construct } from 'constructs';
+import { ChimeraQueue } from '../constructs/chimera-queue';
+import { ChimeraLambda } from '../constructs/chimera-lambda';
 
 export interface OrchestrationStackProps extends cdk.StackProps {
   envName: string;
@@ -27,10 +28,8 @@ export interface OrchestrationStackProps extends cdk.StackProps {
  * - EventBridge rules for routing agent events (started, completed, failed, error)
  * - IAM roles and policies for cross-service event delivery
  *
- * Architecture patterns:
- * - Swarm: Dynamic agent pool scaling via Standard SQS queue
- * - Workflow: EventBridge orchestration with Step Functions targets
- * - Graph: Event-driven DAG execution via rule chains
+ * Queues use ChimeraQueue (mandatory KMS encryption, DLQ, CloudWatch alarms).
+ * Lambdas use ChimeraLambda (mandatory X-Ray, log retention, DLQ).
  *
  * Reference: docs/research/collaboration/01-AWS-Communication-Primitives.md
  */
@@ -50,14 +49,12 @@ export class OrchestrationStack extends cdk.Stack {
 
     // ======================================================================
     // EventBridge Custom Event Bus
-    // Central nervous system for all agent lifecycle events.
     // ======================================================================
 
     this.eventBus = new events.EventBus(this, 'AgentEventBus', {
       eventBusName: `chimera-agents-${props.envName}`,
     });
 
-    // Event archive for replay capability (retain 7 days in dev, 30 days in prod)
     new events.Archive(this, 'EventArchive', {
       sourceEventBus: this.eventBus,
       archiveName: `chimera-agents-archive-${props.envName}`,
@@ -68,7 +65,6 @@ export class OrchestrationStack extends cdk.Stack {
       },
     });
 
-    // CloudWatch log group for event debugging
     const eventLogGroup = new logs.LogGroup(this, 'EventBusLogGroup', {
       logGroupName: `/aws/events/chimera-agents-${props.envName}`,
       retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
@@ -78,96 +74,36 @@ export class OrchestrationStack extends cdk.Stack {
 
     // ======================================================================
     // SQS Queue: Agent Task Distribution (Standard Queue)
-    // High-throughput parallel task distribution for swarm pattern.
-    // Workers poll this queue and process tasks independently.
+    // ChimeraQueue provides DLQ, KMS encryption, and CloudWatch alarms.
     // ======================================================================
 
-    // Dead-letter queue for failed tasks
-    const taskDlq = new sqs.Queue(this, 'AgentTaskDLQ', {
-      queueName: `chimera-agent-tasks-dlq-${props.envName}`,
-      retentionPeriod: cdk.Duration.days(14),
-      encryptionMasterKey: props.platformKey,
-    });
-
-    this.agentTaskQueue = new sqs.Queue(this, 'AgentTaskQueue', {
+    const agentTaskChimeraQueue = new ChimeraQueue(this, 'AgentTaskQueue', {
       queueName: `chimera-agent-tasks-${props.envName}`,
-      visibilityTimeout: cdk.Duration.minutes(15), // Timeout for agent processing
-      retentionPeriod: cdk.Duration.days(4),
-      receiveMessageWaitTime: cdk.Duration.seconds(20), // Long polling
-      encryptionMasterKey: props.platformKey,
-      deadLetterQueue: {
-        queue: taskDlq,
-        maxReceiveCount: 3, // Retry up to 3 times before DLQ
-      },
+      encryptionKey: props.platformKey,
+      visibilityTimeout: cdk.Duration.minutes(15),
     });
+    this.agentTaskQueue = agentTaskChimeraQueue.queue;
 
     // ======================================================================
     // SQS Queue: Agent-to-Agent Messages (FIFO Queue)
-    // Ordered message delivery for session-based agent communication.
-    // Message group ID = tenantId-sessionId for strict ordering per session.
+    // contentBasedDeduplication added via escape hatch (ChimeraQueue uses fifo: true).
     // ======================================================================
 
-    // Dead-letter queue for failed messages
-    const messageDlq = new sqs.Queue(this, 'AgentMessageDLQ', {
-      queueName: `chimera-agent-messages-dlq-${props.envName}.fifo`,
+    const agentMessageChimeraQueue = new ChimeraQueue(this, 'AgentMessageQueue', {
+      queueName: `chimera-agent-messages-${props.envName}`,
+      encryptionKey: props.platformKey,
       fifo: true,
-      retentionPeriod: cdk.Duration.days(14),
-      encryptionMasterKey: props.platformKey,
-    });
-
-    this.agentMessageQueue = new sqs.Queue(this, 'AgentMessageQueue', {
-      queueName: `chimera-agent-messages-${props.envName}.fifo`,
-      fifo: true,
-      contentBasedDeduplication: true, // Automatic deduplication via SHA-256
       visibilityTimeout: cdk.Duration.minutes(5),
-      retentionPeriod: cdk.Duration.days(4),
-      receiveMessageWaitTime: cdk.Duration.seconds(20), // Long polling
-      encryptionMasterKey: props.platformKey,
-      deadLetterQueue: {
-        queue: messageDlq,
-        maxReceiveCount: 3,
-      },
     });
-
-    // ======================================================================
-    // CloudWatch Alarms: Circuit Breakers for DLQs
-    // Alerts when messages accumulate in DLQs, indicating systemic failures.
-    // ======================================================================
-
-    // Alarm for Task DLQ: trigger when >5 messages in 5 minutes
-    const taskDlqAlarm = new cloudwatch.Alarm(this, 'TaskDLQAlarm', {
-      alarmName: `chimera-task-dlq-alarm-${props.envName}`,
-      alarmDescription: 'Circuit breaker: task DLQ depth exceeds threshold',
-      metric: taskDlq.metricApproximateNumberOfMessagesVisible({
-        statistic: cloudwatch.Stats.AVERAGE,
-        period: cdk.Duration.minutes(5),
-      }),
-      threshold: 5,
-      evaluationPeriods: 1,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
-
-    // Alarm for Message DLQ: trigger when >5 messages in 5 minutes
-    const messageDlqAlarm = new cloudwatch.Alarm(this, 'MessageDLQAlarm', {
-      alarmName: `chimera-message-dlq-alarm-${props.envName}`,
-      alarmDescription: 'Circuit breaker: message DLQ depth exceeds threshold',
-      metric: messageDlq.metricApproximateNumberOfMessagesVisible({
-        statistic: cloudwatch.Stats.AVERAGE,
-        period: cdk.Duration.minutes(5),
-      }),
-      threshold: 5,
-      evaluationPeriods: 1,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
+    // Enable content-based deduplication (SHA-256 of message body)
+    (agentMessageChimeraQueue.queue.node.defaultChild as sqs.CfnQueue)
+      .addPropertyOverride('ContentBasedDeduplication', true);
+    this.agentMessageQueue = agentMessageChimeraQueue.queue;
 
     // ======================================================================
     // EventBridge Rules: Agent Lifecycle Event Routing
-    // Route agent events to appropriate targets based on event patterns.
     // ======================================================================
 
-    // Rule 1: Agent Task Started Events → CloudWatch Logs
     const taskStartedRule = new events.Rule(this, 'TaskStartedRule', {
       ruleName: `chimera-agent-started-${props.envName}`,
       eventBus: this.eventBus,
@@ -179,7 +115,6 @@ export class OrchestrationStack extends cdk.Stack {
     });
     taskStartedRule.addTarget(new targets.CloudWatchLogGroup(eventLogGroup));
 
-    // Rule 2: Agent Task Completed Events → CloudWatch Logs + Metrics
     const taskCompletedRule = new events.Rule(this, 'TaskCompletedRule', {
       ruleName: `chimera-agent-completed-${props.envName}`,
       eventBus: this.eventBus,
@@ -191,8 +126,6 @@ export class OrchestrationStack extends cdk.Stack {
     });
     taskCompletedRule.addTarget(new targets.CloudWatchLogGroup(eventLogGroup));
 
-    // Rule 3: Agent Task Failed Events → CloudWatch Logs + DLQ
-    // Failed tasks go to both logs (for debugging) and a queue (for retry/alerting)
     const taskFailedRule = new events.Rule(this, 'TaskFailedRule', {
       ruleName: `chimera-agent-failed-${props.envName}`,
       eventBus: this.eventBus,
@@ -203,10 +136,8 @@ export class OrchestrationStack extends cdk.Stack {
       },
     });
     taskFailedRule.addTarget(new targets.CloudWatchLogGroup(eventLogGroup));
-    taskFailedRule.addTarget(new targets.SqsQueue(taskDlq));
+    taskFailedRule.addTarget(new targets.SqsQueue(agentTaskChimeraQueue.dlq));
 
-    // Rule 4: Agent Error Events → CloudWatch Logs
-    // Runtime errors (not task failures) go to logs for immediate investigation
     const errorRule = new events.Rule(this, 'ErrorRule', {
       ruleName: `chimera-agent-error-${props.envName}`,
       eventBus: this.eventBus,
@@ -218,9 +149,6 @@ export class OrchestrationStack extends cdk.Stack {
     });
     errorRule.addTarget(new targets.CloudWatchLogGroup(eventLogGroup));
 
-    // Rule 5: Swarm Coordination Events → Task Queue
-    // When a coordinator agent needs to spawn workers, it publishes a
-    // "Swarm Task Created" event that gets routed to the task queue.
     const swarmTaskRule = new events.Rule(this, 'SwarmTaskRule', {
       ruleName: `chimera-swarm-task-${props.envName}`,
       eventBus: this.eventBus,
@@ -232,8 +160,6 @@ export class OrchestrationStack extends cdk.Stack {
     });
     swarmTaskRule.addTarget(new targets.SqsQueue(this.agentTaskQueue));
 
-    // Rule 6: Agent-to-Agent Messages → Message Queue (FIFO)
-    // Direct agent-to-agent messages for ordered communication
     const a2aMessageRule = new events.Rule(this, 'A2AMessageRule', {
       ruleName: `chimera-a2a-message-${props.envName}`,
       eventBus: this.eventBus,
@@ -244,16 +170,11 @@ export class OrchestrationStack extends cdk.Stack {
       },
     });
     a2aMessageRule.addTarget(new targets.SqsQueue(this.agentMessageQueue, {
-      // Message group ID extracted from event detail for session-based routing
       messageGroupId: events.EventField.fromPath('$.detail.sessionId'),
     }));
 
-    // Rule 7: Background Task Started → Step Functions (defined after state machine creation)
-    // This rule is created later after the state machine is defined
-
     // ======================================================================
     // IAM Role: EventBridge Event Publisher
-    // Allows agent runtime (Lambda, ECS tasks) to publish events to the bus.
     // ======================================================================
 
     const eventPublisherRole = new iam.Role(this, 'EventPublisherRole', {
@@ -271,21 +192,18 @@ export class OrchestrationStack extends cdk.Stack {
       resources: [this.eventBus.eventBusArn],
     }));
 
-    // Basic Lambda execution permissions (if Lambda agents need logging)
     eventPublisherRole.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
     );
 
     // ======================================================================
     // EventBridge Scheduler: Cron-based Agent Tasks
-    // Enables scheduled agent execution (daily reports, weekly audits, etc.)
     // ======================================================================
 
     this.schedulerGroup = new scheduler.CfnScheduleGroup(this, 'AgentSchedulerGroup', {
       name: `chimera-agent-schedules-${props.envName}`,
     });
 
-    // IAM role for EventBridge Scheduler to publish to EventBridge
     const schedulerRole = new iam.Role(this, 'SchedulerRole', {
       roleName: `chimera-scheduler-${props.envName}`,
       assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
@@ -299,12 +217,8 @@ export class OrchestrationStack extends cdk.Stack {
 
     // ======================================================================
     // Per-Tenant FIFO Queues (Dynamic Creation Pattern)
-    // Tenants can have dedicated FIFO queues for strict ordering guarantees.
-    // This is created on-demand via API/Lambda, not at stack deploy time.
-    // Pattern: chimera-tenant-{tenantId}-tasks-{env}.fifo
     // ======================================================================
 
-    // IAM role for Lambda to create per-tenant queues dynamically
     const queueProvisionerRole = new iam.Role(this, 'QueueProvisionerRole', {
       roleName: `chimera-queue-provisioner-${props.envName}`,
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -333,10 +247,6 @@ export class OrchestrationStack extends cdk.Stack {
 
     // ======================================================================
     // GroupChat Provisioner: SNS Topic + SQS Subscription Creation
-    // Enables Lambda to create per-group SNS topics and per-agent SQS queues
-    // for multi-agent pub-sub communication (swarm groupchat pattern).
-    // Pattern: chimera-groupchat-{groupId}-{env} (SNS topic)
-    //          chimera-groupchat-{groupId}-{agentId}-{env} (SQS queue)
     // ======================================================================
 
     const groupChatProvisionerRole = new iam.Role(this, 'GroupChatProvisionerRole', {
@@ -345,7 +255,6 @@ export class OrchestrationStack extends cdk.Stack {
       description: 'Allows Lambda to create SNS topics and SQS subscriptions for agent groupchat',
     });
 
-    // SNS permissions: create topics, configure attributes, subscribe SQS queues
     groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
       actions: [
         'sns:CreateTopic',
@@ -360,7 +269,6 @@ export class OrchestrationStack extends cdk.Stack {
       resources: [`arn:aws:sns:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`],
     }));
 
-    // SQS permissions: create queues for agent subscriptions
     groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
       actions: [
         'sqs:CreateQueue',
@@ -373,7 +281,6 @@ export class OrchestrationStack extends cdk.Stack {
       resources: [`arn:aws:sqs:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`],
     }));
 
-    // KMS permissions for encrypting SNS topics and SQS queues
     groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
       actions: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:DescribeKey'],
       resources: [props.platformKey.keyArn],
@@ -384,11 +291,11 @@ export class OrchestrationStack extends cdk.Stack {
     );
 
     // ======================================================================
-    // Lambda Functions for Workflow Steps
+    // Lambda Functions for Workflow Steps (ChimeraLambda)
     // ======================================================================
 
     // Pipeline Build: Start build job
-    const startBuildFunction = new lambda.Function(this, 'StartBuildFunction', {
+    const startBuildChimera = new ChimeraLambda(this, 'StartBuildFunction', {
       functionName: `chimera-workflow-start-build-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -417,13 +324,13 @@ def handler(event, context):
         CODEBUILD_PROJECT: `chimera-build-${props.envName}`,
       },
     });
-    startBuildFunction.addToRolePolicy(new iam.PolicyStatement({
+    startBuildChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['codebuild:StartBuild'],
       resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
     }));
 
     // Pipeline Build: Check build status
-    const checkBuildStatusFunction = new lambda.Function(this, 'CheckBuildStatusFunction', {
+    const checkBuildStatusChimera = new ChimeraLambda(this, 'CheckBuildStatusFunction', {
       functionName: `chimera-workflow-check-build-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -447,13 +354,13 @@ def handler(event, context):
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
     });
-    checkBuildStatusFunction.addToRolePolicy(new iam.PolicyStatement({
+    checkBuildStatusChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['codebuild:BatchGetBuilds'],
       resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
     }));
 
     // Data Analysis: Run query
-    const runDataQueryFunction = new lambda.Function(this, 'RunDataQueryFunction', {
+    const runDataQueryChimera = new ChimeraLambda(this, 'RunDataQueryFunction', {
       functionName: `chimera-workflow-run-query-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -482,24 +389,24 @@ def handler(event, context):
         ATHENA_OUTPUT: `s3://chimera-artifacts-${props.envName}/athena-results/`,
       },
     });
-    runDataQueryFunction.addToRolePolicy(new iam.PolicyStatement({
+    runDataQueryChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['athena:StartQueryExecution', 'athena:GetQueryExecution'],
       resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
     }));
-    runDataQueryFunction.addToRolePolicy(new iam.PolicyStatement({
+    runDataQueryChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['s3:GetBucketLocation', 's3:GetObject', 's3:ListBucket', 's3:PutObject'],
       resources: [
         `arn:aws:s3:::chimera-artifacts-${props.envName}`,
         `arn:aws:s3:::chimera-artifacts-${props.envName}/*`,
       ],
     }));
-    runDataQueryFunction.addToRolePolicy(new iam.PolicyStatement({
+    runDataQueryChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['glue:GetTable', 'glue:GetPartitions', 'glue:GetDatabase'],
       resources: ['*'],
     }));
 
     // Data Analysis: Check query status
-    const checkQueryStatusFunction = new lambda.Function(this, 'CheckQueryStatusFunction', {
+    const checkQueryStatusChimera = new ChimeraLambda(this, 'CheckQueryStatusFunction', {
       functionName: `chimera-workflow-check-query-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -521,13 +428,13 @@ def handler(event, context):
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
     });
-    checkQueryStatusFunction.addToRolePolicy(new iam.PolicyStatement({
+    checkQueryStatusChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['athena:GetQueryExecution', 'athena:GetQueryResults'],
       resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
     }));
 
     // Background Task: Execute generic background task
-    const executeBackgroundTaskFunction = new lambda.Function(this, 'ExecuteBackgroundTaskFunction', {
+    const executeBackgroundTaskChimera = new ChimeraLambda(this, 'ExecuteBackgroundTaskFunction', {
       functionName: `chimera-workflow-execute-bg-task-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -566,17 +473,17 @@ def handler(event, context):
         ENV_NAME: props.envName,
       },
     });
-    executeBackgroundTaskFunction.addToRolePolicy(new iam.PolicyStatement({
+    executeBackgroundTaskChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
       resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`],
     }));
-    executeBackgroundTaskFunction.addToRolePolicy(new iam.PolicyStatement({
+    executeBackgroundTaskChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['events:PutEvents'],
       resources: [this.eventBus.eventBusArn],
     }));
 
     // Background Task: Check task status
-    const checkBackgroundTaskStatusFunction = new lambda.Function(this, 'CheckBackgroundTaskStatusFunction', {
+    const checkBackgroundTaskStatusChimera = new ChimeraLambda(this, 'CheckBackgroundTaskStatusFunction', {
       functionName: `chimera-workflow-check-bg-task-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -601,18 +508,17 @@ def handler(event, context):
         SESSIONS_TABLE: `chimera-sessions-${props.envName}`,
       },
     });
-    checkBackgroundTaskStatusFunction.addToRolePolicy(new iam.PolicyStatement({
+    checkBackgroundTaskStatusChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:GetItem'],
       resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`],
     }));
 
     // ======================================================================
     // Step Functions: Pipeline Build Workflow
-    // Orchestrates multi-stage build process with status checks and retries.
     // ======================================================================
 
     const startBuildTask = new tasks.LambdaInvoke(this, 'StartBuildTask', {
-      lambdaFunction: startBuildFunction,
+      lambdaFunction: startBuildChimera.fn,
       outputPath: '$.Payload',
     });
     startBuildTask.addRetry({
@@ -623,7 +529,7 @@ def handler(event, context):
     });
 
     const checkBuildTask = new tasks.LambdaInvoke(this, 'CheckBuildTask', {
-      lambdaFunction: checkBuildStatusFunction,
+      lambdaFunction: checkBuildStatusChimera.fn,
       outputPath: '$.Payload',
     });
     checkBuildTask.addRetry({
@@ -672,11 +578,10 @@ def handler(event, context):
 
     // ======================================================================
     // Step Functions: Data Analysis Workflow
-    // Orchestrates query execution with polling and result validation.
     // ======================================================================
 
     const runQueryTask = new tasks.LambdaInvoke(this, 'RunQueryTask', {
-      lambdaFunction: runDataQueryFunction,
+      lambdaFunction: runDataQueryChimera.fn,
       outputPath: '$.Payload',
     });
     runQueryTask.addRetry({
@@ -687,7 +592,7 @@ def handler(event, context):
     });
 
     const checkQueryTask = new tasks.LambdaInvoke(this, 'CheckQueryTask', {
-      lambdaFunction: checkQueryStatusFunction,
+      lambdaFunction: checkQueryStatusChimera.fn,
       outputPath: '$.Payload',
     });
     checkQueryTask.addRetry({
@@ -736,11 +641,10 @@ def handler(event, context):
 
     // ======================================================================
     // Step Functions: Background Task Workflow
-    // Orchestrates generic background task execution with retry logic.
     // ======================================================================
 
     const executeTaskStep = new tasks.LambdaInvoke(this, 'ExecuteBackgroundTaskStep', {
-      lambdaFunction: executeBackgroundTaskFunction,
+      lambdaFunction: executeBackgroundTaskChimera.fn,
       outputPath: '$.Payload',
     });
     executeTaskStep.addRetry({
@@ -751,7 +655,7 @@ def handler(event, context):
     });
 
     const checkTaskStep = new tasks.LambdaInvoke(this, 'CheckBackgroundTaskStep', {
-      lambdaFunction: checkBackgroundTaskStatusFunction,
+      lambdaFunction: checkBackgroundTaskStatusChimera.fn,
       outputPath: '$.Payload',
     });
     checkTaskStep.addRetry({
@@ -798,14 +702,12 @@ def handler(event, context):
       },
     });
 
-    // Grant Lambda functions access to invoke Step Functions
     this.pipelineBuildStateMachine.grantStartExecution(eventPublisherRole);
     this.dataAnalysisStateMachine.grantStartExecution(eventPublisherRole);
     this.backgroundTaskStateMachine.grantStartExecution(eventPublisherRole);
 
     // ======================================================================
     // EventBridge Rule: Background Task Started → Step Functions
-    // Triggers background task state machine when agents start tasks.
     // ======================================================================
 
     const backgroundTaskRule = new events.Rule(this, 'BackgroundTaskStartedRule', {
@@ -818,7 +720,6 @@ def handler(event, context):
       },
     });
 
-    // Create IAM role for EventBridge to invoke Step Functions
     const stepFunctionsInvokeRole = new iam.Role(this, 'StepFunctionsInvokeRole', {
       roleName: `chimera-sfn-invoke-${props.envName}`,
       assumedBy: new iam.ServicePrincipal('events.amazonaws.com'),
@@ -829,7 +730,6 @@ def handler(event, context):
 
     backgroundTaskRule.addTarget(new targets.SfnStateMachine(this.backgroundTaskStateMachine, {
       role: stepFunctionsInvokeRole,
-      // Pass the event detail as input to the state machine
       input: events.RuleTargetInput.fromEventPath('$.detail'),
     }));
 

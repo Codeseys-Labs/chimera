@@ -47,16 +47,22 @@ describe('SkillPipelineStack', () => {
     });
 
     describe('Lambda Functions', () => {
-      it('should create exactly 8 Lambda functions', () => {
-        template.resourceCountIs('AWS::Lambda::Function', 8);
+      it('should create 9 Lambda functions (8 pipeline stages + 1 LogRetention)', () => {
+        // ChimeraLambda logRetention triggers CDK LogRetention custom resource Lambda (singleton)
+        template.resourceCountIs('AWS::Lambda::Function', 9);
       });
 
-      it('should create all functions with Node.js 20.x runtime', () => {
+      it('should create all application functions with Node.js 20.x runtime', () => {
         const functions = template.findResources('AWS::Lambda::Function');
-        const allNodejs20 = Object.values(functions).every(
+        // Filter to only application Lambda functions (those with a chimera- FunctionName)
+        const appFunctions = Object.values(functions).filter(
+          (fn: any) => fn.Properties.FunctionName?.startsWith?.('chimera-')
+        );
+        const allNodejs20 = appFunctions.every(
           (fn: any) => fn.Properties.Runtime === 'nodejs20.x'
         );
         expect(allNodejs20).toBe(true);
+        expect(appFunctions.length).toBe(8); // 7 pipeline stages + 1 scan-failure handler
       });
 
       describe('Stage 1: Static Analysis', () => {

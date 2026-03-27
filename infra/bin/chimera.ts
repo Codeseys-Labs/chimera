@@ -1,4 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
+import { Aspects } from 'aws-cdk-lib';
+import { AwsSolutionsChecks } from 'cdk-nag';
+import { TenantIsolationAspect, EncryptionAspect, LogRetentionAspect, TaggingAspect } from '../aspects';
 import { NetworkStack } from '../lib/network-stack';
 import { DataStack } from '../lib/data-stack';
 import { SecurityStack } from '../lib/security-stack';
@@ -14,7 +17,17 @@ import { EmailStack } from '../lib/email-stack';
 import { FrontendStack } from '../lib/frontend-stack';
 
 const app = new cdk.App();
+
+// CDK Nag: AwsSolutions compliance scanning (errors block synth, warnings are advisory)
+Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
+
 const envName = app.node.tryGetContext('environment') ?? 'dev';
+
+// Custom Aspects: cross-cutting compliance enforcement
+Aspects.of(app).add(new TenantIsolationAspect());
+Aspects.of(app).add(new EncryptionAspect());
+Aspects.of(app).add(new LogRetentionAspect());
+Aspects.of(app).add(new TaggingAspect({ environment: envName }));
 
 const envConfig: cdk.Environment = {
   account: app.node.tryGetContext('account') ?? process.env.CDK_DEFAULT_ACCOUNT,
