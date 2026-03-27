@@ -142,7 +142,7 @@ export function createRedshiftTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            clusterIdentifier: response.Cluster?.ClusterIdentifier!,
+            clusterIdentifier: response.Cluster?.ClusterIdentifier,
             clusterStatus: response.Cluster?.ClusterStatus,
             endpoint: response.Cluster?.Endpoint?.Address,
           },
@@ -186,7 +186,7 @@ export function createRedshiftTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            clusterIdentifier: response.Cluster?.ClusterIdentifier!,
+            clusterIdentifier: response.Cluster?.ClusterIdentifier,
             clusterStatus: response.Cluster?.ClusterStatus,
           },
           metadata: {
@@ -225,7 +225,7 @@ export function createRedshiftTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            clusterIdentifier: response.Cluster?.ClusterIdentifier!,
+            clusterIdentifier: response.Cluster?.ClusterIdentifier,
             clusterStatus: response.Cluster?.ClusterStatus,
           },
           metadata: {
@@ -264,7 +264,7 @@ export function createRedshiftTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            clusterIdentifier: response.Cluster?.ClusterIdentifier!,
+            clusterIdentifier: response.Cluster?.ClusterIdentifier,
             clusterStatus: response.Cluster?.ClusterStatus,
           },
           metadata: {
@@ -311,7 +311,7 @@ export function createRedshiftTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            clusterIdentifier: response.Cluster?.ClusterIdentifier!,
+            clusterIdentifier: response.Cluster?.ClusterIdentifier,
             clusterStatus: response.Cluster?.ClusterStatus,
           },
           metadata: {
