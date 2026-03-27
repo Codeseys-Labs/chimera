@@ -15,6 +15,21 @@ import { OrchestrationStack } from '../lib/orchestration-stack';
 import { EvolutionStack } from '../lib/evolution-stack';
 import { EmailStack } from '../lib/email-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import {
+  applyNetworkStackSuppressions,
+  applyDataStackSuppressions,
+  applySecurityStackSuppressions,
+  applyObservabilityStackSuppressions,
+  applyApiStackSuppressions,
+  applySkillPipelineStackSuppressions,
+  applyChatStackSuppressions,
+  applyPipelineStackSuppressions,
+  applyOrchestrationStackSuppressions,
+  applyEvolutionStackSuppressions,
+  applyTenantOnboardingStackSuppressions,
+  applyEmailStackSuppressions,
+  applyFrontendStackSuppressions,
+} from '../cdk-nag-suppressions';
 
 const app = new cdk.App();
 
@@ -51,6 +66,7 @@ const networkStack = new NetworkStack(app, `${prefix}-Network`, {
   description: 'Chimera network layer: VPC, subnets, NAT gateways, VPC endpoints, security groups',
   envName,
 });
+applyNetworkStackSuppressions(networkStack);
 
 // --- Stack 2: Data ---
 // 6 DynamoDB tables, 3 S3 buckets. Depends on NetworkStack for VPC (future ElastiCache).
@@ -61,6 +77,7 @@ const dataStack = new DataStack(app, `${prefix}-Data`, {
   vpc: networkStack.vpc,
   ecsSecurityGroup: networkStack.ecsSecurityGroup,
 });
+applyDataStackSuppressions(dataStack);
 dataStack.addDependency(networkStack);
 
 // --- Stack 3: Security ---
@@ -70,6 +87,7 @@ const securityStack = new SecurityStack(app, `${prefix}-Security`, {
   description: 'Chimera security layer: Cognito user pool, WAF WebACL, KMS key',
   envName,
 });
+applySecurityStackSuppressions(securityStack);
 
 // --- Stack 4: Observability ---
 // CloudWatch dashboard, SNS alarm topic, X-Ray config, DDB throttle alarms.
@@ -86,6 +104,7 @@ const observabilityStack = new ObservabilityStack(app, `${prefix}-Observability`
   costTrackingTable: dataStack.costTrackingTable,
   auditTable: dataStack.auditTable,
 });
+applyObservabilityStackSuppressions(observabilityStack);
 observabilityStack.addDependency(dataStack);
 observabilityStack.addDependency(securityStack);
 
@@ -99,6 +118,7 @@ const apiStack = new ApiStack(app, `${prefix}-Api`, {
   userPool: securityStack.userPool,
   webAcl: securityStack.webAcl,
 });
+applyApiStackSuppressions(apiStack);
 apiStack.addDependency(securityStack);
 
 // --- Stack 6: CI/CD Pipeline ---
@@ -113,6 +133,7 @@ const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
   branch: app.node.tryGetContext('branch') ?? 'main',
   dockerHubSecretArn: app.node.tryGetContext('dockerHubSecretArn'),
 });
+applyPipelineStackSuppressions(pipelineStack);
 
 // --- Stack 7: Skill Pipeline ---
 // 7-stage security scanning pipeline for marketplace skills using Step Functions.
@@ -124,6 +145,7 @@ const skillPipelineStack = new SkillPipelineStack(app, `${prefix}-SkillPipeline`
   skillsTable: dataStack.skillsTable,
   skillsBucket: dataStack.skillsBucket,
 });
+applySkillPipelineStackSuppressions(skillPipelineStack);
 skillPipelineStack.addDependency(dataStack);
 
 // --- Stack 8: Chat Gateway ---
@@ -141,6 +163,7 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   skillsTable: dataStack.skillsTable,
   ecrRepository: pipelineStack.chatGatewayEcrRepository,
 });
+applyChatStackSuppressions(chatStack);
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 chatStack.addDependency(pipelineStack);
@@ -155,6 +178,7 @@ const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`
   envName,
   platformKey: securityStack.platformKey,
 });
+applyOrchestrationStackSuppressions(orchestrationStack);
 orchestrationStack.addDependency(securityStack);
 
 // --- Stack 10: Evolution Engine ---
@@ -166,6 +190,7 @@ const evolutionStack = new EvolutionStack(app, `${prefix}-Evolution`, {
   envName,
   auditTable: dataStack.auditTable,
 });
+applyEvolutionStackSuppressions(evolutionStack);
 evolutionStack.addDependency(dataStack);
 
 // --- Stack 11: Tenant Onboarding ---
@@ -188,6 +213,7 @@ const tenantOnboardingStack = new TenantOnboardingStack(app, `${prefix}-TenantOn
   platformKey: securityStack.platformKey,
   alarmTopic: observabilityStack.alarmTopic,
 });
+applyTenantOnboardingStackSuppressions(tenantOnboardingStack);
 tenantOnboardingStack.addDependency(dataStack);
 tenantOnboardingStack.addDependency(securityStack);
 tenantOnboardingStack.addDependency(observabilityStack);
@@ -207,6 +233,7 @@ const emailStack = new EmailStack(app, `${prefix}-Email`, {
   emailDomain: app.node.tryGetContext('emailDomain'),
   fromAddress: app.node.tryGetContext('fromAddress'),
 });
+applyEmailStackSuppressions(emailStack);
 emailStack.addDependency(dataStack);
 emailStack.addDependency(orchestrationStack);
 
@@ -217,6 +244,7 @@ const frontendStack = new FrontendStack(app, `${prefix}-Frontend`, {
   description: 'Chimera frontend: S3 + CloudFront for React SPA',
   envName,
 });
+applyFrontendStackSuppressions(frontendStack);
 
 // Apply tags to all stacks
 for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack, emailStack, frontendStack]) {
