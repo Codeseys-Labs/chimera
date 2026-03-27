@@ -78,6 +78,7 @@ async function runEndpoints(options: {
 
     const cognitoUserPoolId = securityOutputs.UserPoolId;
     const cognitoClientId = securityOutputs.WebClientId || securityOutputs.UserPoolClientId;
+    const cognitoDomain = securityOutputs.HostedUIDomain;
 
     if (!cognitoUserPoolId) {
       throw new Error('Cognito User Pool ID not found in stack outputs');
@@ -88,11 +89,16 @@ async function runEndpoints(options: {
     const currentConfig = loadWorkspaceConfig();
     saveWorkspaceConfig({
       ...currentConfig,
+      aws: {
+        ...currentConfig?.aws,
+        region,
+      },
       endpoints: {
         api_url: apiUrl,
         websocket_url: webSocketUrl,
         cognito_user_pool_id: cognitoUserPoolId,
         cognito_client_id: cognitoClientId,
+        ...(cognitoDomain ? { cognito_domain: cognitoDomain } : {}),
       },
     });
 
@@ -100,10 +106,12 @@ async function runEndpoints(options: {
       console.log(JSON.stringify({
         status: 'ok',
         data: {
+          region,
           api_url: apiUrl,
           websocket_url: webSocketUrl,
           cognito_user_pool_id: cognitoUserPoolId,
           cognito_client_id: cognitoClientId,
+          cognito_domain: cognitoDomain,
         },
       }));
     } else {
@@ -116,6 +124,9 @@ async function runEndpoints(options: {
       console.log(color.gray(`  Cognito Pool: ${cognitoUserPoolId}`));
       if (cognitoClientId) {
         console.log(color.gray(`  Client ID:    ${cognitoClientId}`));
+      }
+      if (cognitoDomain) {
+        console.log(color.gray(`  Hosted UI:    https://${cognitoDomain}.auth.${region}.amazoncognito.com`));
       }
       console.log(color.gray('\nConfiguration saved to chimera.toml'));
     }
