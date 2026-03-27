@@ -1,4 +1,4 @@
-/**
+ /**
  * Minimal ANSI color utilities — no runtime dependency, Bun built-in safe.
  * Replaces the `chalk` package throughout packages/cli.
  */
