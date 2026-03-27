@@ -2,6 +2,7 @@
  * Tests for SSE formatting
  */
 
+import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import {
   formatSSEData,
   formatSSEDone,
@@ -82,13 +83,13 @@ describe('SSE Formatter', () => {
     beforeEach(() => {
       chunks = [];
       mockWriter = {
-        write: jest.fn((chunk: Buffer, callback?: () => void) => {
+        write: mock((chunk: Buffer, callback?: () => void) => {
           chunks.push(chunk);
           if (callback) callback();
           return true;
         }),
-        once: jest.fn(),
-        end: jest.fn((callback?: () => void) => {
+        once: mock(() => undefined),
+        end: mock((callback?: () => void) => {
           if (callback) callback();
         }),
       };

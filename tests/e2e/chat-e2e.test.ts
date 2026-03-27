@@ -6,7 +6,7 @@
  * Budget: Each E2E run should cost < $2.00
  */
 
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { TestClient } from '../helpers/test-client';
 
 const STAGING_CONFIG = {
