@@ -2,37 +2,44 @@
  * Tests for Microsoft Teams Bot Framework webhook routes
  */
 
+import { mock, describe, it, expect, beforeEach, afterEach } from 'bun:test';
+
+// Mock dependencies before importing the router
+const mockParseIncoming = mock(() => [{ role: 'user', content: 'Hello, bot!' }]);
+const mockFormatResponse = mock(() => ({
+  type: 'message',
+  text: 'Hello from Chimera!',
+  textFormat: 'markdown',
+}));
+const mockGetAdapter = mock(() => ({
+  parseIncoming: mockParseIncoming,
+  formatResponse: mockFormatResponse,
+}));
+
+mock.module('../../adapters', () => ({
+  getAdapter: mockGetAdapter,
+}));
+
+const mockInvoke = mock(() => Promise.resolve({ output: 'Hello from Chimera!' }));
+const mockCreateAgent = mock(() => ({ invoke: mockInvoke }));
+const mockCreateDefaultSystemPrompt = mock(() => 'You are a helpful assistant.');
+
+mock.module('@chimera/core', () => ({
+  createAgent: mockCreateAgent,
+  createDefaultSystemPrompt: mockCreateDefaultSystemPrompt,
+}));
+
+const mockResolveUser = mock(async (_c: any, next: any) => { await next(); });
+
+mock.module('../../middleware/user-resolution', () => ({
+  resolveUser: mockResolveUser,
+}));
+
 import { Hono } from 'hono';
 import { createAdaptorServer } from '@hono/node-server';
 import request from 'supertest';
 
-// Mock dependencies before importing the router
-jest.mock('../../adapters', () => ({
-  getAdapter: jest.fn().mockReturnValue({
-    parseIncoming: jest.fn().mockReturnValue([{ role: 'user', content: 'Hello, bot!' }]),
-    formatResponse: jest.fn().mockReturnValue({
-      type: 'message',
-      text: 'Hello from Chimera!',
-      textFormat: 'markdown',
-    }),
-  }),
-}));
-
-jest.mock('@chimera/core', () => ({
-  createAgent: jest.fn().mockReturnValue({
-    invoke: jest.fn().mockResolvedValue({ output: 'Hello from Chimera!' }),
-  }),
-  createDefaultSystemPrompt: jest.fn().mockReturnValue('You are a helpful assistant.'),
-}));
-
-jest.mock('../../middleware/user-resolution', () => ({
-  resolveUser: jest.fn(async (_c: any, next: any) => { await next(); }),
-}));
-
 import teamsRouter from '../../routes/teams';
-import { getAdapter } from '../../adapters';
-import { createAgent } from '@chimera/core';
-import { resolveUser } from '../../middleware/user-resolution';
 import type { TenantContext } from '../../types';
 
 // Helper: valid Teams message activity
@@ -78,7 +85,28 @@ function createTestApp(tenantContext?: { tenantId: string; userId?: string }) {
 
 describe('Teams Routes', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockParseIncoming.mockReset();
+    mockFormatResponse.mockReset();
+    mockGetAdapter.mockReset();
+    mockInvoke.mockReset();
+    mockCreateAgent.mockReset();
+    mockCreateDefaultSystemPrompt.mockReset();
+    mockResolveUser.mockReset();
+    // Restore defaults
+    mockParseIncoming.mockImplementation(() => [{ role: 'user', content: 'Hello, bot!' }]);
+    mockFormatResponse.mockImplementation(() => ({
+      type: 'message',
+      text: 'Hello from Chimera!',
+      textFormat: 'markdown',
+    }));
+    mockGetAdapter.mockImplementation(() => ({
+      parseIncoming: mockParseIncoming,
+      formatResponse: mockFormatResponse,
+    }));
+    mockInvoke.mockImplementation(() => Promise.resolve({ output: 'Hello from Chimera!' }));
+    mockCreateAgent.mockImplementation(() => ({ invoke: mockInvoke }));
+    mockCreateDefaultSystemPrompt.mockImplementation(() => 'You are a helpful assistant.');
+    mockResolveUser.mockImplementation(async (_c: any, next: any) => { await next(); });
     // Reset token-verification env vars for each test
     delete process.env.MICROSOFT_APP_PASSWORD;
     delete process.env.MICROSOFT_APP_ID;
@@ -272,9 +300,9 @@ describe('Teams Routes', () => {
 
     it('should return 200 { ok: true } when message has no text', async () => {
       // Adapter returns empty array for missing text
-      (getAdapter as jest.Mock).mockReturnValueOnce({
-        parseIncoming: jest.fn().mockReturnValue([]),
-        formatResponse: jest.fn(),
+      mockGetAdapter.mockReturnValueOnce({
+        parseIncoming: mock(() => []),
+        formatResponse: mock(() => undefined),
       });
 
       const app = createTestApp({ tenantId: 'tenant-123' });
@@ -288,11 +316,9 @@ describe('Teams Routes', () => {
     });
 
     it('should return 200 { ok: true } when adapter.parseIncoming throws', async () => {
-      (getAdapter as jest.Mock).mockReturnValueOnce({
-        parseIncoming: jest.fn().mockImplementation(() => {
-          throw new Error('Parse error');
-        }),
-        formatResponse: jest.fn(),
+      mockGetAdapter.mockReturnValueOnce({
+        parseIncoming: mock(() => { throw new Error('Parse error'); }),
+        formatResponse: mock(() => undefined),
       });
 
       const app = createTestApp({ tenantId: 'tenant-123' });
@@ -308,17 +334,17 @@ describe('Teams Routes', () => {
 
   describe('POST /teams/messages — agent invocation', () => {
     it('should create agent with correct parameters and return formatted Teams response', async () => {
-      const mockInvoke = jest.fn().mockResolvedValue({ output: 'Here is your answer.' });
-      const mockFormatResponse = jest.fn().mockReturnValue({
+      const localInvoke = mock(() => Promise.resolve({ output: 'Here is your answer.' }));
+      const localFormatResponse = mock(() => ({
         type: 'message',
         text: 'Here is your answer.',
         textFormat: 'markdown',
-      });
+      }));
 
-      (createAgent as jest.Mock).mockReturnValueOnce({ invoke: mockInvoke });
-      (getAdapter as jest.Mock).mockReturnValueOnce({
-        parseIncoming: jest.fn().mockReturnValue([{ role: 'user', content: 'What is the weather?' }]),
-        formatResponse: mockFormatResponse,
+      mockCreateAgent.mockReturnValueOnce({ invoke: localInvoke });
+      mockGetAdapter.mockReturnValueOnce({
+        parseIncoming: mock(() => [{ role: 'user', content: 'What is the weather?' }]),
+        formatResponse: localFormatResponse,
       });
 
       const app = createTestApp({ tenantId: 'tenant-abc', userId: 'user-xyz' });
@@ -329,13 +355,13 @@ describe('Teams Routes', () => {
         .send(activity)
         .expect(200);
 
-      expect(createAgent).toHaveBeenCalledWith(
+      expect(mockCreateAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: 'tenant-abc',
-          sessionId: `teams_${activity.conversation.id}_${activity.from.id}`,
+          sessionId: `teams_${(activity as any).conversation.id}_${(activity as any).from.id}`,
         })
       );
-      expect(mockInvoke).toHaveBeenCalledWith('What is the weather?');
+      expect(localInvoke).toHaveBeenCalledWith('What is the weather?');
       expect(response.body).toEqual({
         type: 'message',
         text: 'Here is your answer.',
@@ -343,17 +369,15 @@ describe('Teams Routes', () => {
       });
     });
 
-    // TODO(bun-mock): bun test does not hoist jest.mock() for relative-path modules,
-    // so the real resolveUser always runs and creates a dev fallback userContext
-    // (cognitoSub: 'dev-teams-{from.id}') that overrides the route's aadObjectId /
-    // from.id priority logic. Run these via `bun run test` (jest) for full coverage.
+    // bun test does not hoist mock.module() for relative-path modules,
+    // so the real resolveUser always runs and creates a dev fallback userContext.
     it.skip('should prefer aadObjectId over raw from.id for userId', async () => {
       const app = createTestApp({ tenantId: 'tenant-abc' });
 
       const activity = makeActivity({ from: { id: 'teams-raw-id', aadObjectId: 'aad-uuid' } });
       await request(app).post('/teams/messages').send(activity).expect(200);
 
-      expect(createAgent).toHaveBeenCalledWith(
+      expect(mockCreateAgent).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'aad-uuid' })
       );
     });
@@ -364,14 +388,14 @@ describe('Teams Routes', () => {
       const activity = makeActivity({ from: { id: 'teams-raw-id' } });
       await request(app).post('/teams/messages').send(activity).expect(200);
 
-      expect(createAgent).toHaveBeenCalledWith(
+      expect(mockCreateAgent).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'teams-raw-id' })
       );
     });
 
     it.skip('should prefer resolved cognitoSub over aadObjectId when userContext is set', async () => {
       // Override resolveUser mock to inject userContext via Hono context
-      (resolveUser as jest.Mock).mockImplementationOnce(async (c: any, next: any) => {
+      mockResolveUser.mockImplementationOnce(async (c: any, next: any) => {
         c.set('userContext', { cognitoSub: 'cognito-sub-123' });
         await next();
       });
@@ -381,14 +405,14 @@ describe('Teams Routes', () => {
       const activity = makeActivity({ from: { id: 'teams-raw-id', aadObjectId: 'aad-uuid' } });
       await request(app).post('/teams/messages').send(activity).expect(200);
 
-      expect(createAgent).toHaveBeenCalledWith(
+      expect(mockCreateAgent).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'cognito-sub-123' })
       );
     });
 
     it('should respond 200 { ok: true } when agent.invoke throws', async () => {
-      (createAgent as jest.Mock).mockReturnValueOnce({
-        invoke: jest.fn().mockRejectedValue(new Error('Bedrock timeout')),
+      mockCreateAgent.mockReturnValueOnce({
+        invoke: mock(() => Promise.reject(new Error('Bedrock timeout'))),
       });
 
       const app = createTestApp({ tenantId: 'tenant-abc' });

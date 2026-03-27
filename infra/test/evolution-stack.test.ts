@@ -15,8 +15,7 @@ import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { EvolutionStack } from '../lib/evolution-stack';
 
-// CDK synthesis of a large stack with inline Lambdas and SFN takes ~20s
-jest.setTimeout(60000);
+// Timeout configured in infra/bunfig.toml: [test] timeout = 30000
 
 describe('EvolutionStack', () => {
   let stack: EvolutionStack;
