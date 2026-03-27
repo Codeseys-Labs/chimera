@@ -31,7 +31,7 @@ export async function loadCredentials(): Promise<Credentials | null> {
   try {
     const exists = await Bun.file(CREDENTIALS_FILE).exists();
     if (!exists) return null;
-    return await Bun.file(CREDENTIALS_FILE).json<Credentials>();
+    return await Bun.file(CREDENTIALS_FILE).json() as Credentials;
   } catch {
     return null;
   }
