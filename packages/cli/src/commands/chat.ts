@@ -128,7 +128,18 @@ export function registerChatCommand(program: Command): void {
     .command('chat')
     .description('Start an interactive chat session with the Chimera platform')
     .option('-s, --session-id <id>', 'Resume an existing session by ID')
-    .action(async (options: { sessionId?: string }) => {
-      await runChatLoop(options.sessionId);
+    .option('--classic', 'Use the classic readline REPL instead of the TUI')
+    .action(async (options: { sessionId?: string; classic?: boolean }) => {
+      if (options.classic) {
+        await runChatLoop(options.sessionId);
+      } else {
+        const React = await import('react');
+        const { render } = await import('ink');
+        const { default: ChatView } = await import('../tui/chat/ChatView.js');
+        const { waitUntilExit } = render(
+          React.createElement(ChatView, { sessionId: options.sessionId }),
+        );
+        await waitUntilExit();
+      }
     });
 }
