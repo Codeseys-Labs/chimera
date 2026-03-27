@@ -134,10 +134,12 @@ export class SecurityStack extends cdk.Stack {
     // Dynamic callback URLs: accept API Gateway URLs from ApiStack or use localhost for dev
     const defaultCallbackUrls = [
       'http://localhost:8080/auth/callback',
+      'http://localhost:9999/callback',
       `https://chat-${props.envName}.example.com/auth/callback`,
     ];
     const defaultLogoutUrls = [
       'http://localhost:8080/',
+      'http://localhost:9999/',
       `https://chat-${props.envName}.example.com/`,
     ];
 
