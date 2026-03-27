@@ -28,6 +28,7 @@ export interface WorkspaceConfig {
     websocket_url?: string;
     cognito_user_pool_id?: string;
     cognito_client_id?: string;
+    cognito_domain?: string;
   };
   tenants?: {
     default_tier?: string;

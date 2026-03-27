@@ -159,27 +159,22 @@ export function registerLoginCommand(program: Command): void {
     .description('Authenticate with the Chimera platform (Cognito PKCE)')
     .action(async () => {
       const config = loadWorkspaceConfig();
-      const cfg = config as typeof config & { auth?: { cognito_domain?: string } };
-
-      const userPoolId = config.endpoints?.cognito_user_pool_id;
       const clientId = config.endpoints?.cognito_client_id;
       const region = config.aws?.region ?? 'us-east-1';
 
-      // Prefer explicit cognito_domain from [auth]; fall back to constructing from pool ID
-      const rawDomain = cfg.auth?.cognito_domain;
+      // Prefer cognito_domain from [endpoints] (set by `chimera endpoints`), then [auth]
+      const rawDomain = config.endpoints?.cognito_domain ?? config.auth?.cognito_domain;
       const cognitoDomain = rawDomain
         ? rawDomain.startsWith('http')
           ? rawDomain
           : `https://${rawDomain}.auth.${region}.amazoncognito.com`
-        : userPoolId
-          ? `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`
-          : null;
+        : null;
 
       if (!cognitoDomain || !clientId) {
         console.error(color.red('✗ Missing Cognito configuration in chimera.toml'));
         console.error(
           color.dim(
-            '  Set endpoints.cognito_client_id and either auth.cognito_domain or endpoints.cognito_user_pool_id',
+            '  Run `chimera endpoints` to fetch configuration, or set endpoints.cognito_domain and endpoints.cognito_client_id',
           ),
         );
         process.exit(1);

@@ -118,21 +118,17 @@ export function checkCognitoConfig(): CheckResult {
   return { label: 'Cognito pool config', ok: true, detail: `Pool: ${poolId}` };
 }
 
-// Fixed set of Chimera CloudFormation stacks to check
-const CHIMERA_STACKS = [
-  'ChimeraNetworkStack',
-  'ChimeraDataStack',
-  'ChimeraSecurityStack',
-  'ChimeraApiStack',
-  'ChimeraChatStack',
-];
+// Chimera stack suffixes — actual names follow Chimera-{env}-{Suffix} pattern
+const CHIMERA_STACK_SUFFIXES = ['Network', 'Data', 'Security', 'Api', 'Chat'];
 
-export async function checkStackStatus(region?: string): Promise<CheckResult> {
+export async function checkStackStatus(region?: string, env?: string): Promise<CheckResult> {
+  const resolvedEnv = env ?? 'dev';
+  const stackNames = CHIMERA_STACK_SUFFIXES.map((s) => `Chimera-${resolvedEnv}-${s}`);
   const cfn = new CloudFormationClient({ region: region ?? 'us-east-1' });
   const results: string[] = [];
   let allOk = true;
 
-  for (const stackName of CHIMERA_STACKS) {
+  for (const stackName of stackNames) {
     try {
       const res = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
       const stack = res.Stacks?.[0];
@@ -177,6 +173,7 @@ export function registerDoctorCommand(program: Command): void {
     .action(async (options: { json?: boolean }) => {
       const config = loadWorkspaceConfig();
       const region = config.aws?.region;
+      const env = config.workspace?.environment;
       const baseUrl = config.endpoints?.api_url ?? '';
 
       if (!options.json) {
@@ -188,7 +185,7 @@ export function registerDoctorCommand(program: Command): void {
         checkChimeraAuth(),
         checkApiConnectivity(baseUrl),
         Promise.resolve(checkCognitoConfig()),
-        checkStackStatus(region),
+        checkStackStatus(region, env),
       ]);
 
       if (options.json) {
