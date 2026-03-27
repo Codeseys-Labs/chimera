@@ -7,15 +7,24 @@
  * - TTL configurations for ephemeral data
  * - DynamoDB Streams for change data capture
  * - Customer-managed KMS key for audit table encryption
- * - 3 S3 buckets (tenant-data, skills, artifacts)
+ * - 3 S3 buckets (tenant-data, skills, artifacts) + 2 access-log buckets
  * - S3 lifecycle rules and versioning
  * - Stack outputs for all resources
+ *
+ * NOTE: DataStack now uses ChimeraTable (TableV2/GlobalTable) and ChimeraBucket.
+ * - DynamoDB resource type: AWS::DynamoDB::GlobalTable (not AWS::DynamoDB::Table)
+ * - PITR is stored in Replicas[].PointInTimeRecoverySpecification
+ * - S3 bucket count: 5 (3 main + 2 access-log for tenant/skills buckets)
+ * - S3 encryption: KMS (not AES256)
  */
 
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { DataStack } from '../lib/data-stack';
+
+// TableV2 (GlobalTable) requires an environment-bound stack
+const ENV = { account: '123456789012', region: 'us-east-1' };
 
 describe('DataStack', () => {
   let app: cdk.App;
@@ -26,7 +35,7 @@ describe('DataStack', () => {
     app = new cdk.App();
 
     // Create a minimal VPC for the DataStack
-    const vpcStack = new cdk.Stack(app, 'VpcStack');
+    const vpcStack = new cdk.Stack(app, 'VpcStack', { env: ENV });
     vpc = new ec2.Vpc(vpcStack, 'TestVpc');
     ecsSecurityGroup = new ec2.SecurityGroup(vpcStack, 'MockEcsSg', {
       vpc,
@@ -40,6 +49,7 @@ describe('DataStack', () => {
 
     beforeEach(() => {
       stack = new DataStack(app, 'TestDataStack', {
+        env: ENV,
         envName: 'dev',
         vpc,
         ecsSecurityGroup,
@@ -49,7 +59,9 @@ describe('DataStack', () => {
 
     describe('KMS Key', () => {
       it('should create CMK for audit table encryption', () => {
-        template.resourceCountIs('AWS::KMS::Key', 1);
+        // At least 1 KMS key (audit key + per-table and per-bucket keys from L3 constructs)
+        const keys = template.findResources('AWS::KMS::Key');
+        expect(Object.keys(keys).length).toBeGreaterThanOrEqual(1);
 
         template.hasResourceProperties('AWS::KMS::Key', {
           Description: 'CMK for Chimera audit log encryption',
@@ -67,13 +79,13 @@ describe('DataStack', () => {
     });
 
     describe('DynamoDB Tables', () => {
-      it('should create exactly 6 DynamoDB tables', () => {
-        template.resourceCountIs('AWS::DynamoDB::Table', 6);
+      it('should create exactly 6 DynamoDB GlobalTables', () => {
+        template.resourceCountIs('AWS::DynamoDB::GlobalTable', 6);
       });
 
       describe('Tenants Table', () => {
         it('should create tenants table with correct schema', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-tenants-dev',
             KeySchema: [
               { AttributeName: 'PK', KeyType: 'HASH' },
@@ -87,17 +99,27 @@ describe('DataStack', () => {
               { AttributeName: 'status', AttributeType: 'S' },
             ]),
             BillingMode: 'PAY_PER_REQUEST',
-            PointInTimeRecoverySpecification: {
-              PointInTimeRecoveryEnabled: true,
-            },
             StreamSpecification: {
               StreamViewType: 'NEW_AND_OLD_IMAGES',
             },
           });
         });
 
+        it('should have PITR enabled (in Replicas)', () => {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+            TableName: 'chimera-tenants-dev',
+            Replicas: Match.arrayWith([
+              Match.objectLike({
+                PointInTimeRecoverySpecification: {
+                  PointInTimeRecoveryEnabled: true,
+                },
+              }),
+            ]),
+          });
+        });
+
         it('should create GSI1-tier index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-tenants-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -113,7 +135,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI2-status index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-tenants-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -131,7 +153,7 @@ describe('DataStack', () => {
 
       describe('Sessions Table', () => {
         it('should create sessions table with TTL enabled', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-sessions-dev',
             KeySchema: [
               { AttributeName: 'PK', KeyType: 'HASH' },
@@ -148,7 +170,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI1-agent-activity index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-sessions-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -163,7 +185,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI2-user-sessions index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-sessions-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -180,7 +202,7 @@ describe('DataStack', () => {
 
       describe('Skills Table', () => {
         it('should create skills table with streams enabled', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-skills-dev',
             KeySchema: [
               { AttributeName: 'PK', KeyType: 'HASH' },
@@ -193,7 +215,7 @@ describe('DataStack', () => {
         });
 
         it('should create 3 global secondary indexes', () => {
-          const table = template.findResources('AWS::DynamoDB::Table', {
+          const table = template.findResources('AWS::DynamoDB::GlobalTable', {
             Properties: {
               TableName: 'chimera-skills-dev',
             },
@@ -204,7 +226,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI1-author index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-skills-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -219,7 +241,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI2-category index with downloadCount sort key', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-skills-dev',
             AttributeDefinitions: Match.arrayWith([
               { AttributeName: 'downloadCount', AttributeType: 'N' },
@@ -237,7 +259,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI3-trust index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-skills-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -253,27 +275,32 @@ describe('DataStack', () => {
       });
 
       describe('Rate Limits Table', () => {
-        it('should create rate limits table with TTL and no PITR', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+        it('should create rate limits table with TTL', () => {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-rate-limits-dev',
             TimeToLiveSpecification: {
               AttributeName: 'ttl',
               Enabled: true,
             },
           });
+        });
 
-          // Rate limits table should NOT have point-in-time recovery (ephemeral data)
-          const table = template.findResources('AWS::DynamoDB::Table', {
-            Properties: {
-              TableName: 'chimera-rate-limits-dev',
-            },
+        it('should have PITR enabled (ChimeraTable mandatory invariant)', () => {
+          // ChimeraTable always enables PITR — low-cost insurance for ephemeral data
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+            TableName: 'chimera-rate-limits-dev',
+            Replicas: Match.arrayWith([
+              Match.objectLike({
+                PointInTimeRecoverySpecification: {
+                  PointInTimeRecoveryEnabled: true,
+                },
+              }),
+            ]),
           });
-          const tableResource = Object.values(table)[0] as any;
-          expect(tableResource.Properties.PointInTimeRecoverySpecification).toBeUndefined();
         });
 
         it('should have no global secondary indexes', () => {
-          const table = template.findResources('AWS::DynamoDB::Table', {
+          const table = template.findResources('AWS::DynamoDB::GlobalTable', {
             Properties: {
               TableName: 'chimera-rate-limits-dev',
             },
@@ -285,19 +312,26 @@ describe('DataStack', () => {
 
       describe('Cost Tracking Table', () => {
         it('should create cost tracking table with streams and PITR', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-cost-tracking-dev',
-            PointInTimeRecoverySpecification: {
-              PointInTimeRecoveryEnabled: true,
-            },
             StreamSpecification: {
               StreamViewType: 'NEW_AND_OLD_IMAGES',
             },
           });
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+            TableName: 'chimera-cost-tracking-dev',
+            Replicas: Match.arrayWith([
+              Match.objectLike({
+                PointInTimeRecoverySpecification: {
+                  PointInTimeRecoveryEnabled: true,
+                },
+              }),
+            ]),
+          });
         });
 
         it('should not have TTL (2-year retention for billing)', () => {
-          const table = template.findResources('AWS::DynamoDB::Table', {
+          const table = template.findResources('AWS::DynamoDB::GlobalTable', {
             Properties: {
               TableName: 'chimera-cost-tracking-dev',
             },
@@ -308,12 +342,13 @@ describe('DataStack', () => {
       });
 
       describe('Audit Table', () => {
-        it('should create audit table with CMK encryption', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+        it('should create audit table with KMS encryption', () => {
+          // GlobalTable: top-level SSESpecification.SSEEnabled = true,
+          // per-replica KMS key reference in Replicas[].SSESpecification
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-audit-dev',
             SSESpecification: {
               SSEEnabled: true,
-              SSEType: 'KMS',
             },
             TimeToLiveSpecification: {
               AttributeName: 'ttl',
@@ -323,7 +358,7 @@ describe('DataStack', () => {
         });
 
         it('should create GSI1-event-type index', () => {
-          template.hasResourceProperties('AWS::DynamoDB::Table', {
+          template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
             TableName: 'chimera-audit-dev',
             GlobalSecondaryIndexes: Match.arrayWith([
               Match.objectLike({
@@ -340,17 +375,19 @@ describe('DataStack', () => {
     });
 
     describe('S3 Buckets', () => {
-      it('should create exactly 3 S3 buckets', () => {
-        template.resourceCountIs('AWS::S3::Bucket', 3);
+      it('should create 5 S3 buckets (3 main + 2 access-log for tenant/skills)', () => {
+        // tenantBucket + tenantBucket-access-logs + skillsBucket + skillsBucket-access-logs
+        // + artifactsBucket (isAccessLogBucket:true, no nested log bucket)
+        template.resourceCountIs('AWS::S3::Bucket', 5);
       });
 
       describe('Tenant Bucket', () => {
-        it('should create tenant bucket with versioning and encryption', () => {
+        it('should create tenant bucket with versioning and KMS encryption', () => {
           template.hasResourceProperties('AWS::S3::Bucket', {
             BucketEncryption: {
               ServerSideEncryptionConfiguration: [{
                 ServerSideEncryptionByDefault: {
-                  SSEAlgorithm: 'AES256',
+                  SSEAlgorithm: 'aws:kms',
                 },
               }],
             },
@@ -402,7 +439,7 @@ describe('DataStack', () => {
             BucketEncryption: {
               ServerSideEncryptionConfiguration: [{
                 ServerSideEncryptionByDefault: {
-                  SSEAlgorithm: 'AES256',
+                  SSEAlgorithm: 'aws:kms',
                 },
               }],
             },
@@ -454,7 +491,8 @@ describe('DataStack', () => {
         const buckets = template.findResources('AWS::S3::BucketPolicy');
         const bucketCount = Object.keys(buckets).length;
 
-        expect(bucketCount).toBe(3);
+        // 5 buckets = 5 policies (3 main + 2 access-log, each with enforceSSL)
+        expect(bucketCount).toBe(5);
 
         // All bucket policies should enforce SSL
         for (const [_, policy] of Object.entries(buckets)) {
@@ -538,6 +576,7 @@ describe('DataStack', () => {
 
     beforeEach(() => {
       stack = new DataStack(app, 'TestDataStackProd', {
+        env: ENV,
         envName: 'prod',
         vpc,
         ecsSecurityGroup,
@@ -547,7 +586,7 @@ describe('DataStack', () => {
 
     it('should use RETAIN removal policy for tables in prod', () => {
       // Checking one representative table
-      const tables = template.findResources('AWS::DynamoDB::Table', {
+      const tables = template.findResources('AWS::DynamoDB::GlobalTable', {
         Properties: {
           TableName: 'chimera-tenants-prod',
         },
@@ -560,7 +599,7 @@ describe('DataStack', () => {
 
     it('should use RETAIN removal policy for tenant and skills buckets in prod', () => {
       const allBuckets = template.findResources('AWS::S3::Bucket');
-      // Find non-artifacts buckets (tenant and skills) by excluding the one with expire-old-artifacts rule
+      // Find non-artifacts main buckets by excluding those with expire-old-artifacts rule
       const nonArtifactsBuckets = Object.values(allBuckets).filter((bucket: any) => {
         const lifecycleRules = bucket.Properties?.LifecycleConfiguration?.Rules;
         return !lifecycleRules?.some((rule: any) => rule.Id === 'expire-old-artifacts');

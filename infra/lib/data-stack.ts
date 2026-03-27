@@ -6,6 +6,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as dax from 'aws-cdk-lib/aws-dax';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { ChimeraTable } from '../constructs/chimera-table';
+import { ChimeraBucket } from '../constructs/chimera-bucket';
 
 export interface DataStackProps extends cdk.StackProps {
   envName: string;
@@ -19,14 +21,19 @@ export interface DataStackProps extends cdk.StackProps {
  * Creates 6 DynamoDB tables (tenants, sessions, skills, rate-limits, cost-tracking, audit)
  * and 3 S3 buckets (tenant-data, skills, artifacts). Table schemas and GSIs match the
  * Final Architecture Plan exactly.
+ *
+ * All tables use ChimeraTable (TableV2/GlobalTable) with mandatory invariants:
+ * PITR, KMS encryption, streams, deletion protection.
+ * All buckets use ChimeraBucket with mandatory invariants:
+ * KMS encryption, versioning, access logging, SSL enforcement.
  */
 export class DataStack extends cdk.Stack {
-  public readonly tenantsTable: dynamodb.Table;
-  public readonly sessionsTable: dynamodb.Table;
-  public readonly skillsTable: dynamodb.Table;
-  public readonly rateLimitsTable: dynamodb.Table;
-  public readonly costTrackingTable: dynamodb.Table;
-  public readonly auditTable: dynamodb.Table;
+  public readonly tenantsTable: dynamodb.TableV2;
+  public readonly sessionsTable: dynamodb.TableV2;
+  public readonly skillsTable: dynamodb.TableV2;
+  public readonly rateLimitsTable: dynamodb.TableV2;
+  public readonly costTrackingTable: dynamodb.TableV2;
+  public readonly auditTable: dynamodb.TableV2;
   public readonly tenantBucket: s3.Bucket;
   public readonly skillsBucket: s3.Bucket;
   public readonly artifactsBucket: s3.Bucket;
@@ -53,27 +60,25 @@ export class DataStack extends cdk.Stack {
     // GSI2: status -> tenantId (query tenants by lifecycle status)
     // Streams: NEW_AND_OLD_IMAGES for config change events
     // ======================================================================
-    this.tenantsTable = new dynamodb.Table(this, 'TenantsTable', {
+    const tenantsChimera = new ChimeraTable(this, 'TenantsTable', {
       tableName: `chimera-tenants-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'GSI1-tier',
+          partitionKey: { name: 'tier', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+        {
+          indexName: 'GSI2-status',
+          partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+      ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
-    this.tenantsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1-tier',
-      partitionKey: { name: 'tier', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-    this.tenantsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI2-status',
-      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
+    this.tenantsTable = tenantsChimera.table;
 
     // ======================================================================
     // Table 2: chimera-sessions
@@ -82,28 +87,26 @@ export class DataStack extends cdk.Stack {
     // GSI2: userId -> lastActivity (find user sessions)
     // TTL: 24 hours after last activity
     // ======================================================================
-    this.sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
+    const sessionsChimera = new ChimeraTable(this, 'SessionsTable', {
       tableName: `chimera-sessions-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      timeToLiveAttribute: 'ttl',
-      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      ttlAttribute: 'ttl',
+      globalSecondaryIndexes: [
+        {
+          indexName: 'GSI1-agent-activity',
+          partitionKey: { name: 'agentId', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+        {
+          indexName: 'GSI2-user-sessions',
+          partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+      ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
-    this.sessionsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1-agent-activity',
-      partitionKey: { name: 'agentId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-    this.sessionsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI2-user-sessions',
-      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'lastActivity', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
+    this.sessionsTable = sessionsChimera.table;
 
     // ======================================================================
     // Table 3: chimera-skills (Marketplace Catalog)
@@ -113,52 +116,44 @@ export class DataStack extends cdk.Stack {
     // GSI3: trustLevel -> updatedAt (list skills by trust tier, sorted by recency)
     // Streams: triggers skill update notifications
     // ======================================================================
-    this.skillsTable = new dynamodb.Table(this, 'SkillsTable', {
+    const skillsChimera = new ChimeraTable(this, 'SkillsTable', {
       tableName: `chimera-skills-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'GSI1-author',
+          partitionKey: { name: 'author', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'skillName', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+        {
+          indexName: 'GSI2-category',
+          partitionKey: { name: 'category', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'downloadCount', type: dynamodb.AttributeType.NUMBER },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+        {
+          indexName: 'GSI3-trust',
+          partitionKey: { name: 'trustLevel', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'updatedAt', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+      ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
-    // GSI1: Author Index - Query skills by author
-    this.skillsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1-author',
-      partitionKey: { name: 'author', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'skillName', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-    // GSI2: Category Index - Browse by category, sorted by popularity
-    this.skillsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI2-category',
-      partitionKey: { name: 'category', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'downloadCount', type: dynamodb.AttributeType.NUMBER },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-    // GSI3: Trust Level Index - List skills by trust tier, sorted by recency
-    this.skillsTable.addGlobalSecondaryIndex({
-      indexName: 'GSI3-trust',
-      partitionKey: { name: 'trustLevel', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'updatedAt', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
+    this.skillsTable = skillsChimera.table;
 
     // ======================================================================
     // Table 4: chimera-rate-limits
     // PK: TENANT#{id}, SK: WINDOW#{timestamp}
     // No GSI. TTL: 5 minutes after window end.
-    // PITR disabled -- ephemeral data, not worth the cost.
-    // DESTROY removal -- can be recreated from scratch.
+    // Note: ChimeraTable enables PITR and streams by default (low-cost insurance).
     // ======================================================================
-    this.rateLimitsTable = new dynamodb.Table(this, 'RateLimitsTable', {
+    const rateLimitsChimera = new ChimeraTable(this, 'RateLimitsTable', {
       tableName: `chimera-rate-limits-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      timeToLiveAttribute: 'ttl',
+      ttlAttribute: 'ttl',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    this.rateLimitsTable = rateLimitsChimera.table;
 
     // ======================================================================
     // Table 5: chimera-cost-tracking
@@ -166,15 +161,11 @@ export class DataStack extends cdk.Stack {
     // Streams: triggers budget threshold alarms via EventBridge
     // No TTL -- retained 2 years for billing reconciliation.
     // ======================================================================
-    this.costTrackingTable = new dynamodb.Table(this, 'CostTrackingTable', {
+    const costTrackingChimera = new ChimeraTable(this, 'CostTrackingTable', {
       tableName: `chimera-cost-tracking-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
+    this.costTrackingTable = costTrackingChimera.table;
 
     // ======================================================================
     // Table 6: chimera-audit
@@ -183,23 +174,21 @@ export class DataStack extends cdk.Stack {
     // TTL varies by tier: 90d (basic), 1yr (pro), 7yr (enterprise) -- set at write time.
     // Encrypted with CMK (compliance requirement).
     // ======================================================================
-    this.auditTable = new dynamodb.Table(this, 'AuditTable', {
+    const auditChimera = new ChimeraTable(this, 'AuditTable', {
       tableName: `chimera-audit-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      timeToLiveAttribute: 'ttl',
-      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
+      ttlAttribute: 'ttl',
       encryptionKey: auditKey,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'GSI1-event-type',
+          partitionKey: { name: 'eventType', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+      ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
-    this.auditTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1-event-type',
-      partitionKey: { name: 'eventType', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
+    this.auditTable = auditChimera.table;
 
     // ======================================================================
     // DAX Cluster (DynamoDB Accelerator)
@@ -269,83 +258,68 @@ export class DataStack extends cdk.Stack {
     // Memory snapshots, agent outputs, cron outputs, documents.
     // Prefix: tenants/{tenantId}/...
     // ======================================================================
-    this.tenantBucket = new s3.Bucket(this, 'TenantBucket', {
+    const tenantChimera = new ChimeraBucket(this, 'TenantBucket', {
       bucketName: `chimera-tenants-${this.account}-${this.region}-${props.envName}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: true,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      lifecycleRules: [
-        {
-          id: 'intelligent-tiering',
-          transitions: [{
-            storageClass: s3.StorageClass.INTELLIGENT_TIERING,
-            transitionAfter: cdk.Duration.days(30),
-          }],
-        },
-        {
-          id: 'glacier-archive',
-          prefix: 'archive/',
-          transitions: [{
-            storageClass: s3.StorageClass.GLACIER,
-            transitionAfter: cdk.Duration.days(90),
-          }],
-        },
-        {
-          id: 'delete-old-versions',
-          noncurrentVersionExpiration: cdk.Duration.days(90),
-        },
-      ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
     });
+    // Add project-specific lifecycle rules beyond ChimeraBucket defaults
+    tenantChimera.bucket.addLifecycleRule({
+      id: 'intelligent-tiering',
+      transitions: [{
+        storageClass: s3.StorageClass.INTELLIGENT_TIERING,
+        transitionAfter: cdk.Duration.days(30),
+      }],
+    });
+    tenantChimera.bucket.addLifecycleRule({
+      id: 'glacier-archive',
+      prefix: 'archive/',
+      transitions: [{
+        storageClass: s3.StorageClass.GLACIER,
+        transitionAfter: cdk.Duration.days(90),
+      }],
+    });
+    this.tenantBucket = tenantChimera.bucket;
 
     // ======================================================================
     // S3 Bucket 2: Skills
     // Skill packages (SKILL.md + code), Cedar policies, evaluation datasets/results.
     // Prefix: skills/global/{name}/, skills/marketplace/{name}/, skills/tenant/{id}/{name}/
     // ======================================================================
-    this.skillsBucket = new s3.Bucket(this, 'SkillsBucket', {
+    const skillsChimeraBucket = new ChimeraBucket(this, 'SkillsBucket', {
       bucketName: `chimera-skills-${this.account}-${this.region}-${props.envName}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: true,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      lifecycleRules: [{
-        id: 'noncurrent-versions',
-        noncurrentVersionExpiration: cdk.Duration.days(180),
-      }],
+      noncurrentVersionExpiration: cdk.Duration.days(180),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
     });
+    skillsChimeraBucket.bucket.addLifecycleRule({
+      id: 'noncurrent-versions',
+      noncurrentVersionExpiration: cdk.Duration.days(180),
+    });
+    this.skillsBucket = skillsChimeraBucket.bucket;
 
     // ======================================================================
     // S3 Bucket 3: Artifacts
     // Pipeline artifacts, CDK assets, CodeBuild outputs, drift detection reports.
-    // Reproducible from Git -- DESTROY is safe.
+    // Reproducible from Git -- DESTROY is safe. isAccessLogBucket avoids creating
+    // an unnecessary nested access-log bucket for this ephemeral bucket.
     // ======================================================================
-    this.artifactsBucket = new s3.Bucket(this, 'ArtifactsBucket', {
+    const artifactsChimera = new ChimeraBucket(this, 'ArtifactsBucket', {
       bucketName: `chimera-artifacts-${this.account}-${this.region}-${props.envName}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: true,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      lifecycleRules: [
-        {
-          id: 'expire-old-artifacts',
-          expiration: cdk.Duration.days(90),
-        },
-        {
-          id: 'expire-noncurrent',
-          noncurrentVersionExpiration: cdk.Duration.days(30),
-        },
-      ],
+      isAccessLogBucket: true,
+      noncurrentVersionExpiration: cdk.Duration.days(30),
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
     });
+    artifactsChimera.bucket.addLifecycleRule({
+      id: 'expire-old-artifacts',
+      expiration: cdk.Duration.days(90),
+    });
+    artifactsChimera.bucket.addLifecycleRule({
+      id: 'expire-noncurrent',
+      noncurrentVersionExpiration: cdk.Duration.days(30),
+    });
+    this.artifactsBucket = artifactsChimera.bucket;
 
     // --- Stack outputs ---
-    const tables = {
+    const tables: Record<string, dynamodb.TableV2> = {
       TenantsTable: this.tenantsTable,
       SessionsTable: this.sessionsTable,
       SkillsTable: this.skillsTable,
@@ -364,7 +338,7 @@ export class DataStack extends cdk.Stack {
       });
     }
 
-    const buckets = {
+    const buckets: Record<string, s3.Bucket> = {
       TenantBucket: this.tenantBucket,
       SkillsBucket: this.skillsBucket,
       ArtifactsBucket: this.artifactsBucket,

@@ -10,6 +10,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+import { ChimeraLambda } from '../constructs/chimera-lambda';
 
 export interface SkillPipelineStackProps extends cdk.StackProps {
   envName: string;
@@ -30,6 +31,7 @@ export interface SkillPipelineStackProps extends cdk.StackProps {
  * 7. Skill Deployment (publish to DynamoDB registry + S3)
  *
  * Plus a failure notification handler (SNS + DDB status update).
+ * All Lambdas use ChimeraLambda for mandatory X-Ray tracing, log retention, DLQ.
  *
  * Reference: docs/research/architecture-reviews/Chimera-Skill-Ecosystem-Design.md § 4.2
  */
@@ -45,13 +47,11 @@ export class SkillPipelineStack extends cdk.Stack {
     // Supporting resources
     // ======================================================================
 
-    // SNS topic for scan failure notifications
     const failureNotificationTopic = new sns.Topic(this, 'ScanFailureTopic', {
       topicName: `chimera-skill-scan-failures-${props.envName}`,
       displayName: 'Chimera Skill Pipeline Failure Notifications',
     });
 
-    // Secrets Manager secret for Ed25519 signing key (auto-generated on first Lambda invocation)
     const signingKeySecret = new secretsmanager.Secret(this, 'SkillSigningKey', {
       secretName: `chimera/skill-pipeline/signing-key-${props.envName}`,
       description: 'Ed25519 key pair used by the SkillPipeline signature-verification Lambda',
@@ -60,6 +60,7 @@ export class SkillPipelineStack extends cdk.Stack {
 
     // ======================================================================
     // Lambda Functions — all Node.js 20.x, code loaded from asset directories
+    // ChimeraLambda adds: X-Ray tracing, log retention, DLQ, NODE_OPTIONS env var
     // ======================================================================
 
     const assetPath = (stage: string) =>
@@ -71,7 +72,7 @@ export class SkillPipelineStack extends cdk.Stack {
     };
 
     // Stage 1: Static Analysis
-    const staticAnalysisFunction = new lambda.Function(this, 'StaticAnalysisFunction', {
+    const staticAnalysisChimera = new ChimeraLambda(this, 'StaticAnalysisFunction', {
       functionName: `chimera-skill-static-analysis-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -82,7 +83,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Stage 2: Dependency Audit
-    const dependencyAuditFunction = new lambda.Function(this, 'DependencyAuditFunction', {
+    const dependencyAuditChimera = new ChimeraLambda(this, 'DependencyAuditFunction', {
       functionName: `chimera-skill-dependency-audit-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -92,7 +93,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Stage 3: Sandbox Run
-    const sandboxRunFunction = new lambda.Function(this, 'SandboxRunFunction', {
+    const sandboxRunChimera = new ChimeraLambda(this, 'SandboxRunFunction', {
       functionName: `chimera-skill-sandbox-test-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -102,7 +103,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Stage 4: Signature Verification (Ed25519 sign + verify)
-    const signatureVerificationFunction = new lambda.Function(this, 'SignatureVerificationFunction', {
+    const signatureVerificationChimera = new ChimeraLambda(this, 'SignatureVerificationFunction', {
       functionName: `chimera-skill-signature-verification-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -116,7 +117,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Stage 5: Performance Testing (CloudWatch metrics + anomaly detectors)
-    const performanceTestingFunction = new lambda.Function(this, 'PerformanceTestingFunction', {
+    const performanceTestingChimera = new ChimeraLambda(this, 'PerformanceTestingFunction', {
       functionName: `chimera-skill-performance-testing-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -127,7 +128,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Stage 6: Manual Review (permission validation)
-    const manualReviewFunction = new lambda.Function(this, 'ManualReviewFunction', {
+    const manualReviewChimera = new ChimeraLambda(this, 'ManualReviewFunction', {
       functionName: `chimera-skill-manual-review-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -138,7 +139,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Stage 7: Skill Deployment (S3 + DynamoDB publish)
-    const skillDeploymentFunction = new lambda.Function(this, 'SkillDeploymentFunction', {
+    const skillDeploymentChimera = new ChimeraLambda(this, 'SkillDeploymentFunction', {
       functionName: `chimera-skill-deployment-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -149,7 +150,7 @@ export class SkillPipelineStack extends cdk.Stack {
     });
 
     // Scan Failure Notification (error path)
-    const scanFailureFunction = new lambda.Function(this, 'ScanFailureFunction', {
+    const scanFailureChimera = new ChimeraLambda(this, 'ScanFailureFunction', {
       functionName: `chimera-skill-scan-notify-failure-${props.envName}`,
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
@@ -166,28 +167,28 @@ export class SkillPipelineStack extends cdk.Stack {
     // IAM permissions
     // ======================================================================
 
-    props.skillsTable.grantReadWriteData(staticAnalysisFunction);
-    props.skillsBucket.grantRead(staticAnalysisFunction);
+    props.skillsTable.grantReadWriteData(staticAnalysisChimera.fn);
+    props.skillsBucket.grantRead(staticAnalysisChimera.fn);
 
-    props.skillsTable.grantReadWriteData(signatureVerificationFunction);
-    props.skillsBucket.grantRead(signatureVerificationFunction);
-    signingKeySecret.grantRead(signatureVerificationFunction);
-    signingKeySecret.grantWrite(signatureVerificationFunction);
+    props.skillsTable.grantReadWriteData(signatureVerificationChimera.fn);
+    props.skillsBucket.grantRead(signatureVerificationChimera.fn);
+    signingKeySecret.grantRead(signatureVerificationChimera.fn);
+    signingKeySecret.grantWrite(signatureVerificationChimera.fn);
 
-    props.skillsTable.grantReadWriteData(performanceTestingFunction);
-    props.skillsBucket.grantRead(performanceTestingFunction);
-    performanceTestingFunction.addToRolePolicy(new iam.PolicyStatement({
+    props.skillsTable.grantReadWriteData(performanceTestingChimera.fn);
+    props.skillsBucket.grantRead(performanceTestingChimera.fn);
+    performanceTestingChimera.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['cloudwatch:PutMetricData', 'cloudwatch:PutAnomalyDetector'],
       resources: ['*'],
     }));
 
-    props.skillsTable.grantReadWriteData(manualReviewFunction);
+    props.skillsTable.grantReadWriteData(manualReviewChimera.fn);
 
-    props.skillsTable.grantReadWriteData(skillDeploymentFunction);
-    props.skillsBucket.grantReadWrite(skillDeploymentFunction);
+    props.skillsTable.grantReadWriteData(skillDeploymentChimera.fn);
+    props.skillsBucket.grantReadWrite(skillDeploymentChimera.fn);
 
-    props.skillsTable.grantReadWriteData(scanFailureFunction);
-    failureNotificationTopic.grantPublish(scanFailureFunction);
+    props.skillsTable.grantReadWriteData(scanFailureChimera.fn);
+    failureNotificationTopic.grantPublish(scanFailureChimera.fn);
 
     // ======================================================================
     // Step Functions State Machine
@@ -210,26 +211,23 @@ export class SkillPipelineStack extends cdk.Stack {
       return t;
     };
 
-    const staticAnalysisTask       = mkTask('StaticAnalysis',       staticAnalysisFunction);
-    const dependencyAuditTask      = mkTask('DependencyAudit',      dependencyAuditFunction);
-    const sandboxRunTask           = mkTask('SandboxRun',           sandboxRunFunction);
-    const signatureVerificationTask = mkTask('SignatureVerification', signatureVerificationFunction);
-    const performanceTestingTask   = mkTask('PerformanceTesting',   performanceTestingFunction);
-    const manualReviewTask         = mkTask('ManualReview',         manualReviewFunction);
-    const skillDeploymentTask      = mkTask('SkillDeployment',      skillDeploymentFunction);
-    const scanFailureTask          = mkTask('NotifyScanFailure',    scanFailureFunction);
+    const staticAnalysisTask       = mkTask('StaticAnalysis',       staticAnalysisChimera.fn);
+    const dependencyAuditTask      = mkTask('DependencyAudit',      dependencyAuditChimera.fn);
+    const sandboxRunTask           = mkTask('SandboxRun',           sandboxRunChimera.fn);
+    const signatureVerificationTask = mkTask('SignatureVerification', signatureVerificationChimera.fn);
+    const performanceTestingTask   = mkTask('PerformanceTesting',   performanceTestingChimera.fn);
+    const manualReviewTask         = mkTask('ManualReview',         manualReviewChimera.fn);
+    const skillDeploymentTask      = mkTask('SkillDeployment',      skillDeploymentChimera.fn);
+    const scanFailureTask          = mkTask('NotifyScanFailure',    scanFailureChimera.fn);
 
-    // Define success/failure end states
     const scanPassed = new stepfunctions.Succeed(this, 'ScanPassed');
     const scanRejected = new stepfunctions.Fail(this, 'ScanRejected', {
       error: 'SkillScanFailed',
       cause: 'Skill failed security scanning pipeline',
     });
 
-    // Single failure chain (created once to avoid duplicate state names)
     const failureChain = scanFailureTask.next(scanRejected);
 
-    // Stage result checks
     const checkStaticResult = new stepfunctions.Choice(this, 'CheckStaticResult')
       .when(stepfunctions.Condition.stringEquals('$.static_result', 'FAIL'), failureChain)
       .otherwise(dependencyAuditTask);
@@ -258,7 +256,6 @@ export class SkillPipelineStack extends cdk.Stack {
       .when(stepfunctions.Condition.stringEquals('$.deployment_result', 'FAIL'), failureChain)
       .otherwise(scanPassed);
 
-    // Wire catch handlers on every task
     staticAnalysisTask.addCatch(failureChain, catchOpts);
     dependencyAuditTask.addCatch(failureChain, catchOpts);
     sandboxRunTask.addCatch(failureChain, catchOpts);
@@ -267,7 +264,6 @@ export class SkillPipelineStack extends cdk.Stack {
     manualReviewTask.addCatch(failureChain, catchOpts);
     skillDeploymentTask.addCatch(failureChain, catchOpts);
 
-    // Chain pipeline stages
     const definition = staticAnalysisTask.next(checkStaticResult);
     dependencyAuditTask.next(checkDependencyResult);
     sandboxRunTask.next(checkSandboxResult);
@@ -276,14 +272,12 @@ export class SkillPipelineStack extends cdk.Stack {
     manualReviewTask.next(checkManualReviewResult);
     skillDeploymentTask.next(checkDeploymentResult);
 
-    // Create log group for state machine
     const logGroup = new logs.LogGroup(this, 'StateMachineLogGroup', {
       logGroupName: `/aws/states/chimera-skill-pipeline-${props.envName}`,
       retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    // Create state machine
     this.stateMachine = new stepfunctions.StateMachine(this, 'SkillSecurityPipeline', {
       stateMachineName: `chimera-skill-pipeline-${props.envName}`,
       definition,

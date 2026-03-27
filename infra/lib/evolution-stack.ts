@@ -8,6 +8,9 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import { ChimeraTable } from '../constructs/chimera-table';
+import { ChimeraBucket } from '../constructs/chimera-bucket';
+import { ChimeraLambda } from '../constructs/chimera-lambda';
 
 export interface EvolutionStackProps extends cdk.StackProps {
   envName: string;
@@ -30,7 +33,7 @@ export interface EvolutionStackProps extends cdk.StackProps {
  * Reference: docs/research/architecture-reviews/Chimera-Self-Evolution-Engine.md
  */
 export class EvolutionStack extends cdk.Stack {
-  public readonly evolutionStateTable: dynamodb.Table;
+  public readonly evolutionStateTable: dynamodb.TableV2;
   public readonly evolutionArtifactsBucket: s3.Bucket;
   public readonly promptEvolutionStateMachine: stepfunctions.StateMachine;
   public readonly skillGenerationStateMachine: stepfunctions.StateMachine;
@@ -44,80 +47,63 @@ export class EvolutionStack extends cdk.Stack {
 
     // ======================================================================
     // DynamoDB: chimera-evolution-state
-    // Stores A/B test state, model routing weights, memory lifecycle,
-    // detected patterns, cron suggestions, feedback events, health scores.
     // ======================================================================
-    this.evolutionStateTable = new dynamodb.Table(this, 'EvolutionStateTable', {
+    const evolutionStateChimera = new ChimeraTable(this, 'EvolutionStateTable', {
       tableName: `chimera-evolution-state-${props.envName}`,
-      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
-      timeToLiveAttribute: 'ttl',
-      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-    });
-
-    // GSI1: Memory Lifecycle Index
-    // Query all memories by lifecycle status (active, hot, warm, cold, archived)
-    // PK: TENANT#{tenant_id}#LIFECYCLE#{lifecycle}, SK: last_accessed
-    this.evolutionStateTable.addGlobalSecondaryIndex({
-      indexName: 'GSI1-lifecycle',
-      partitionKey: { name: 'lifecycleIndexPK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'last_accessed', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-
-    // GSI2: Unprocessed Feedback Index
-    // Query all unprocessed feedback events by type for batch processing
-    // PK: TENANT#{tenant_id}#UNPROCESSED, SK: feedback_type#timestamp
-    this.evolutionStateTable.addGlobalSecondaryIndex({
-      indexName: 'GSI2-unprocessed-feedback',
-      partitionKey: { name: 'unprocessedIndexPK', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'feedbackSortKey', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-
-    // ======================================================================
-    // S3: Evolution Artifacts
-    // Stores pre-change snapshots for rollback, A/B test golden datasets,
-    // generated skill packages, and memory evolution logs.
-    // ======================================================================
-    this.evolutionArtifactsBucket = new s3.Bucket(this, 'EvolutionArtifactsBucket', {
-      bucketName: `chimera-evolution-artifacts-${this.account}-${this.region}-${props.envName}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: true,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      lifecycleRules: [
+      ttlAttribute: 'ttl',
+      globalSecondaryIndexes: [
         {
-          id: 'expire-old-snapshots',
-          prefix: 'snapshots/',
-          expiration: cdk.Duration.days(90), // Rollback window: 90 days
+          indexName: 'GSI1-lifecycle',
+          partitionKey: { name: 'lifecycleIndexPK', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'last_accessed', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
         },
         {
-          id: 'archive-golden-datasets',
-          prefix: 'golden-datasets/',
-          transitions: [{
-            storageClass: s3.StorageClass.GLACIER,
-            transitionAfter: cdk.Duration.days(180),
-          }],
-        },
-        {
-          id: 'expire-noncurrent-versions',
-          noncurrentVersionExpiration: cdk.Duration.days(30),
+          indexName: 'GSI2-unprocessed-feedback',
+          partitionKey: { name: 'unprocessedIndexPK', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'feedbackSortKey', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
         },
       ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
     });
+    this.evolutionStateTable = evolutionStateChimera.table;
+
+    // ======================================================================
+    // S3: Evolution Artifacts
+    // ======================================================================
+    // Note: bucketName omitted to avoid access-log bucket name exceeding 63-char S3 limit
+    // (the name `chimera-evolution-artifacts-{account}-{region}-{env}-access-logs` is too long).
+    // The bucket ARN/name are exported as stack outputs for cross-stack consumption.
+    const evolutionArtifactsChimera = new ChimeraBucket(this, 'EvolutionArtifactsBucket', {
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+    evolutionArtifactsChimera.bucket.addLifecycleRule({
+      id: 'expire-old-snapshots',
+      prefix: 'snapshots/',
+      expiration: cdk.Duration.days(90),
+    });
+    evolutionArtifactsChimera.bucket.addLifecycleRule({
+      id: 'archive-golden-datasets',
+      prefix: 'golden-datasets/',
+      transitions: [{
+        storageClass: s3.StorageClass.GLACIER,
+        transitionAfter: cdk.Duration.days(180),
+      }],
+    });
+    evolutionArtifactsChimera.bucket.addLifecycleRule({
+      id: 'expire-noncurrent-versions',
+      noncurrentVersionExpiration: cdk.Duration.days(30),
+    });
+    this.evolutionArtifactsBucket = evolutionArtifactsChimera.bucket;
 
     // ======================================================================
     // Lambda Functions for Evolution Tasks
+    // All Python 3.12, code.fromInline — ChimeraLambda wraps each with
+    // X-Ray tracing, log retention, DLQ, and default env vars.
     // ======================================================================
 
-    // Prompt Evolution: Analyze conversation logs for failure patterns
-    const analyzeConversationLogsFunction = new lambda.Function(this, 'AnalyzeConversationLogsFunction', {
+    const analyzeConversationLogsChimera = new ChimeraLambda(this, 'AnalyzeConversationLogsFunction', {
       functionName: `chimera-evolution-analyze-logs-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -199,8 +185,7 @@ def handler(event, context):
       },
     });
 
-    // Prompt Evolution: Generate improved prompt variants
-    const generatePromptVariantFunction = new lambda.Function(this, 'GeneratePromptVariantFunction', {
+    const generatePromptVariantChimera = new ChimeraLambda(this, 'GeneratePromptVariantFunction', {
       functionName: `chimera-evolution-generate-prompt-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -289,8 +274,7 @@ def handler(event, context):
       },
     });
 
-    // Prompt Evolution: Test prompt variant in sandbox
-    const testPromptVariantFunction = new lambda.Function(this, 'TestPromptVariantFunction', {
+    const testPromptVariantChimera = new ChimeraLambda(this, 'TestPromptVariantFunction', {
       functionName: `chimera-evolution-test-prompt-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -394,8 +378,7 @@ def handler(event, context):
       },
     });
 
-    // Skill Generation: Detect repeated tool call patterns
-    const detectPatternsFunction = new lambda.Function(this, 'DetectPatternsFunction', {
+    const detectPatternsChimera = new ChimeraLambda(this, 'DetectPatternsFunction', {
       functionName: `chimera-evolution-detect-patterns-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -439,11 +422,9 @@ def handler(event, context):
     table_name = os.environ['EVOLUTION_TABLE']
     table = dynamodb.Table(table_name)
 
-    # Query conversation logs from last N days
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(days=lookback_days)
 
-    # Scan for recent conversation logs (in production, use GSI with timestamp)
     response = table.query(
         KeyConditionExpression='PK = :pk AND SK BETWEEN :start AND :end',
         ExpressionAttributeValues={
@@ -454,7 +435,6 @@ def handler(event, context):
         Limit=1000
     )
 
-    # Extract tool sequences from conversations
     all_ngrams = []
     conversation_count = 0
 
@@ -467,10 +447,8 @@ def handler(event, context):
             all_ngrams.extend(ngrams)
             conversation_count += 1
 
-    # Count pattern frequencies
     pattern_counts = Counter(all_ngrams)
 
-    # Filter patterns by minimum occurrence threshold
     frequent_patterns = [
         {
             'pattern': ' -> '.join(pattern),
@@ -481,17 +459,15 @@ def handler(event, context):
         if count >= min_occurrences
     ]
 
-    # Sort by frequency
     frequent_patterns.sort(key=lambda x: x['count'], reverse=True)
 
-    # Store detected patterns for skill generation
     if frequent_patterns:
         patterns_key = f'TENANT#{tenant_id}#PATTERNS#{datetime.utcnow().isoformat()}'
         table.put_item(
             Item={
                 'PK': patterns_key,
                 'SK': 'DETECTED',
-                'patterns': frequent_patterns[:10],  # Top 10
+                'patterns': frequent_patterns[:10],
                 'analyzed_conversations': conversation_count,
                 'detection_timestamp': datetime.utcnow().isoformat(),
                 'ttl': int((datetime.utcnow() + timedelta(days=90)).timestamp())
@@ -501,7 +477,7 @@ def handler(event, context):
     return {
         'tenant_id': tenant_id,
         'patterns_found': len(frequent_patterns),
-        'top_patterns': frequent_patterns[:5],  # Return top 5
+        'top_patterns': frequent_patterns[:5],
         'analyzed_conversations': conversation_count,
         'detection_timestamp': datetime.utcnow().isoformat()
     }
@@ -510,8 +486,7 @@ def handler(event, context):
       memorySize: 1024,
     });
 
-    // Skill Generation: Generate SKILL.md from detected pattern
-    const generateSkillFunction = new lambda.Function(this, 'GenerateSkillFunction', {
+    const generateSkillChimera = new ChimeraLambda(this, 'GenerateSkillFunction', {
       functionName: `chimera-evolution-generate-skill-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -576,15 +551,6 @@ def generate_skill_md(pattern_info):
 def handler(event, context):
     """
     Generate SKILL.md files from high-confidence repeated tool patterns.
-
-    Input (from detectPatternsFunction):
-      tenant_id, patterns_found, top_patterns: [{pattern, count, confidence}]
-
-    For each pattern with confidence >= 0.7 and count >= 3:
-    1. Derives a skill name from the tool sequence
-    2. Generates a SKILL.md document
-    3. Stores SKILL.md in S3 under skills/{tenant_id}/{skill_name}/SKILL.md
-    4. Records skill metadata in DynamoDB with status PENDING_REVIEW
     """
     tenant_id = event.get('tenant_id', 'unknown')
     top_patterns = event.get('top_patterns', [])
@@ -672,8 +638,7 @@ def handler(event, context):
       },
     });
 
-    // Memory Evolution: Run garbage collection on memories
-    const memoryGarbageCollectionFunction = new lambda.Function(this, 'MemoryGCFunction', {
+    const memoryGCChimera = new ChimeraLambda(this, 'MemoryGCFunction', {
       functionName: `chimera-evolution-memory-gc-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -691,11 +656,6 @@ ARCHIVE_THRESHOLD_DAYS = 90
 def handler(event, context):
     """
     Memory garbage collection: temporal decay, promotion, and archival.
-
-    Phases:
-    1. Temporal decay - transition active->warm->cold by last_accessed age
-    2. Promotion - frequently accessed warm memories become skill candidates
-    3. Archival - cold memories past retention window marked for TTL expiry
     Reference: ADR-016 memory lifecycle strategy.
     """
     tenant_id = event['tenant_id']
@@ -773,8 +733,7 @@ def handler(event, context):
       },
     });
 
-    // Feedback Processing: Route feedback to appropriate subsystems
-    const processFeedbackFunction = new lambda.Function(this, 'ProcessFeedbackFunction', {
+    const processFeedbackChimera = new ChimeraLambda(this, 'ProcessFeedbackFunction', {
       functionName: `chimera-evolution-process-feedback-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -788,12 +747,6 @@ dynamodb = boto3.resource('dynamodb')
 def handler(event, context):
     """
     Process feedback events and route to evolution subsystems.
-
-    Routes:
-    - thumbs_down -> prompt_evolution + model_routing (negative reward signal)
-    - thumbs_up   -> model_routing (positive reward signal)
-    - correction  -> prompt_evolution + memory
-    - remember    -> memory storage
     """
     tenant_id = event.get('tenant_id', 'system')
     table = dynamodb.Table(os.environ['EVOLUTION_TABLE'])
@@ -882,8 +835,7 @@ def handler(event, context):
       },
     });
 
-    // Rollback: Restore previous state from S3 snapshot
-    const rollbackChangeFunction = new lambda.Function(this, 'RollbackChangeFunction', {
+    const rollbackChangeChimera = new ChimeraLambda(this, 'RollbackChangeFunction', {
       functionName: `chimera-evolution-rollback-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
@@ -899,11 +851,6 @@ dynamodb = boto3.resource('dynamodb')
 def handler(event, context):
     """
     Roll back evolution change using pre-state snapshot from S3.
-
-    Restores previous state for:
-    - Prompt variants (S3 snapshot -> DynamoDB)
-    - Auto-generated skills (S3 snapshot -> file system)
-    - Memory state (S3 snapshot -> DynamoDB)
     """
     event_id = event['event_id']
     rollback_type = event['rollback_type']  # 'prompt', 'skill', 'memory'
@@ -913,7 +860,6 @@ def handler(event, context):
     evolution_table_name = os.environ['EVOLUTION_TABLE']
     table = dynamodb.Table(evolution_table_name)
 
-    # Retrieve snapshot metadata from S3
     snapshot_key = f'snapshots/{tenant_id}/{rollback_type}/{event_id}/snapshot.json'
 
     try:
@@ -932,10 +878,8 @@ def handler(event, context):
             'event_id': event_id
         }
 
-    # Restore based on rollback type
     try:
         if rollback_type == 'prompt':
-            # Restore prompt variant to DynamoDB
             table.put_item(Item={
                 'PK': f'TENANT#{tenant_id}#PROMPT',
                 'SK': 'ACTIVE',
@@ -946,7 +890,6 @@ def handler(event, context):
             })
 
         elif rollback_type == 'skill':
-            # Mark auto-generated skill as inactive
             table.update_item(
                 Key={
                     'PK': f'TENANT#{tenant_id}#SKILL#{snapshot_data["skill_id"]}',
@@ -961,11 +904,9 @@ def handler(event, context):
             )
 
         elif rollback_type == 'memory':
-            # Restore memory items in batch
             for memory_item in snapshot_data.get('memories', []):
                 table.put_item(Item=memory_item)
 
-        # Log rollback event to audit table
         table.put_item(Item={
             'PK': f'TENANT#{tenant_id}#AUDIT',
             'SK': f'ROLLBACK#{datetime.utcnow().isoformat()}',
@@ -1000,29 +941,29 @@ def handler(event, context):
       },
     });
 
-    // Grant permissions
-    this.evolutionStateTable.grantReadWriteData(analyzeConversationLogsFunction);
-    this.evolutionStateTable.grantReadWriteData(generatePromptVariantFunction);
-    this.evolutionStateTable.grantReadWriteData(testPromptVariantFunction);
-    this.evolutionStateTable.grantReadWriteData(detectPatternsFunction);
-    this.evolutionStateTable.grantReadWriteData(generateSkillFunction);
-    this.evolutionStateTable.grantReadWriteData(memoryGarbageCollectionFunction);
-    this.evolutionStateTable.grantReadWriteData(processFeedbackFunction);
-    this.evolutionStateTable.grantReadWriteData(rollbackChangeFunction);
+    // Grant permissions (using .fn to access the underlying Lambda function)
+    this.evolutionStateTable.grantReadWriteData(analyzeConversationLogsChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(generatePromptVariantChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(testPromptVariantChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(detectPatternsChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(generateSkillChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(memoryGCChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(processFeedbackChimera.fn);
+    this.evolutionStateTable.grantReadWriteData(rollbackChangeChimera.fn);
 
-    this.evolutionArtifactsBucket.grantReadWrite(analyzeConversationLogsFunction);
-    this.evolutionArtifactsBucket.grantReadWrite(testPromptVariantFunction);
-    this.evolutionArtifactsBucket.grantReadWrite(generateSkillFunction);
-    this.evolutionArtifactsBucket.grantReadWrite(rollbackChangeFunction);
+    this.evolutionArtifactsBucket.grantReadWrite(analyzeConversationLogsChimera.fn);
+    this.evolutionArtifactsBucket.grantReadWrite(testPromptVariantChimera.fn);
+    this.evolutionArtifactsBucket.grantReadWrite(generateSkillChimera.fn);
+    this.evolutionArtifactsBucket.grantReadWrite(rollbackChangeChimera.fn);
 
-    props.auditTable.grantWriteData(rollbackChangeFunction);
+    props.auditTable.grantWriteData(rollbackChangeChimera.fn);
 
     // ======================================================================
     // Step Functions: Prompt Evolution Pipeline
     // ======================================================================
 
     const analyzeLogsTask = new tasks.LambdaInvoke(this, 'AnalyzeLogs', {
-      lambdaFunction: analyzeConversationLogsFunction,
+      lambdaFunction: analyzeConversationLogsChimera.fn,
       outputPath: '$.Payload',
     });
     analyzeLogsTask.addRetry({
@@ -1033,7 +974,7 @@ def handler(event, context):
     });
 
     const generateVariantTask = new tasks.LambdaInvoke(this, 'GenerateVariant', {
-      lambdaFunction: generatePromptVariantFunction,
+      lambdaFunction: generatePromptVariantChimera.fn,
       outputPath: '$.Payload',
     });
     generateVariantTask.addRetry({
@@ -1044,7 +985,7 @@ def handler(event, context):
     });
 
     const testVariantTask = new tasks.LambdaInvoke(this, 'TestVariant', {
-      lambdaFunction: testPromptVariantFunction,
+      lambdaFunction: testPromptVariantChimera.fn,
       outputPath: '$.Payload',
     });
     testVariantTask.addRetry({
@@ -1101,7 +1042,7 @@ def handler(event, context):
     // ======================================================================
 
     const detectPatternsTask = new tasks.LambdaInvoke(this, 'DetectPatterns', {
-      lambdaFunction: detectPatternsFunction,
+      lambdaFunction: detectPatternsChimera.fn,
       outputPath: '$.Payload',
     });
     detectPatternsTask.addRetry({
@@ -1112,7 +1053,7 @@ def handler(event, context):
     });
 
     const generateSkillTask = new tasks.LambdaInvoke(this, 'GenerateSkill', {
-      lambdaFunction: generateSkillFunction,
+      lambdaFunction: generateSkillChimera.fn,
       outputPath: '$.Payload',
     });
     generateSkillTask.addRetry({
@@ -1162,7 +1103,7 @@ def handler(event, context):
     // ======================================================================
 
     const memoryGCTask = new tasks.LambdaInvoke(this, 'MemoryGC', {
-      lambdaFunction: memoryGarbageCollectionFunction,
+      lambdaFunction: memoryGCChimera.fn,
       outputPath: '$.Payload',
     });
     memoryGCTask.addRetry({
@@ -1206,7 +1147,7 @@ def handler(event, context):
     // ======================================================================
 
     const processFeedbackTask = new tasks.LambdaInvoke(this, 'ProcessFeedback', {
-      lambdaFunction: processFeedbackFunction,
+      lambdaFunction: processFeedbackChimera.fn,
       outputPath: '$.Payload',
     });
     processFeedbackTask.addRetry({
@@ -1249,31 +1190,27 @@ def handler(event, context):
     // EventBridge: Scheduled Evolution Tasks
     // ======================================================================
 
-    // Daily: Prompt evolution analysis
     new events.Rule(this, 'DailyPromptEvolutionRule', {
       ruleName: `chimera-daily-prompt-evolution-${props.envName}`,
       description: 'Trigger daily prompt evolution analysis',
-      schedule: events.Schedule.cron({ hour: '2', minute: '0' }), // 2 AM UTC
+      schedule: events.Schedule.cron({ hour: '2', minute: '0' }),
       targets: [new targets.SfnStateMachine(this.promptEvolutionStateMachine)],
     });
 
-    // Weekly: Skill pattern detection
     new events.Rule(this, 'WeeklySkillGenerationRule', {
       ruleName: `chimera-weekly-skill-generation-${props.envName}`,
       description: 'Trigger weekly skill auto-generation',
-      schedule: events.Schedule.cron({ weekDay: 'SUN', hour: '3', minute: '0' }), // Sunday 3 AM UTC
+      schedule: events.Schedule.cron({ weekDay: 'SUN', hour: '3', minute: '0' }),
       targets: [new targets.SfnStateMachine(this.skillGenerationStateMachine)],
     });
 
-    // Daily: Memory garbage collection
     new events.Rule(this, 'DailyMemoryEvolutionRule', {
       ruleName: `chimera-daily-memory-evolution-${props.envName}`,
       description: 'Trigger daily memory evolution and GC',
-      schedule: events.Schedule.cron({ hour: '4', minute: '0' }), // 4 AM UTC
+      schedule: events.Schedule.cron({ hour: '4', minute: '0' }),
       targets: [new targets.SfnStateMachine(this.memoryEvolutionStateMachine)],
     });
 
-    // Hourly: Feedback processing
     new events.Rule(this, 'HourlyFeedbackProcessingRule', {
       ruleName: `chimera-hourly-feedback-processing-${props.envName}`,
       description: 'Trigger hourly feedback event processing',
