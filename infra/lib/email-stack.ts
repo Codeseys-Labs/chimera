@@ -97,7 +97,7 @@ export class EmailStack extends cdk.Stack {
 
     this.inboundEmailBucket = new s3.Bucket(this, 'InboundEmailBucket', {
       bucketName: `chimera-inbound-email-${props.envName}-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      encryption: s3.BucketEncryption.KMS_MANAGED,
       versioned: false,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
