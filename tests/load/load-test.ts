@@ -6,7 +6,7 @@
  * Budget: Should stay under $5.00 per full load test run
  */
 
-import { describe, test, expect, beforeAll } from '@jest/globals';
+import { describe, test, expect, beforeAll } from 'bun:test';
 import { TestClient } from '../helpers/test-client';
 
 const LOAD_TEST_CONFIG = {

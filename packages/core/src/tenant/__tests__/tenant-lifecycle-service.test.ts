@@ -182,7 +182,7 @@ describe('TenantLifecycleService', () => {
       const ddb = makeMockDdb(null);
       const svc = new TenantLifecycleService({ tenantsTableName: TABLE, dynamodb: ddb as any });
 
-      try { await svc.changeTier(TENANT_ID, 'advanced'); } catch {}
+      try { await svc.changeTier(TENANT_ID, 'advanced'); } catch { /* expected: tenant not found */ }
 
       expect(ddb.get.mock.calls.length).toBe(1);
       // No writes should happen when tenant not found

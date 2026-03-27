@@ -179,8 +179,8 @@ export function createGlueTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            name: table?.Name!,
-            databaseName: table?.DatabaseName!,
+            name: table?.Name,
+            databaseName: table?.DatabaseName,
             description: table?.Description,
             owner: table?.Owner,
             createTime: table?.CreateTime?.toISOString(),
@@ -290,8 +290,8 @@ export function createGlueTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            id: jobRun?.Id!,
-            jobName: jobRun?.JobName!,
+            id: jobRun?.Id,
+            jobName: jobRun?.JobName,
             jobRunState: jobRun?.JobRunState,
             startedOn: jobRun?.StartedOn?.toISOString(),
             completedOn: jobRun?.CompletedOn?.toISOString(),
@@ -338,7 +338,7 @@ export function createGlueTools(clientFactory: AWSClientFactory) {
         return JSON.stringify({
           success: true,
           data: {
-            name: crawler?.Name!,
+            name: crawler?.Name,
             role: crawler?.Role,
             databaseName: crawler?.DatabaseName,
             state: crawler?.State,
