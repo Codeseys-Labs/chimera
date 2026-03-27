@@ -72,6 +72,21 @@ async function runEndpoints(options: {
 
     if (!options.json) spinner.succeed(color.green('API Gateway endpoints retrieved'));
 
+    // Fetch ChatStack ALB DNS (optional — skip gracefully if stack not yet deployed)
+    if (!options.json) spinner.start('Fetching Chat gateway endpoint...');
+    let chatUrl: string | undefined;
+    try {
+      const chatStackName = `Chimera-${env}-Chat`;
+      const chatOutputs = await getStackOutputs(client, chatStackName);
+      const albDns = chatOutputs.AlbDnsName;
+      if (albDns) {
+        chatUrl = `http://${albDns}`;
+      }
+      if (!options.json) spinner.succeed(color.green('Chat gateway endpoint retrieved'));
+    } catch {
+      if (!options.json) spinner.warn(color.yellow('Chat stack not found — chat_url not set'));
+    }
+
     if (!options.json) spinner.start('Fetching Cognito configuration...');
     const securityStackName = `Chimera-${env}-Security`;
     const securityOutputs = await getStackOutputs(client, securityStackName);
@@ -95,6 +110,7 @@ async function runEndpoints(options: {
       },
       endpoints: {
         api_url: apiUrl,
+        ...(chatUrl ? { chat_url: chatUrl } : {}),
         websocket_url: webSocketUrl,
         cognito_user_pool_id: cognitoUserPoolId,
         cognito_client_id: cognitoClientId,
@@ -108,6 +124,7 @@ async function runEndpoints(options: {
         data: {
           region,
           api_url: apiUrl,
+          chat_url: chatUrl,
           websocket_url: webSocketUrl,
           cognito_user_pool_id: cognitoUserPoolId,
           cognito_client_id: cognitoClientId,
@@ -118,6 +135,9 @@ async function runEndpoints(options: {
       console.log(color.green('\n✓ Connected to Chimera deployment'));
       console.log(color.gray('\nEndpoints:'));
       console.log(color.gray(`  API Gateway:  ${apiUrl}`));
+      if (chatUrl) {
+        console.log(color.gray(`  Chat (ALB):   ${chatUrl}`));
+      }
       if (webSocketUrl) {
         console.log(color.gray(`  WebSocket:    ${webSocketUrl}`));
       }
