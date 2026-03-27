@@ -1,16 +1,24 @@
 /**
  * Chimera API client
  *
- * Reads auth tokens from ~/.chimera/credentials, sets Authorization header,
- * reads base URL from chimera.toml [endpoints] api_url.
+ * - Reads auth token from ~/.chimera/credentials
+ * - Sets Authorization: Bearer <token> header
+ * - Base URL from chimera.toml [api] section
+ * - Throws ChimeraAuthError on 401 (triggers re-auth prompt)
  */
 
-import * as fs from 'fs';
+import { loadWorkspaceConfig } from '../utils/workspace.js';
 import * as path from 'path';
 import * as os from 'os';
-import { loadWorkspaceConfig, type WorkspaceConfig } from '../utils/workspace';
 
 export const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.chimera', 'credentials');
+
+export class ChimeraAuthError extends Error {
+  constructor(message = 'Authentication required. Run "chimera login" to authenticate.') {
+    super(message);
+    this.name = 'ChimeraAuthError';
+  }
+}
 
 export interface Credentials {
   accessToken: string;
@@ -19,101 +27,106 @@ export interface Credentials {
   expiresAt: string;
 }
 
-export class ChimeraAuthError extends Error {
-  constructor(message = 'Authentication required. Run `chimera login`.') {
-    super(message);
-    this.name = 'ChimeraAuthError';
-  }
-}
-
 export async function loadCredentials(filePath = DEFAULT_CREDENTIALS_FILE): Promise<Credentials | null> {
   try {
-    if (!fs.existsSync(filePath)) return null;
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw) as Credentials;
+    const exists = await Bun.file(filePath).exists();
+    if (!exists) return null;
+    return await Bun.file(filePath).json() as Credentials;
   } catch {
     return null;
   }
 }
 
-export function getBaseUrl(config?: WorkspaceConfig): string {
-  const cfg = config ?? loadWorkspaceConfig();
-  return cfg.endpoints?.api_url ?? '';
+function getBaseUrl(): string {
+  // WorkspaceConfig doesn't declare [api] yet — read it via index access
+  const config = loadWorkspaceConfig() as Record<string, unknown>;
+  const api = config.api as { base_url?: string } | undefined;
+  return api?.base_url ?? '';
 }
 
-async function getAuthHeader(credFile?: string): Promise<string> {
-  const creds = await loadCredentials(credFile);
-  if (!creds) {
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const creds = await loadCredentials();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (creds) {
+    if (new Date(creds.expiresAt) <= new Date()) {
+      throw new ChimeraAuthError('Token expired. Run "chimera login" again.');
+    }
+    headers['Authorization'] = `Bearer ${creds.accessToken}`;
+  }
+  return headers;
+}
+
+async function request<T>(method: string, urlPath: string, body?: unknown): Promise<T> {
+  const baseUrl = getBaseUrl();
+  if (!baseUrl) {
+    throw new Error(
+      'API base URL not configured. Run "chimera connect" to set endpoints, then add [api] base_url to chimera.toml.',
+    );
+  }
+
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${baseUrl}${urlPath}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (response.status === 401) {
     throw new ChimeraAuthError();
   }
-  if (new Date(creds.expiresAt) <= new Date()) {
-    throw new ChimeraAuthError('Token expired. Run `chimera login` again.');
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API error ${response.status}: ${text}`);
   }
-  return `Bearer ${creds.accessToken}`;
+
+  return response.json() as Promise<T>;
 }
 
-function handleAuthError(status: number): void {
-  if (status === 401) throw new ChimeraAuthError();
-}
-
-async function requireOk(res: Response): Promise<void> {
-  handleAuthError(res.status);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
+async function requestStream(method: string, urlPath: string, body?: unknown): Promise<Response> {
+  const baseUrl = getBaseUrl();
+  if (!baseUrl) {
+    throw new Error(
+      'API base URL not configured. Run "chimera connect" to set endpoints, then add [api] base_url to chimera.toml.',
+    );
   }
+
+  const headers = await getAuthHeaders();
+  headers['Accept'] = 'text/event-stream';
+
+  const response = await fetch(`${baseUrl}${urlPath}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (response.status === 401) {
+    throw new ChimeraAuthError();
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+
+  return response;
 }
 
 export const apiClient = {
-  async get<T = unknown>(endpoint: string, credFile?: string): Promise<T> {
-    const auth = await getAuthHeader(credFile);
-    const res = await fetch(`${getBaseUrl()}${endpoint}`, {
-      headers: { Authorization: auth },
-    });
-    await requireOk(res);
-    return res.json() as Promise<T>;
+  get<T = unknown>(urlPath: string): Promise<T> {
+    return request<T>('GET', urlPath);
   },
-
-  async post<T = unknown>(endpoint: string, body: unknown, credFile?: string): Promise<T> {
-    const auth = await getAuthHeader(credFile);
-    const res = await fetch(`${getBaseUrl()}${endpoint}`, {
-      method: 'POST',
-      headers: { Authorization: auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    await requireOk(res);
-    return res.json() as Promise<T>;
+  post<T = unknown>(urlPath: string, body?: unknown): Promise<T> {
+    return request<T>('POST', urlPath, body);
   },
-
-  async getStream(endpoint: string, credFile?: string): Promise<Response> {
-    const auth = await getAuthHeader(credFile);
-    const res = await fetch(`${getBaseUrl()}${endpoint}`, {
-      headers: { Authorization: auth, Accept: 'text/event-stream' },
-    });
-    handleAuthError(res.status);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`API error ${res.status}: ${text}`);
-    }
-    return res;
+  delete<T = unknown>(urlPath: string): Promise<T> {
+    return request<T>('DELETE', urlPath);
   },
-
-  async postStream(endpoint: string, body: unknown, credFile?: string): Promise<Response> {
-    const auth = await getAuthHeader(credFile);
-    const res = await fetch(`${getBaseUrl()}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        Authorization: auth,
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-      },
-      body: JSON.stringify(body),
-    });
-    handleAuthError(res.status);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`API error ${res.status}: ${text}`);
-    }
-    return res;
+  getStream(urlPath: string): Promise<Response> {
+    return requestStream('GET', urlPath);
+  },
+  postStream(urlPath: string, body?: unknown): Promise<Response> {
+    return requestStream('POST', urlPath, body);
   },
 };
