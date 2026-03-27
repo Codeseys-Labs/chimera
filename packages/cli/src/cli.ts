@@ -7,7 +7,8 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
+import * as fs from 'fs';
+import * as path from 'path';
 import { registerTenantCommands } from './commands/tenant';
 import { registerSessionCommands } from './commands/session';
 import { registerSkillCommands } from './commands/skill';
@@ -18,13 +19,28 @@ import { registerStatusCommand } from './commands/status';
 import { registerSyncCommand } from './commands/sync';
 import { registerUpgradeCommand } from './commands/upgrade';
 import { registerInitCommand } from './commands/init';
+import { registerLoginCommand } from './commands/login';
+import { registerChatCommand } from './commands/chat';
+import { registerDoctorCommand } from './commands/doctor';
+import { color } from './lib/color';
+
+function getVersion(): string {
+  try {
+    const pkgPath = path.join(__dirname, '../package.json');
+    const raw = fs.readFileSync(pkgPath, 'utf8');
+    const pkg = JSON.parse(raw) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
 
 const program = new Command();
 
 program
   .name('chimera')
   .description('AWS Chimera multi-tenant agent platform CLI')
-  .version('0.1.0');
+  .version(getVersion());
 
 // Register command groups
 registerTenantCommands(program);
@@ -37,6 +53,9 @@ registerStatusCommand(program);
 registerSyncCommand(program);
 registerUpgradeCommand(program);
 registerInitCommand(program);
+registerLoginCommand(program);
+registerChatCommand(program);
+registerDoctorCommand(program);
 
 // Error handling
 program.exitOverride();
@@ -49,6 +68,6 @@ if (!process.argv.slice(2).length) {
 }
 
 process.on('unhandledRejection', (err: Error) => {
-  console.error(chalk.red('Error:'), err.message);
+  console.error(color.red('Error:'), err.message);
   process.exit(1);
 });
