@@ -13,7 +13,8 @@ Tier assignments (mirrors TOOL_TIER_MAP in tier-config.ts):
 - Tier 1 (basic+):    Lambda, EC2, S3, CloudWatch, SQS
 - Tier 2 (advanced+): RDS, Redshift, Athena, Glue, OpenSearch
 - Tier 3 (premium):   Step Functions, Bedrock, SageMaker, Rekognition,
-                      Textract, Transcribe, CodeBuild, CodeCommit, CodePipeline
+                      Textract, Transcribe, CodeBuild, CodeCommit, CodePipeline,
+                      Evolution (self-evolution workflow tools)
 """
 import importlib
 import logging
@@ -126,6 +127,10 @@ _TOOL_TIER_REGISTRY: Dict[str, tuple] = {
         'list_pipelines', 'get_pipeline_details', 'check_pipeline_status',
         'trigger_pipeline', 'get_pipeline_execution_details',
         'create_pipeline', 'delete_pipeline',
+    ]),
+    'tools.evolution_tools': (3, [
+        'trigger_infra_evolution', 'check_evolution_status',
+        'register_capability', 'list_evolution_history',
     ]),
 }
 
@@ -246,6 +251,11 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     'get_pipeline_execution_details': 'Get details of a specific pipeline execution',
     'create_pipeline': 'Create a new CodePipeline pipeline',
     'delete_pipeline': 'Delete a CodePipeline pipeline',
+    # Tier 3: Self-Evolution
+    'trigger_infra_evolution': 'Commit agent-generated CDK stack code to CodeCommit to trigger infrastructure self-evolution',
+    'check_evolution_status': 'Check the CodePipeline deployment status of a self-evolution request',
+    'register_capability': 'Register a deployed capability in the Gateway skills registry for tenant discovery',
+    'list_evolution_history': 'List recent self-evolution requests and their deployment status for a tenant',
 }
 
 # Maps tool tier number to the SSM key for that tier's Lambda ARN.
