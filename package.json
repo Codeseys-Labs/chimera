@@ -17,7 +17,7 @@
     "build:chat-gateway": "cd packages/chat-gateway && bun run build",
     "build:cli": "cd packages/cli && bun run build",
     "build:infra": "cd infra && bun run build",
-    "compile:dev": "cd packages/cli && bun build src/cli.ts --compile --outfile ../../chimera",
+    "compile:dev": "cd packages/cli && bun build src/cli.ts --compile --external react-devtools-core --outfile ../../chimera",
     "compile:cli": "cd packages/cli && bun run compile",
     "compile:cli:all": "cd packages/cli && bun run compile:all",
     "test": "bun test ./packages/ ./infra/",
