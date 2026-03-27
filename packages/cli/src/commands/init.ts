@@ -4,10 +4,17 @@
 
 import { Command } from 'commander';
 import inquirer from 'inquirer';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { saveWorkspaceConfig, findWorkspaceConfig, WorkspaceConfig } from '../utils/workspace.js';
+import {
+  saveWorkspaceConfig,
+  findWorkspaceConfig,
+  loadCredentials,
+  saveCredentials,
+  WorkspaceConfig,
+} from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 
 export const AWS_CREDENTIALS_PATH = path.join(os.homedir(), '.aws', 'credentials');
@@ -77,6 +84,50 @@ export function writeAwsProfile(
   }
 }
 
+/**
+ * Generate a cryptographically random password meeting Cognito's default policy:
+ * 12+ chars, at least one uppercase, lowercase, digit, and symbol.
+ */
+export function generatePassword(): string {
+  const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lower = 'abcdefghijklmnopqrstuvwxyz';
+  const digits = '0123456789';
+  const symbols = '!@#$%^&*';
+  const all = upper + lower + digits + symbols;
+
+  // Start with one of each required character class
+  const parts: string[] = [
+    upper[crypto.randomInt(upper.length)],
+    upper[crypto.randomInt(upper.length)],
+    lower[crypto.randomInt(lower.length)],
+    lower[crypto.randomInt(lower.length)],
+    digits[crypto.randomInt(digits.length)],
+    digits[crypto.randomInt(digits.length)],
+    symbols[crypto.randomInt(symbols.length)],
+    symbols[crypto.randomInt(symbols.length)],
+  ];
+
+  // Fill to 16 characters total
+  while (parts.length < 16) {
+    parts.push(all[crypto.randomInt(all.length)]);
+  }
+
+  // Fisher-Yates shuffle using crypto.randomInt
+  for (let i = parts.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [parts[i], parts[j]] = [parts[j], parts[i]];
+  }
+
+  return parts.join('');
+}
+
+/**
+ * Validate an email address format.
+ */
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export function registerInitCommand(program: Command): void {
   program
     .command('init')
@@ -85,6 +136,8 @@ export function registerInitCommand(program: Command): void {
     .option('--region <region>', 'AWS region (skip prompt)')
     .option('--env <env>', 'Environment name (skip prompt)')
     .option('--repo <repo>', 'CodeCommit repository name (skip prompt)')
+    .option('--admin-email <email>', 'Admin user email (skip prompt)')
+    .option('--admin-password <password>', 'Admin user password (skip prompt, use - to auto-generate)')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       try {
@@ -248,23 +301,113 @@ export function registerInitCommand(program: Command): void {
           repository = (repo as string).trim();
         }
 
+        // ── Admin User ────────────────────────────────────────────────────────
+        let adminEmail: string = options.adminEmail ?? '';
+        let adminPassword = '';
+        let passwordWasGenerated = false;
+
+        if (!adminEmail) {
+          const { email } = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'email',
+              message: 'Admin email:',
+              validate: (input: string) =>
+                isValidEmail(input.trim()) || 'Enter a valid email address',
+            },
+          ]);
+          adminEmail = (email as string).trim();
+        }
+
+        if (options.adminPassword === '-' || !options.adminPassword) {
+          if (!options.adminPassword) {
+            const AUTO_GENERATE = 'Auto-generate (recommended)';
+            const ENTER_MANUALLY = 'Enter manually';
+            const { passwordChoice } = await inquirer.prompt([
+              {
+                type: 'list',
+                name: 'passwordChoice',
+                message: 'Admin password:',
+                choices: [AUTO_GENERATE, ENTER_MANUALLY],
+                default: AUTO_GENERATE,
+              },
+            ]);
+
+            if (passwordChoice === ENTER_MANUALLY) {
+              const { pwd } = await inquirer.prompt([
+                {
+                  type: 'password',
+                  name: 'pwd',
+                  message: 'Password (min 12 chars, upper+lower+digit+symbol):',
+                  mask: '*',
+                  validate: (input: string) => {
+                    if (input.length < 12) return 'Password must be at least 12 characters';
+                    if (!/[A-Z]/.test(input)) return 'Must contain at least one uppercase letter';
+                    if (!/[a-z]/.test(input)) return 'Must contain at least one lowercase letter';
+                    if (!/[0-9]/.test(input)) return 'Must contain at least one digit';
+                    if (!/[^A-Za-z0-9]/.test(input)) return 'Must contain at least one symbol';
+                    return true;
+                  },
+                },
+              ]);
+              adminPassword = pwd as string;
+            } else {
+              adminPassword = generatePassword();
+              passwordWasGenerated = true;
+            }
+          } else {
+            adminPassword = generatePassword();
+            passwordWasGenerated = true;
+          }
+        } else {
+          adminPassword = options.adminPassword as string;
+        }
+
         // ── Write chimera.toml ────────────────────────────────────────────────
         const config: WorkspaceConfig = {
           aws: { profile, region },
           workspace: { environment, repository },
+          auth: { admin_email: adminEmail },
         };
 
         saveWorkspaceConfig(config, process.cwd());
 
+        // ── Save admin password to ~/.chimera/credentials ─────────────────────
+        const creds = loadCredentials();
+        saveCredentials({ ...creds, admin: { password: adminPassword } });
+
         if (options.json) {
-          console.log(JSON.stringify({ status: 'ok', data: { profile, region, environment, repository } }));
+          console.log(JSON.stringify({
+            status: 'ok',
+            data: {
+              profile,
+              region,
+              environment,
+              repository,
+              admin_email: adminEmail,
+              password_generated: passwordWasGenerated,
+              ...(passwordWasGenerated ? { admin_password: adminPassword } : {}),
+            },
+          }));
         } else {
           console.log(color.green('\nchimera.toml created successfully\n'));
           console.log(`  Profile:     ${color.cyan(profile)}`);
           console.log(`  Region:      ${color.cyan(region)}`);
           console.log(`  Environment: ${color.cyan(environment)}`);
           console.log(`  Repository:  ${color.cyan(repository)}`);
+          console.log(`  Admin email: ${color.cyan(adminEmail)}`);
+          if (passwordWasGenerated) {
+            console.log(`  Admin password (generated): ${color.yellow(adminPassword)}`);
+            console.log(color.gray('  (saved to ~/.chimera/credentials)'));
+          } else {
+            console.log(color.gray('  Admin password saved to ~/.chimera/credentials'));
+          }
           console.log(color.yellow('\nRemember to add chimera.toml to your .gitignore'));
+          console.log(color.gray('\nNext steps:'));
+          console.log(color.gray('  1. chimera deploy    -- deploy infrastructure'));
+          console.log(color.gray('  2. chimera endpoints -- save API endpoints'));
+          console.log(color.gray('  3. chimera setup     -- provision admin user in Cognito'));
+          console.log(color.gray('  4. chimera login     -- authenticate'));
         }
       } catch (err: unknown) {
         const isTtyError =
