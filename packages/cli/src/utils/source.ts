@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import { execSync, execFileSync } from 'child_process';
-import chalk from 'chalk';
+import { color } from '../lib/color';
 
 export interface SourceLocation {
   type: 'local' | 'github-release' | 'git-clone';
@@ -146,11 +146,11 @@ export async function fetchGitHubRelease(
   repo: string,
   tag: string = 'latest',
 ): Promise<string> {
-  console.log(chalk.gray(`  Fetching GitHub release: ${owner}/${repo}@${tag}`));
+  console.log(color.gray(`  Fetching GitHub release: ${owner}/${repo}@${tag}`));
 
   // Resolve release to tarball URL
   const tarballUrl = await resolveGitHubReleaseUrl(owner, repo, tag);
-  console.log(chalk.gray(`  Download URL: ${tarballUrl}`));
+  console.log(color.gray(`  Download URL: ${tarballUrl}`));
 
   // Create temp directory for download
   const tmpDir = fs.mkdtempSync(path.join('/tmp', 'chimera-deploy-'));
@@ -159,17 +159,17 @@ export async function fetchGitHubRelease(
 
   try {
     // Download tarball
-    console.log(chalk.gray(`  Downloading tarball...`));
+    console.log(color.gray(`  Downloading tarball...`));
     await downloadFile(tarballUrl, tarballPath);
 
     // Extract tarball
-    console.log(chalk.gray(`  Extracting tarball...`));
+    console.log(color.gray(`  Extracting tarball...`));
     extractTarball(tarballPath, extractDir);
 
     // Clean up tarball (keep extracted source)
     fs.unlinkSync(tarballPath);
 
-    console.log(chalk.gray(`  Source extracted to: ${extractDir}`));
+    console.log(color.gray(`  Source extracted to: ${extractDir}`));
     return extractDir;
   } catch (error) {
     // Clean up on error
@@ -192,7 +192,7 @@ export async function fetchGitClone(
 ): Promise<string> {
   const ref = branch ?? tag;
   console.log(
-    chalk.gray(`  Cloning git remote: ${remote}${ref ? `@${ref}` : ''}`),
+    color.gray(`  Cloning git remote: ${remote}${ref ? `@${ref}` : ''}`),
   );
 
   const tmpDir = fs.mkdtempSync(path.join('/tmp', 'chimera-deploy-'));
@@ -207,7 +207,7 @@ export async function fetchGitClone(
 
     execFileSync('git', args, { stdio: 'inherit' });
 
-    console.log(chalk.gray(`  Cloned to: ${cloneDir}`));
+    console.log(color.gray(`  Cloned to: ${cloneDir}`));
     return cloneDir;
   } catch (error) {
     if (fs.existsSync(tmpDir)) {
