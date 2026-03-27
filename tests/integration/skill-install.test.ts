@@ -16,6 +16,11 @@ const TEST_CONFIG = {
 };
 
 describe('Skill Installation Integration Tests', () => {
+  if (!process.env.CHIMERA_TEST_API_URL) {
+    test.skip('skipped: CHIMERA_TEST_API_URL not set', () => {});
+    return;
+  }
+
   let client: TestClient;
   const installedSkills: string[] = [];
 
