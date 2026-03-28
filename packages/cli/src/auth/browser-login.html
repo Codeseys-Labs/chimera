@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chimera Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0d14;
+      --surface: #111827;
+      --border: #1f2937;
+      --border-focus: #7c3aed;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --error-bg: #1c0a0a;
+      --error-border: #7f1d1d;
+      --error-text: #fca5a5;
+      --success-bg: #022c22;
+      --success-border: #14532d;
+      --success-text: #6ee7b7;
+      --info-bg: #0c1a2e;
+      --info-border: #1e3a5f;
+      --info-text: #93c5fd;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .container { width: 100%; max-width: 400px; }
+
+    .brand {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .brand h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .brand p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+    }
+
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 0.375rem;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.625rem 0.875rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9375rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus { border-color: var(--border-focus); }
+    .form-group input::placeholder { color: var(--text-muted); opacity: 0.6; }
+
+    button[type="submit"], .btn-primary {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    button[type="submit"]:hover, .btn-primary:hover { background: var(--accent-hover); }
+    button[type="submit"]:disabled, .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .alert {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+      line-height: 1.5;
+    }
+    .alert-error {
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: var(--error-text);
+    }
+    .alert-success {
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      color: var(--success-text);
+    }
+    .alert-info {
+      background: var(--info-bg);
+      border: 1px solid var(--info-border);
+      color: var(--info-text);
+    }
+
+    .hidden { display: none !important; }
+
+    .mfa-setup-secret {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: var(--info-text);
+      word-break: break-all;
+    }
+    .mfa-setup-secret .label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+      font-family: inherit;
+    }
+
+    .section-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.25rem;
+    }
+    .section-subtitle {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    .success-icon {
+      font-size: 3rem;
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+    .success-message {
+      text-align: center;
+      color: var(--success-text);
+    }
+    .success-message h2 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+    .success-message p { font-size: 0.875rem; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="brand">
+      <h1>Chimera</h1>
+      <p>Multi-Tenant Agent Platform</p>
+    </div>
+
+    <div class="card">
+      <!-- Error / info messages -->
+      <div id="alertBox" class="alert hidden"></div>
+
+      <!-- Step 1: Email + Password form -->
+      <div id="loginSection">
+        <div class="section-title">Sign In</div>
+        <div class="section-subtitle">Enter your credentials to continue</div>
+        <form id="loginForm">
+          <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" autocomplete="email" required placeholder="you@example.com" />
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" autocomplete="current-password" required placeholder="••••••••••••" />
+          </div>
+          <button type="submit" id="loginBtn">Sign In</button>
+        </form>
+      </div>
+
+      <!-- Step 2a: MFA code entry (SOFTWARE_TOKEN_MFA or SMS_MFA) -->
+      <div id="mfaSection" class="hidden">
+        <div class="section-title" id="mfaTitle">MFA Required</div>
+        <div class="section-subtitle" id="mfaSubtitle">Enter your verification code</div>
+        <form id="mfaForm">
+          <div class="form-group">
+            <label for="mfaCode">Verification Code</label>
+            <input
+              type="text"
+              id="mfaCode"
+              maxlength="6"
+              pattern="[0-9]{6}"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              placeholder="000000"
+            />
+          </div>
+          <button type="submit" id="mfaBtn">Verify</button>
+        </form>
+      </div>
+
+      <!-- Step 2b: MFA setup (MFA_SETUP) -->
+      <div id="mfaSetupSection" class="hidden">
+        <div class="section-title">Set Up Authenticator App</div>
+        <div class="section-subtitle">Scan or enter the secret in your authenticator app, then enter the code below</div>
+        <div class="mfa-setup-secret">
+          <div class="label">Secret Key</div>
+          <div id="setupSecret"></div>
+        </div>
+        <div class="mfa-setup-secret">
+          <div class="label">OTP Auth URI</div>
+          <div id="setupUri"></div>
+        </div>
+        <form id="mfaSetupForm">
+          <div class="form-group">
+            <label for="setupCode">Verification Code</label>
+            <input
+              type="text"
+              id="setupCode"
+              maxlength="6"
+              pattern="[0-9]{6}"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              placeholder="000000"
+            />
+          </div>
+          <button type="submit" id="setupBtn">Verify & Complete Setup</button>
+        </form>
+      </div>
+
+      <!-- Step 3: Success -->
+      <div id="successSection" class="hidden">
+        <div class="success-icon">✓</div>
+        <div class="success-message">
+          <h2>Authenticated!</h2>
+          <p>You're logged in. This window will close shortly, or you can close it manually.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Injected by browser-server.ts
+    const CLIENT_ID = '{{CLIENT_ID}}';
+    const REGION = '{{REGION}}';
+    const COGNITO_ENDPOINT = `https://cognito-idp.${REGION}.amazonaws.com/`;
+    const CALLBACK_URL = 'http://localhost:9999/auth/callback';
+
+    let currentSession = null;
+    let currentChallenge = null;
+    let userEmail = null;
+
+    // ─── UI helpers ───────────────────────────────────────────────────────────
+
+    function showSection(id) {
+      ['loginSection', 'mfaSection', 'mfaSetupSection', 'successSection'].forEach(s => {
+        document.getElementById(s).classList.add('hidden');
+      });
+      document.getElementById(id).classList.remove('hidden');
+    }
+
+    function showAlert(message, type = 'error') {
+      const box = document.getElementById('alertBox');
+      box.textContent = message;
+      box.className = `alert alert-${type}`;
+    }
+
+    function clearAlert() {
+      const box = document.getElementById('alertBox');
+      box.className = 'alert hidden';
+    }
+
+    function setLoading(btnId, loading) {
+      const btn = document.getElementById(btnId);
+      btn.disabled = loading;
+      btn.textContent = loading ? 'Please wait…' : btn.dataset.label;
+    }
+
+    // Store original button labels
+    document.addEventListener('DOMContentLoaded', () => {
+      ['loginBtn', 'mfaBtn', 'setupBtn'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.dataset.label = btn.textContent;
+      });
+    });
+
+    // ─── Cognito API calls ────────────────────────────────────────────────────
+
+    async function cognitoRequest(target, body) {
+      const resp = await fetch(COGNITO_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'X-Amz-Target': `AWSCognitoIdentityProviderService.${target}`,
+          'Content-Type': 'application/x-amz-json-1.1',
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.message || data.__type || `Request failed (${resp.status})`);
+      }
+      return data;
+    }
+
+    async function initiateAuth(email, password) {
+      return cognitoRequest('InitiateAuth', {
+        AuthFlow: 'USER_PASSWORD_AUTH',
+        AuthParameters: { USERNAME: email, PASSWORD: password },
+        ClientId: CLIENT_ID,
+      });
+    }
+
+    async function respondToChallenge(challengeName, responses) {
+      return cognitoRequest('RespondToAuthChallenge', {
+        ChallengeName: challengeName,
+        ClientId: CLIENT_ID,
+        Session: currentSession,
+        ChallengeResponses: responses,
+      });
+    }
+
+    async function associateSoftwareToken() {
+      return cognitoRequest('AssociateSoftwareToken', { Session: currentSession });
+    }
+
+    async function verifySoftwareToken(userCode, session) {
+      return cognitoRequest('VerifySoftwareToken', { UserCode: userCode, Session: session });
+    }
+
+    // ─── Challenge handling ───────────────────────────────────────────────────
+
+    async function handleResponse(data) {
+      if (data.AuthenticationResult) {
+        await postTokens(data.AuthenticationResult);
+        return;
+      }
+
+      currentSession = data.Session;
+      currentChallenge = data.ChallengeName;
+
+      if (data.ChallengeName === 'SOFTWARE_TOKEN_MFA') {
+        document.getElementById('mfaTitle').textContent = 'Authenticator App Required';
+        document.getElementById('mfaSubtitle').textContent = 'Open your authenticator app and enter the 6-digit code';
+        showSection('mfaSection');
+
+      } else if (data.ChallengeName === 'SMS_MFA') {
+        document.getElementById('mfaTitle').textContent = 'SMS Verification';
+        document.getElementById('mfaSubtitle').textContent = 'Enter the code sent to your phone';
+        showSection('mfaSection');
+
+      } else if (data.ChallengeName === 'MFA_SETUP') {
+        // Need to call AssociateSoftwareToken to get the secret
+        const assocData = await associateSoftwareToken();
+        // Store the associate session for VerifySoftwareToken
+        window._mfaSetupAssociateSession = assocData.Session;
+        const secret = assocData.SecretCode;
+        const uri = `otpauth://totp/Chimera:${encodeURIComponent(userEmail)}?secret=${secret}&issuer=Chimera`;
+        document.getElementById('setupSecret').textContent = secret;
+        document.getElementById('setupUri').textContent = uri;
+        showSection('mfaSetupSection');
+
+      } else {
+        showAlert(`Unhandled challenge: ${data.ChallengeName}. Please contact support.`);
+      }
+    }
+
+    async function postTokens(authResult) {
+      await fetch(CALLBACK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_token: authResult.AccessToken,
+          id_token: authResult.IdToken,
+          refresh_token: authResult.RefreshToken,
+          expires_in: authResult.ExpiresIn,
+        }),
+      });
+      showSection('successSection');
+      setTimeout(() => window.close(), 2000);
+    }
+
+    // ─── Form handlers ────────────────────────────────────────────────────────
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      userEmail = email;
+
+      setLoading('loginBtn', true);
+      try {
+        const data = await initiateAuth(email, password);
+        await handleResponse(data);
+      } catch (err) {
+        showAlert(err.message || 'Sign in failed. Check your credentials and try again.');
+      } finally {
+        setLoading('loginBtn', false);
+      }
+    });
+
+    document.getElementById('mfaForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+      const code = document.getElementById('mfaCode').value.trim();
+
+      setLoading('mfaBtn', true);
+      try {
+        let responses;
+        if (currentChallenge === 'SOFTWARE_TOKEN_MFA') {
+          responses = { USERNAME: userEmail, SOFTWARE_TOKEN_MFA_CODE: code };
+        } else {
+          responses = { USERNAME: userEmail, SMS_MFA_CODE: code };
+        }
+        const data = await respondToChallenge(currentChallenge, responses);
+        await handleResponse(data);
+      } catch (err) {
+        showAlert(err.message || 'Invalid code. Please try again.');
+      } finally {
+        setLoading('mfaBtn', false);
+      }
+    });
+
+    document.getElementById('mfaSetupForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert();
+      const code = document.getElementById('setupCode').value.trim();
+
+      setLoading('setupBtn', true);
+      try {
+        // Verify the TOTP code against the associate session
+        const verifyData = await verifySoftwareToken(code, window._mfaSetupAssociateSession);
+        // Update session from verify response
+        currentSession = verifyData.Session;
+        // Respond to MFA_SETUP challenge
+        const data = await respondToChallenge('MFA_SETUP', { USERNAME: userEmail });
+        await handleResponse(data);
+      } catch (err) {
+        showAlert(err.message || 'Setup failed. Check the code and try again.');
+      } finally {
+        setLoading('setupBtn', false);
+      }
+    });
+  </script>
+</body>
+</html>
