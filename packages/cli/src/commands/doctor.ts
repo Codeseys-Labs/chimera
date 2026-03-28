@@ -29,18 +29,19 @@ export interface CheckResult {
 
 // ─── Individual checks ────────────────────────────────────────────────────────
 
-export function checkAwsCredentials(): CheckResult {
+export function checkAwsCredentials(awsProfile?: string): CheckResult {
   const hasEnvKey = Boolean(process.env['AWS_ACCESS_KEY_ID']);
   const hasEnvRole = Boolean(process.env['AWS_ROLE_ARN'] ?? process.env['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI']);
   const hasFile = fs.existsSync(AWS_CREDENTIALS_FILE);
+  const hasProfile = Boolean(process.env['AWS_PROFILE'] ?? process.env['AWS_DEFAULT_PROFILE'] ?? awsProfile);
 
-  if (hasEnvKey || hasEnvRole || hasFile) {
+  if (hasEnvKey || hasEnvRole || hasFile || hasProfile) {
     return { label: 'AWS credentials', ok: true };
   }
   return {
     label: 'AWS credentials',
     ok: false,
-    detail: 'No AWS credentials found. Set AWS_ACCESS_KEY_ID or configure ~/.aws/credentials',
+    detail: 'No AWS credentials found. Set AWS_ACCESS_KEY_ID, AWS_PROFILE, or configure ~/.aws/credentials',
   };
 }
 
@@ -73,12 +74,14 @@ export async function checkChimeraAuth(credFile = CREDENTIALS_FILE): Promise<Che
   }
 }
 
-export async function checkApiConnectivity(baseUrl: string): Promise<CheckResult> {
-  if (!baseUrl) {
+export async function checkApiConnectivity(baseUrl: string, chatUrl?: string): Promise<CheckResult> {
+  // Prefer chat_url (ECS ALB) for health check — api_url (API Gateway) returns 403 on /health
+  const healthBase = chatUrl || baseUrl;
+  if (!healthBase) {
     return { label: 'API connectivity', ok: false, detail: 'api_url not set in chimera.toml [endpoints]' };
   }
   try {
-    const healthUrl = `${baseUrl.replace(/\/$/, '')}/health`;
+    const healthUrl = `${healthBase.replace(/\/$/, '')}/health`;
     const res = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) });
     if (res.ok) {
       return { label: 'API connectivity', ok: true, detail: healthUrl };
@@ -125,7 +128,10 @@ const CHIMERA_STACK_SUFFIXES = ['Network', 'Data', 'Security', 'Api', 'Chat'];
 export async function checkStackStatus(region?: string, env?: string): Promise<CheckResult> {
   const resolvedEnv = env ?? 'dev';
   const stackNames = CHIMERA_STACK_SUFFIXES.map((s) => `Chimera-${resolvedEnv}-${s}`);
-  const cfn = new CloudFormationClient({ region: region ?? 'us-east-1' });
+  // When region is undefined, CloudFormationClient resolves from AWS SDK chain
+  // (AWS_DEFAULT_REGION, ~/.aws/config, instance metadata, etc.) rather than
+  // hard-coding us-east-1 which would silently query the wrong region.
+  const cfn = new CloudFormationClient(region ? { region } : {});
   const results: string[] = [];
   let allOk = true;
 
@@ -171,20 +177,22 @@ export function registerDoctorCommand(program: Command): void {
     .command('doctor')
     .description('Run pre-flight checks for the Chimera platform')
     .option('--json', 'Output results as JSON')
-    .action(async (options: { json?: boolean }) => {
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml [aws] region)')
+    .action(async (options: { json?: boolean; region?: string }) => {
       const config = loadWorkspaceConfig();
-      const region = config.aws?.region;
+      const region = options.region ?? config.aws?.region;
       const env = config.workspace?.environment;
       const baseUrl = config.endpoints?.api_url ?? '';
+      const chatUrl = config.endpoints?.chat_url;
 
       if (!options.json) {
         console.log(color.bold('\nChimera Doctor — Pre-flight Checks\n'));
       }
 
       const checks = await Promise.all([
-        Promise.resolve(checkAwsCredentials()),
+        Promise.resolve(checkAwsCredentials(config.aws?.profile)),
         checkChimeraAuth(),
-        checkApiConnectivity(baseUrl),
+        checkApiConnectivity(baseUrl, chatUrl),
         Promise.resolve(checkCognitoConfig()),
         checkStackStatus(region, env),
       ]);
