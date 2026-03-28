@@ -22,6 +22,8 @@ export interface ChatStackProps extends cdk.StackProps {
   ecrRepository?: ecr.IRepository;
   domainName?: string;
   certificate?: acm.ICertificate;
+  cognitoUserPoolId?: string;
+  cognitoUserPoolClientId?: string;
 }
 
 /**
@@ -166,6 +168,8 @@ export class ChatStack extends cdk.Stack {
         SKILLS_TABLE_NAME: props.skillsTable.tableName,
         PORT: '8080',
         LOG_LEVEL: isProd ? 'info' : 'debug',
+        COGNITO_USER_POOL_ID: props.cognitoUserPoolId ?? '',
+        COGNITO_CLIENT_ID: props.cognitoUserPoolClientId ?? '',
       },
       healthCheck: {
         command: ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1'],

@@ -7,6 +7,7 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { optionalAuth } from './middleware/auth';
 import { extractTenantContext } from './middleware/tenant';
 import { rateLimitMiddleware, recordMetricsMiddleware } from './middleware/rate-limit';
 import authRouter from './routes/auth';
@@ -54,6 +55,10 @@ app.use('/slack/events', async (c, next) => {
 });
 
 // Apply tenant middleware and rate limiting to all /chat/* and /slack/* routes
+// optionalAuth runs first: extracts JWT claims into auth context if Bearer token is present.
+// extractTenantContext falls back to auth.tenantId when X-Tenant-Id header is absent,
+// enabling direct CLI access via Bearer JWT without requiring the API Gateway header.
+app.use('/chat/*', optionalAuth);
 app.use('/chat/*', extractTenantContext);
 app.use('/chat/*', rateLimitMiddleware('api-requests', 1));
 app.use('/slack/*', extractTenantContext);
