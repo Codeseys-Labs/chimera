@@ -1,154 +1,103 @@
 /**
- * chimera login — Cognito PKCE authentication flow
+ * chimera login — Direct terminal authentication via Cognito InitiateAuth
  *
- * Opens browser to Cognito hosted UI, starts local redirect listener,
- * exchanges auth code for tokens, stores tokens in ~/.chimera/credentials.
+ * Prompts for email and password in the terminal, calls Cognito InitiateAuth
+ * with USER_PASSWORD_AUTH flow, and stores tokens in ~/.chimera/credentials.
+ * No browser popup, no localhost redirect server.
  */
 
 import { Command } from 'commander';
-import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as http from 'http';
-import { execFile } from 'child_process';
-import { loadWorkspaceConfig } from '../utils/workspace';
-import { color } from '../lib/color';
+import inquirer from 'inquirer';
+import {
+  CognitoIdentityProviderClient,
+  InitiateAuthCommand,
+  RespondToAuthChallengeCommand,
+  type AuthenticationResultType,
+} from '@aws-sdk/client-cognito-identity-provider';
+import { loadWorkspaceConfig, loadCredentials, saveCredentials } from '../utils/workspace.js';
+import { color } from '../lib/color.js';
 
-const CREDENTIALS_DIR = path.join(os.homedir(), '.chimera');
-export const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, 'credentials');
-const REDIRECT_PORT = 9999;
-const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/callback`;
-const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+// ─── Core auth logic (exported for testing) ───────────────────────────────────
 
-// ─── PKCE helpers ────────────────────────────────────────────────────────────
-
-function base64URLEncode(buffer: Buffer): string {
-  return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-export function generatePKCE(): { verifier: string; challenge: string } {
-  const verifier = base64URLEncode(crypto.randomBytes(32));
-  const challenge = base64URLEncode(crypto.createHash('sha256').update(verifier).digest());
-  return { verifier, challenge };
-}
-
-// ─── Token exchange ───────────────────────────────────────────────────────────
-
-export interface TokenSet {
-  accessToken: string;
-  idToken: string;
-  refreshToken: string;
-  expiresAt: string;
-}
-
-export async function exchangeCodeForTokens(
-  code: string,
-  codeVerifier: string,
-  cognitoDomain: string,
+/**
+ * Authenticate with Cognito using email + password (USER_PASSWORD_AUTH flow).
+ * Handles NEW_PASSWORD_REQUIRED challenge transparently.
+ *
+ * @param clientId  Cognito app client ID
+ * @param region    AWS region
+ * @param email     User email / username
+ * @param password  User password
+ * @param newPasswordFn  Injectable prompt for new-password challenge (defaults to inquirer)
+ */
+export async function terminalLogin(
   clientId: string,
-): Promise<TokenSet> {
-  const res = await fetch(`${cognitoDomain}/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: clientId,
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: codeVerifier,
-    }).toString(),
-  });
+  region: string,
+  email: string,
+  password: string,
+  newPasswordFn?: () => Promise<string>,
+): Promise<void> {
+  const cognitoClient = new CognitoIdentityProviderClient({ region });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token exchange failed (${res.status}): ${text}`);
+  const response = await cognitoClient.send(new InitiateAuthCommand({
+    AuthFlow: 'USER_PASSWORD_AUTH',
+    AuthParameters: { USERNAME: email, PASSWORD: password },
+    ClientId: clientId,
+  }));
+
+  let authResult: AuthenticationResultType | undefined = response.AuthenticationResult;
+
+  // Admin-provisioned users are forced to change their password on first login
+  if (response.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
+    console.log(color.yellow('\nYou must set a new password to continue.'));
+
+    const newPassword = newPasswordFn
+      ? await newPasswordFn()
+      : await promptNewPassword();
+
+    const challengeResponse = await cognitoClient.send(new RespondToAuthChallengeCommand({
+      ChallengeName: 'NEW_PASSWORD_REQUIRED',
+      ClientId: clientId,
+      Session: response.Session,
+      ChallengeResponses: { USERNAME: email, NEW_PASSWORD: newPassword },
+    }));
+    authResult = challengeResponse.AuthenticationResult;
   }
 
-  const data = (await res.json()) as {
-    access_token: string;
-    id_token: string;
-    refresh_token: string;
-    expires_in: number;
-  };
+  if (!authResult?.AccessToken) {
+    throw new Error('Authentication failed: no tokens returned from Cognito');
+  }
 
-  const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
-  return {
-    accessToken: data.access_token,
-    idToken: data.id_token,
-    refreshToken: data.refresh_token,
-    expiresAt,
-  };
-}
-
-// ─── Redirect listener ────────────────────────────────────────────────────────
-
-function waitForCallback(expectedState: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      const rawUrl = req.url ?? '';
-      const url = new URL(rawUrl, `http://localhost:${REDIRECT_PORT}`);
-
-      if (url.pathname !== '/callback') {
-        res.writeHead(404);
-        res.end('Not found');
-        return;
-      }
-
-      const error = url.searchParams.get('error');
-      if (error) {
-        const desc = url.searchParams.get('error_description') ?? error;
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<h1>Authentication failed</h1><p>You can close this tab.</p>');
-        server.close();
-        reject(new Error(`Auth error: ${desc}`));
-        return;
-      }
-
-      if (url.searchParams.get('state') !== expectedState) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<h1>Authentication failed</h1><p>State mismatch.</p>');
-        server.close();
-        reject(new Error('Invalid state parameter — possible CSRF attack'));
-        return;
-      }
-
-      const code = url.searchParams.get('code');
-      if (!code) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<h1>No code received</h1>');
-        server.close();
-        reject(new Error('No authorization code received'));
-        return;
-      }
-
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<h1>Authentication successful!</h1><p>You can close this tab and return to the terminal.</p>');
-      server.close();
-      resolve(code);
-    });
-
-    server.listen(REDIRECT_PORT);
-
-    const timer = setTimeout(() => {
-      server.close();
-      reject(new Error('Login timed out after 5 minutes'));
-    }, LOGIN_TIMEOUT_MS);
-
-    server.on('close', () => clearTimeout(timer));
+  const expiresAt = new Date(Date.now() + (authResult.ExpiresIn ?? 3600) * 1000).toISOString();
+  const existing = loadCredentials();
+  saveCredentials({
+    ...existing,
+    auth: {
+      access_token: authResult.AccessToken,
+      id_token: authResult.IdToken ?? '',
+      refresh_token: authResult.RefreshToken ?? '',
+      expires_at: expiresAt,
+    },
   });
 }
 
-function openBrowser(url: string): void {
-  // execFile (not exec) to avoid shell injection — url is app-controlled
-  const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  execFile(cmd, [url], (err) => {
-    if (err) {
-      console.error(color.dim(`  (Could not open browser automatically: ${err.message})`));
-      console.log(`  Please open this URL manually:\n  ${url}`);
-    }
-  });
+async function promptNewPassword(): Promise<string> {
+  const { newPassword } = await inquirer.prompt<{ newPassword: string }>([
+    {
+      type: 'password',
+      name: 'newPassword',
+      message: 'New password:',
+      mask: '*',
+      validate: (input: string) => {
+        if (input.length < 12) return 'Password must be at least 12 characters';
+        if (!/[A-Z]/.test(input)) return 'Must contain at least one uppercase letter';
+        if (!/[a-z]/.test(input)) return 'Must contain at least one lowercase letter';
+        if (!/[0-9]/.test(input)) return 'Must contain at least one digit';
+        if (!/[^A-Za-z0-9]/.test(input)) return 'Must contain at least one symbol';
+        return true;
+      },
+    },
+  ]);
+  return newPassword;
 }
 
 // ─── Command registration ─────────────────────────────────────────────────────
@@ -156,61 +105,47 @@ function openBrowser(url: string): void {
 export function registerLoginCommand(program: Command): void {
   program
     .command('login')
-    .description('Authenticate with the Chimera platform (Cognito PKCE)')
-    .action(async () => {
+    .description('Authenticate with the Chimera platform')
+    .option('--email <email>', 'Email address (skips prompt)')
+    .action(async (options: { email?: string }) => {
       const config = loadWorkspaceConfig();
       const clientId = config.endpoints?.cognito_client_id;
       const region = config.aws?.region ?? 'us-east-1';
 
-      // Prefer cognito_domain from [endpoints] (set by `chimera endpoints`), then [auth]
-      const rawDomain = config.endpoints?.cognito_domain ?? config.auth?.cognito_domain;
-      const cognitoDomain = rawDomain
-        ? rawDomain.startsWith('http')
-          ? rawDomain
-          : `https://${rawDomain}.auth.${region}.amazoncognito.com`
-        : null;
-
-      if (!cognitoDomain || !clientId) {
-        console.error(color.red('✗ Missing Cognito configuration in chimera.toml'));
-        console.error(
-          color.dim(
-            '  Run `chimera endpoints` to fetch configuration, or set endpoints.cognito_domain and endpoints.cognito_client_id',
-          ),
-        );
+      if (!clientId) {
+        console.error(color.red('✗ Missing Cognito client ID in chimera.toml'));
+        console.error(color.dim('  Run `chimera endpoints` to fetch configuration'));
         process.exit(1);
       }
 
-      const { verifier, challenge } = generatePKCE();
-      const state = base64URLEncode(crypto.randomBytes(16));
+      console.log(color.bold('Chimera Login\n'));
 
-      const authUrl = new URL(`${cognitoDomain}/authorize`);
-      authUrl.searchParams.set('response_type', 'code');
-      authUrl.searchParams.set('client_id', clientId);
-      authUrl.searchParams.set('redirect_uri', REDIRECT_URI);
-      authUrl.searchParams.set('scope', 'openid email');
-      authUrl.searchParams.set('code_challenge', challenge);
-      authUrl.searchParams.set('code_challenge_method', 'S256');
-      authUrl.searchParams.set('state', state);
+      const { email, password } = await inquirer.prompt<{ email: string; password: string }>([
+        {
+          type: 'input',
+          name: 'email',
+          message: 'Email:',
+          default: options.email,
+          when: !options.email,
+          validate: (input: string) =>
+            /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.trim()) || 'Enter a valid email address',
+        },
+        {
+          type: 'password',
+          name: 'password',
+          message: 'Password:',
+          mask: '*',
+          validate: (input: string) => input.length > 0 || 'Password is required',
+        },
+      ]);
 
-      console.log(color.bold('Chimera Login'));
-      console.log('\nOpening browser to authenticate...');
-      console.log(color.dim(`Auth URL: ${authUrl.toString()}\n`));
-
-      openBrowser(authUrl.toString());
-
-      console.log('Waiting for browser redirect...');
-      const code = await waitForCallback(state);
-
-      console.log('Exchanging authorization code for tokens...');
-      const tokens = await exchangeCodeForTokens(code, verifier, cognitoDomain, clientId);
-
-      if (!fs.existsSync(CREDENTIALS_DIR)) {
-        fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
+      try {
+        await terminalLogin(clientId, region, options.email ?? email, password);
+        console.log(color.green('\n✓ Logged in successfully'));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(color.red(`\n✗ Login failed: ${msg}`));
+        process.exit(1);
       }
-      fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
-
-      const expiresAt = new Date(tokens.expiresAt);
-      console.log(color.green('✓ Logged in successfully'));
-      console.log(color.dim(`  Token expires: ${expiresAt.toLocaleString()}`));
     });
 }
