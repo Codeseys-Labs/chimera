@@ -10,6 +10,7 @@
 import { loadWorkspaceConfig } from '../utils/workspace.js';
 import * as path from 'path';
 import * as os from 'os';
+import TOML from 'smol-toml';
 
 export const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.chimera', 'credentials');
 
@@ -31,7 +32,30 @@ export async function loadCredentials(filePath = DEFAULT_CREDENTIALS_FILE): Prom
   try {
     const exists = await Bun.file(filePath).exists();
     if (!exists) return null;
-    return await Bun.file(filePath).json() as Credentials;
+    const raw = await Bun.file(filePath).text();
+
+    // Try flat JSON format first (camelCase keys — written by older login.ts versions)
+    try {
+      const json = JSON.parse(raw) as Credentials;
+      if (json.accessToken) return json;
+    } catch {
+      // Not JSON — fall through to TOML
+    }
+
+    // Try TOML format (written by workspace.ts saveCredentials — [auth] section, snake_case keys)
+    const parsed = TOML.parse(raw) as {
+      auth?: { access_token?: string; id_token?: string; refresh_token?: string; expires_at?: string };
+    };
+    if (parsed.auth?.access_token) {
+      return {
+        accessToken: parsed.auth.access_token,
+        idToken: parsed.auth.id_token ?? '',
+        refreshToken: parsed.auth.refresh_token ?? '',
+        expiresAt: parsed.auth.expires_at ?? '',
+      };
+    }
+
+    return null;
   } catch {
     return null;
   }

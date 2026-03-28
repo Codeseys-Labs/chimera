@@ -2,16 +2,17 @@
  * Tests for packages/cli/src/commands/login.ts
  *
  * Verifies:
- * - PKCE generation produces valid base64url output
- * - Token exchange calls correct endpoint and returns structured TokenSet
- * - Credentials file written with correct structure
- * - Expired token is detectable
+ * - terminalLogin calls Cognito InitiateAuth with correct parameters
+ * - Successful login stores tokens via saveCredentials (TOML format)
+ * - NEW_PASSWORD_REQUIRED challenge is handled
+ * - Errors from Cognito are propagated
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { generatePKCE, exchangeCodeForTokens } from '../../commands/login';
+import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
+import TOML from 'smol-toml';
 
 let tmpDir: string;
 
@@ -23,124 +24,179 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe('generatePKCE', () => {
-  it('returns verifier and challenge as non-empty strings', () => {
-    const { verifier, challenge } = generatePKCE();
-    expect(typeof verifier).toBe('string');
-    expect(verifier.length).toBeGreaterThan(0);
-    expect(typeof challenge).toBe('string');
-    expect(challenge.length).toBeGreaterThan(0);
+// ─── Mock Cognito SDK ─────────────────────────────────────────────────────────
+
+const mockInitiateAuth = mock(async () => ({
+  AuthenticationResult: {
+    AccessToken: 'access-123',
+    IdToken: 'id-456',
+    RefreshToken: 'refresh-789',
+    ExpiresIn: 3600,
+  },
+}));
+
+const mockRespondToAuthChallenge = mock(async () => ({
+  AuthenticationResult: {
+    AccessToken: 'new-access-token',
+    IdToken: 'new-id-token',
+    RefreshToken: 'new-refresh-token',
+    ExpiresIn: 3600,
+  },
+}));
+
+mock.module('@aws-sdk/client-cognito-identity-provider', () => {
+  class InitiateAuthCommand {
+    constructor(public input: unknown) {}
+  }
+  class RespondToAuthChallengeCommand {
+    constructor(public input: unknown) {}
+  }
+  class CognitoIdentityProviderClient {
+    async send(cmd: unknown) {
+      if (cmd instanceof InitiateAuthCommand) return mockInitiateAuth();
+      if (cmd instanceof RespondToAuthChallengeCommand) return mockRespondToAuthChallenge();
+      return {};
+    }
+  }
+  return { CognitoIdentityProviderClient, InitiateAuthCommand, RespondToAuthChallengeCommand };
+});
+
+// ─── Mock workspace saveCredentials / loadCredentials ─────────────────────────
+
+let capturedSavedCredentials: Record<string, unknown> | null = null;
+
+mock.module('../../utils/workspace.js', () => ({
+  loadWorkspaceConfig: () => ({
+    aws: { region: 'us-east-1' },
+    endpoints: { cognito_client_id: 'test-client-id' },
+  }),
+  loadCredentials: () => ({}),
+  saveCredentials: (creds: Record<string, unknown>) => {
+    capturedSavedCredentials = creds;
+  },
+}));
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+describe('terminalLogin', () => {
+  beforeEach(() => {
+    capturedSavedCredentials = null;
+    mockInitiateAuth.mockReset();
+    mockRespondToAuthChallenge.mockReset();
+    mockInitiateAuth.mockImplementation(async () => ({
+      AuthenticationResult: {
+        AccessToken: 'access-123',
+        IdToken: 'id-456',
+        RefreshToken: 'refresh-789',
+        ExpiresIn: 3600,
+      },
+    }));
   });
 
-  it('verifier contains only base64url characters', () => {
-    const { verifier } = generatePKCE();
-    expect(verifier).toMatch(/^[A-Za-z0-9\-_]+$/);
+  it('calls Cognito InitiateAuth and stores tokens', async () => {
+    const { terminalLogin } = await import('../../commands/login');
+    await terminalLogin('client-id', 'us-east-1', 'user@example.com', 'MyPassword1!');
+
+    expect(capturedSavedCredentials).not.toBeNull();
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('access-123');
+    expect(auth.id_token).toBe('id-456');
+    expect(auth.refresh_token).toBe('refresh-789');
+    expect(typeof auth.expires_at).toBe('string');
+    // expires_at should be ~1 hour from now
+    expect(new Date(auth.expires_at).getTime()).toBeGreaterThan(Date.now() + 3500 * 1000);
   });
 
-  it('challenge contains only base64url characters', () => {
-    const { challenge } = generatePKCE();
-    expect(challenge).toMatch(/^[A-Za-z0-9\-_]+$/);
+  it('handles NEW_PASSWORD_REQUIRED challenge', async () => {
+    mockInitiateAuth.mockImplementation(async () => ({
+      ChallengeName: 'NEW_PASSWORD_REQUIRED',
+      Session: 'session-token-abc',
+    }));
+    mockRespondToAuthChallenge.mockImplementation(async () => ({
+      AuthenticationResult: {
+        AccessToken: 'new-access-token',
+        IdToken: 'new-id-token',
+        RefreshToken: 'new-refresh-token',
+        ExpiresIn: 3600,
+      },
+    }));
+
+    const { terminalLogin } = await import('../../commands/login');
+    // Inject new-password provider to skip inquirer prompt
+    await terminalLogin('client-id', 'us-east-1', 'user@example.com', 'TempPass1!', async () => 'NewPass1!@#Abc');
+
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('new-access-token');
   });
 
-  it('generates different verifiers on each call', () => {
-    const first = generatePKCE();
-    const second = generatePKCE();
-    expect(first.verifier).not.toBe(second.verifier);
+  it('throws when Cognito returns no tokens', async () => {
+    mockInitiateAuth.mockImplementation(async () => ({ AuthenticationResult: null }));
+    const { terminalLogin } = await import('../../commands/login');
+    await expect(
+      terminalLogin('client-id', 'us-east-1', 'user@example.com', 'pass'),
+    ).rejects.toThrow('no tokens returned');
+  });
+
+  it('preserves existing credentials (e.g. admin password) when storing tokens', async () => {
+    // Pre-populate capturedSavedCredentials to simulate existing admin creds
+    mock.module('../../utils/workspace.js', () => ({
+      loadWorkspaceConfig: () => ({
+        aws: { region: 'us-east-1' },
+        endpoints: { cognito_client_id: 'test-client-id' },
+      }),
+      loadCredentials: () => ({ admin: { password: 'AdminP@ss1' } }),
+      saveCredentials: (creds: Record<string, unknown>) => {
+        capturedSavedCredentials = creds;
+      },
+    }));
+
+    const { terminalLogin } = await import('../../commands/login');
+    await terminalLogin('client-id', 'us-east-1', 'user@example.com', 'MyPassword1!');
+
+    // Should have both admin and auth sections
+    expect((capturedSavedCredentials as Record<string, unknown>).admin).toEqual({ password: 'AdminP@ss1' });
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('access-123');
   });
 });
 
-describe('exchangeCodeForTokens', () => {
-  it('POSTs to /oauth2/token and returns TokenSet', async () => {
-    const mockResponse = {
-      access_token: 'access-123',
-      id_token: 'id-456',
-      refresh_token: 'refresh-789',
-      expires_in: 3600,
-    };
-
-    const originalFetch = global.fetch;
-    let capturedUrl = '';
-    let capturedMethod = '';
-    let capturedBody = '';
-
-    global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      capturedUrl = input.toString();
-      capturedMethod = init?.method ?? 'GET';
-      capturedBody = init?.body?.toString() ?? '';
-      return new Response(JSON.stringify(mockResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-
-    try {
-      const tokens = await exchangeCodeForTokens(
-        'auth-code-abc',
-        'my-verifier',
-        'https://cognito.example.com',
-        'my-client-id',
-      );
-
-      expect(capturedUrl).toBe('https://cognito.example.com/oauth2/token');
-      expect(capturedMethod).toBe('POST');
-      expect(capturedBody).toContain('code=auth-code-abc');
-      expect(capturedBody).toContain('code_verifier=my-verifier');
-      expect(capturedBody).toContain('client_id=my-client-id');
-
-      expect(tokens.accessToken).toBe('access-123');
-      expect(tokens.idToken).toBe('id-456');
-      expect(tokens.refreshToken).toBe('refresh-789');
-      expect(typeof tokens.expiresAt).toBe('string');
-      // expiresAt should be ~1 hour from now
-      expect(new Date(tokens.expiresAt).getTime()).toBeGreaterThan(Date.now() + 3500 * 1000);
-    } finally {
-      global.fetch = originalFetch;
-    }
-  });
-
-  it('throws when token endpoint returns an error', async () => {
-    const originalFetch = global.fetch;
-    global.fetch = jest.fn().mockResolvedValue(
-      new Response('invalid_grant', { status: 400 }),
-    );
-    try {
-      await expect(
-        exchangeCodeForTokens('bad-code', 'verifier', 'https://cognito.example.com', 'client-id'),
-      ).rejects.toThrow('Token exchange failed');
-    } finally {
-      global.fetch = originalFetch;
-    }
-  });
-});
-
-describe('credentials file structure', () => {
-  it('written file contains all required fields', () => {
+describe('credentials file (TOML format)', () => {
+  it('written file contains all required fields in [auth] section', () => {
     const tmpCredFile = path.join(tmpDir, 'credentials');
-    const tokens = {
-      accessToken: 'acc',
-      idToken: 'id',
-      refreshToken: 'ref',
-      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+    const content = TOML.stringify({
+      auth: {
+        access_token: 'acc',
+        id_token: 'id',
+        refresh_token: 'ref',
+        expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+      },
+    } as Parameters<typeof TOML.stringify>[0]);
+    fs.writeFileSync(tmpCredFile, content);
+
+    const parsed = TOML.parse(fs.readFileSync(tmpCredFile, 'utf8')) as {
+      auth: { access_token: string; id_token: string; refresh_token: string; expires_at: string };
     };
-    fs.writeFileSync(tmpCredFile, JSON.stringify(tokens));
-    const parsed = JSON.parse(fs.readFileSync(tmpCredFile, 'utf8')) as typeof tokens;
-    expect(parsed.accessToken).toBeDefined();
-    expect(parsed.idToken).toBeDefined();
-    expect(parsed.refreshToken).toBeDefined();
-    expect(parsed.expiresAt).toBeDefined();
-    expect(new Date(parsed.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(parsed.auth.access_token).toBe('acc');
+    expect(parsed.auth.id_token).toBe('id');
+    expect(parsed.auth.refresh_token).toBe('ref');
+    expect(new Date(parsed.auth.expires_at).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it('detects expired token', () => {
+  it('detects expired token in TOML format', () => {
     const tmpCredFile = path.join(tmpDir, 'credentials');
-    const expiredTokens = {
-      accessToken: 'acc',
-      idToken: 'id',
-      refreshToken: 'ref',
-      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    const content = TOML.stringify({
+      auth: {
+        access_token: 'acc',
+        id_token: 'id',
+        refresh_token: 'ref',
+        expires_at: new Date(Date.now() - 1000).toISOString(),
+      },
+    } as Parameters<typeof TOML.stringify>[0]);
+    fs.writeFileSync(tmpCredFile, content);
+
+    const parsed = TOML.parse(fs.readFileSync(tmpCredFile, 'utf8')) as {
+      auth: { expires_at: string };
     };
-    fs.writeFileSync(tmpCredFile, JSON.stringify(expiredTokens));
-    const parsed = JSON.parse(fs.readFileSync(tmpCredFile, 'utf8')) as typeof expiredTokens;
-    expect(new Date(parsed.expiresAt).getTime()).toBeLessThan(Date.now());
+    expect(new Date(parsed.auth.expires_at).getTime()).toBeLessThan(Date.now());
   });
 });
