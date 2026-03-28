@@ -29,7 +29,11 @@ export interface Credentials {
 
 export function loadCredentials(filePath = DEFAULT_CREDENTIALS_FILE): Credentials | null {
   const creds = wsLoadCredentials(filePath);
-  if (!creds.auth?.access_token) return null;
+  if (!creds.auth?.access_token) {
+    const authKeys = creds.auth ? Object.keys(creds.auth).join(',') || 'none' : 'section missing';
+    process.stderr.write(`[chimera debug] loadCredentials: access_token absent (file=${filePath} auth=${authKeys})\n`);
+    return null;
+  }
   return {
     accessToken: creds.auth.access_token,
     idToken: creds.auth.id_token ?? '',
@@ -76,11 +80,14 @@ export function getUrlForPath(urlPath: string): string {
 }
 
 async function getAuthHeaders(credentialsFile?: string): Promise<Record<string, string>> {
-  const creds = loadCredentials(credentialsFile);
+  const file = credentialsFile ?? DEFAULT_CREDENTIALS_FILE;
+  const creds = loadCredentials(file);
   if (!creds) {
+    process.stderr.write(`[chimera debug] getAuthHeaders: no valid credentials at ${file}\n`);
     throw new ChimeraAuthError();
   }
   if (new Date(creds.expiresAt) <= new Date()) {
+    process.stderr.write(`[chimera debug] getAuthHeaders: token expired at ${creds.expiresAt}\n`);
     throw new ChimeraAuthError('Token expired. Run "chimera login" again.');
   }
   return {
