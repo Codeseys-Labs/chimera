@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import TOML from 'smol-toml';
 import { loadCredentials, getBaseUrl, getUrlForPath, ChimeraAuthError, apiClient } from '../../lib/api-client';
 
 let tmpDir: string;
@@ -56,6 +57,32 @@ describe('loadCredentials', () => {
 
   it('returns null when credentials file is malformed JSON', async () => {
     fs.writeFileSync(tmpCredFile, 'not-valid-json');
+    const result = await loadCredentials(tmpCredFile);
+    expect(result).toBeNull();
+  });
+
+  it('parses TOML format credentials ([auth] section with snake_case keys)', async () => {
+    const content = TOML.stringify({
+      auth: {
+        access_token: 'toml-access-token',
+        id_token: 'toml-id-token',
+        refresh_token: 'toml-refresh-token',
+        expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+      },
+    } as Parameters<typeof TOML.stringify>[0]);
+    fs.writeFileSync(tmpCredFile, content);
+    const creds = await loadCredentials(tmpCredFile);
+    expect(creds).not.toBeNull();
+    expect(creds?.accessToken).toBe('toml-access-token');
+    expect(creds?.idToken).toBe('toml-id-token');
+    expect(creds?.refreshToken).toBe('toml-refresh-token');
+  });
+
+  it('returns null for TOML without [auth] section', async () => {
+    const content = TOML.stringify({
+      admin: { password: 'AdminPass1!' },
+    } as Parameters<typeof TOML.stringify>[0]);
+    fs.writeFileSync(tmpCredFile, content);
     const result = await loadCredentials(tmpCredFile);
     expect(result).toBeNull();
   });
