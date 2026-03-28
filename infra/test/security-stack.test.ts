@@ -162,6 +162,7 @@ describe('SecurityStack', () => {
           AllowedOAuthFlows: ['code'],
           AllowedOAuthScopes: Match.arrayWith(['openid', 'email', 'profile']),
           AllowedOAuthFlowsUserPoolClient: true,
+          ExplicitAuthFlows: Match.arrayWith(['ALLOW_USER_PASSWORD_AUTH']),
           // CDK converts hours/days to minutes internally
           AccessTokenValidity: 60, // 1 hour = 60 minutes
           IdTokenValidity: 60, // 1 hour = 60 minutes
