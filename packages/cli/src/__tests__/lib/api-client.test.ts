@@ -38,30 +38,38 @@ function writeCredentials(overrides: Partial<{
     refreshToken: 'test-refresh-token',
     expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
   };
-  fs.writeFileSync(tmpCredFile, JSON.stringify({ ...defaults, ...overrides }));
+  const merged = { ...defaults, ...overrides };
+  fs.writeFileSync(tmpCredFile, TOML.stringify({
+    auth: {
+      access_token: merged.accessToken,
+      id_token: merged.idToken,
+      refresh_token: merged.refreshToken,
+      expires_at: merged.expiresAt,
+    },
+  } as Parameters<typeof TOML.stringify>[0]));
 }
 
 describe('loadCredentials', () => {
-  it('returns null when credentials file does not exist', async () => {
-    const result = await loadCredentials(path.join(tmpDir, 'nonexistent'));
+  it('returns null when credentials file does not exist', () => {
+    const result = loadCredentials(path.join(tmpDir, 'nonexistent'));
     expect(result).toBeNull();
   });
 
-  it('returns parsed credentials when file exists', async () => {
+  it('returns parsed credentials when file exists', () => {
     writeCredentials();
-    const creds = await loadCredentials(tmpCredFile);
+    const creds = loadCredentials(tmpCredFile);
     expect(creds).not.toBeNull();
     expect(creds?.accessToken).toBe('test-access-token');
     expect(creds?.refreshToken).toBe('test-refresh-token');
   });
 
-  it('returns null when credentials file is malformed JSON', async () => {
-    fs.writeFileSync(tmpCredFile, 'not-valid-json');
-    const result = await loadCredentials(tmpCredFile);
+  it('returns null when credentials file is malformed', () => {
+    fs.writeFileSync(tmpCredFile, 'not-valid-toml-content: [unclosed');
+    const result = loadCredentials(tmpCredFile);
     expect(result).toBeNull();
   });
 
-  it('parses TOML format credentials ([auth] section with snake_case keys)', async () => {
+  it('parses TOML format credentials ([auth] section with snake_case keys)', () => {
     const content = TOML.stringify({
       auth: {
         access_token: 'toml-access-token',
@@ -71,19 +79,19 @@ describe('loadCredentials', () => {
       },
     } as Parameters<typeof TOML.stringify>[0]);
     fs.writeFileSync(tmpCredFile, content);
-    const creds = await loadCredentials(tmpCredFile);
+    const creds = loadCredentials(tmpCredFile);
     expect(creds).not.toBeNull();
     expect(creds?.accessToken).toBe('toml-access-token');
     expect(creds?.idToken).toBe('toml-id-token');
     expect(creds?.refreshToken).toBe('toml-refresh-token');
   });
 
-  it('returns null for TOML without [auth] section', async () => {
+  it('returns null for TOML without [auth] section', () => {
     const content = TOML.stringify({
       admin: { password: 'AdminPass1!' },
     } as Parameters<typeof TOML.stringify>[0]);
     fs.writeFileSync(tmpCredFile, content);
-    const result = await loadCredentials(tmpCredFile);
+    const result = loadCredentials(tmpCredFile);
     expect(result).toBeNull();
   });
 });

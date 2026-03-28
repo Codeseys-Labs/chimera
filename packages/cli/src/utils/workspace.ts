@@ -133,14 +133,15 @@ export function saveWorkspaceConfig(config: WorkspaceConfig, dir?: string): void
 
 /**
  * Load credentials from ~/.chimera/credentials (TOML format).
- * Returns {} when the file does not exist.
+ * Returns {} when the file does not exist or cannot be parsed.
+ * Accepts an optional path override for testing.
  */
-export function loadCredentials(): CredentialsConfig {
-  if (!fs.existsSync(CREDENTIALS_FILE)) {
+export function loadCredentials(credentialsFile = CREDENTIALS_FILE): CredentialsConfig {
+  if (!fs.existsSync(credentialsFile)) {
     return {};
   }
   try {
-    const raw = fs.readFileSync(CREDENTIALS_FILE, 'utf8');
+    const raw = fs.readFileSync(credentialsFile, 'utf8');
     return TOML.parse(raw) as CredentialsConfig;
   } catch {
     return {};

@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import TOML from 'smol-toml';
 import {
   checkAwsCredentials,
   checkChimeraAuth,
@@ -71,12 +72,14 @@ describe('checkChimeraAuth', () => {
   it('fails when token is expired', async () => {
     fs.writeFileSync(
       tmpCredFile,
-      JSON.stringify({
-        accessToken: 'tok',
-        idToken: 'id',
-        refreshToken: 'ref',
-        expiresAt: new Date(Date.now() - 1000).toISOString(),
-      }),
+      TOML.stringify({
+        auth: {
+          access_token: 'tok',
+          id_token: 'id',
+          refresh_token: 'ref',
+          expires_at: new Date(Date.now() - 1000).toISOString(),
+        },
+      } as Parameters<typeof TOML.stringify>[0]),
     );
     const result = await checkChimeraAuth(tmpCredFile);
     expect(result.ok).toBe(false);
@@ -86,12 +89,14 @@ describe('checkChimeraAuth', () => {
   it('passes when token is valid', async () => {
     fs.writeFileSync(
       tmpCredFile,
-      JSON.stringify({
-        accessToken: 'tok',
-        idToken: 'id',
-        refreshToken: 'ref',
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-      }),
+      TOML.stringify({
+        auth: {
+          access_token: 'tok',
+          id_token: 'id',
+          refresh_token: 'ref',
+          expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+        },
+      } as Parameters<typeof TOML.stringify>[0]),
     );
     const result = await checkChimeraAuth(tmpCredFile);
     expect(result.ok).toBe(true);
@@ -99,7 +104,10 @@ describe('checkChimeraAuth', () => {
   });
 
   it('fails when credentials are missing required fields', async () => {
-    fs.writeFileSync(tmpCredFile, JSON.stringify({ refreshToken: 'ref' }));
+    fs.writeFileSync(
+      tmpCredFile,
+      TOML.stringify({ admin: { password: 'ref' } } as Parameters<typeof TOML.stringify>[0]),
+    );
     const result = await checkChimeraAuth(tmpCredFile);
     expect(result.ok).toBe(false);
     expect(result.detail).toContain('malformed');
