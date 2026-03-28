@@ -145,7 +145,7 @@ export class SecurityStack extends cdk.Stack {
 
     this.userPoolClient = this.userPool.addClient('WebClient', {
       userPoolClientName: 'chimera-web',
-      authFlows: { userSrp: true },
+      authFlows: { userSrp: true, userPassword: true },
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [
