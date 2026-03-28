@@ -15,6 +15,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
 import { loadWorkspaceConfig } from '../utils/workspace';
+import TOML from 'smol-toml';
 import { color } from '../lib/color';
 
 const CREDENTIALS_FILE = path.join(os.homedir(), '.chimera', 'credentials');
@@ -54,18 +55,18 @@ export async function checkChimeraAuth(credFile = CREDENTIALS_FILE): Promise<Che
 
   try {
     const raw = fs.readFileSync(credFile, 'utf8');
-    const creds = JSON.parse(raw) as { accessToken?: string; expiresAt?: string };
-    if (!creds.accessToken || !creds.expiresAt) {
+    const parsed = TOML.parse(raw) as { auth?: { access_token?: string; expires_at?: string } };
+    if (!parsed.auth?.access_token || !parsed.auth?.expires_at) {
       return { label: 'Chimera auth', ok: false, detail: 'Credentials file is malformed' };
     }
-    if (new Date(creds.expiresAt) <= new Date()) {
+    if (new Date(parsed.auth.expires_at) <= new Date()) {
       return {
         label: 'Chimera auth',
         ok: false,
-        detail: `Token expired at ${new Date(creds.expiresAt).toLocaleString()}. Run \`chimera login\``,
+        detail: `Token expired at ${new Date(parsed.auth.expires_at).toLocaleString()}. Run \`chimera login\``,
       };
     }
-    const exp = new Date(creds.expiresAt);
+    const exp = new Date(parsed.auth.expires_at);
     return { label: 'Chimera auth', ok: true, detail: `Expires ${exp.toLocaleString()}` };
   } catch {
     return { label: 'Chimera auth', ok: false, detail: 'Failed to read credentials file' };
