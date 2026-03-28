@@ -5,6 +5,10 @@
  * - terminalLogin calls Cognito InitiateAuth with correct parameters
  * - Successful login stores tokens via saveCredentials (TOML format)
  * - NEW_PASSWORD_REQUIRED challenge is handled
+ * - SOFTWARE_TOKEN_MFA challenge is handled
+ * - SMS_MFA challenge is handled
+ * - MFA_SETUP flow (AssociateSoftwareToken + VerifySoftwareToken)
+ * - Challenge chaining (e.g. NEW_PASSWORD_REQUIRED → MFA_SETUP)
  * - Errors from Cognito are propagated
  */
 
@@ -44,6 +48,16 @@ const mockRespondToAuthChallenge = mock(async () => ({
   },
 }));
 
+const mockAssociateSoftwareToken = mock(async () => ({
+  SecretCode: 'BASE32SECRET123ABCDE',
+  Session: 'associate-session-token',
+}));
+
+const mockVerifySoftwareToken = mock(async () => ({
+  Status: 'SUCCESS',
+  Session: 'verify-session-token',
+}));
+
 mock.module('@aws-sdk/client-cognito-identity-provider', () => {
   class InitiateAuthCommand {
     constructor(public input: unknown) {}
@@ -51,14 +65,28 @@ mock.module('@aws-sdk/client-cognito-identity-provider', () => {
   class RespondToAuthChallengeCommand {
     constructor(public input: unknown) {}
   }
+  class AssociateSoftwareTokenCommand {
+    constructor(public input: unknown) {}
+  }
+  class VerifySoftwareTokenCommand {
+    constructor(public input: unknown) {}
+  }
   class CognitoIdentityProviderClient {
     async send(cmd: unknown) {
       if (cmd instanceof InitiateAuthCommand) return mockInitiateAuth();
       if (cmd instanceof RespondToAuthChallengeCommand) return mockRespondToAuthChallenge();
+      if (cmd instanceof AssociateSoftwareTokenCommand) return mockAssociateSoftwareToken();
+      if (cmd instanceof VerifySoftwareTokenCommand) return mockVerifySoftwareToken();
       return {};
     }
   }
-  return { CognitoIdentityProviderClient, InitiateAuthCommand, RespondToAuthChallengeCommand };
+  return {
+    CognitoIdentityProviderClient,
+    InitiateAuthCommand,
+    RespondToAuthChallengeCommand,
+    AssociateSoftwareTokenCommand,
+    VerifySoftwareTokenCommand,
+  };
 });
 
 // ─── Mock workspace saveCredentials / loadCredentials ─────────────────────────
@@ -83,6 +111,9 @@ describe('terminalLogin', () => {
     capturedSavedCredentials = null;
     mockInitiateAuth.mockReset();
     mockRespondToAuthChallenge.mockReset();
+    mockAssociateSoftwareToken.mockReset();
+    mockVerifySoftwareToken.mockReset();
+
     mockInitiateAuth.mockImplementation(async () => ({
       AuthenticationResult: {
         AccessToken: 'access-123',
@@ -90,6 +121,22 @@ describe('terminalLogin', () => {
         RefreshToken: 'refresh-789',
         ExpiresIn: 3600,
       },
+    }));
+    mockRespondToAuthChallenge.mockImplementation(async () => ({
+      AuthenticationResult: {
+        AccessToken: 'new-access-token',
+        IdToken: 'new-id-token',
+        RefreshToken: 'new-refresh-token',
+        ExpiresIn: 3600,
+      },
+    }));
+    mockAssociateSoftwareToken.mockImplementation(async () => ({
+      SecretCode: 'BASE32SECRET123ABCDE',
+      Session: 'associate-session-token',
+    }));
+    mockVerifySoftwareToken.mockImplementation(async () => ({
+      Status: 'SUCCESS',
+      Session: 'verify-session-token',
     }));
   });
 
@@ -127,6 +174,112 @@ describe('terminalLogin', () => {
 
     const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
     expect(auth.access_token).toBe('new-access-token');
+  });
+
+  it('handles SOFTWARE_TOKEN_MFA challenge', async () => {
+    mockInitiateAuth.mockImplementation(async () => ({
+      ChallengeName: 'SOFTWARE_TOKEN_MFA',
+      Session: 'mfa-session-abc',
+    }));
+
+    const { terminalLogin } = await import('../../commands/login');
+    await terminalLogin(
+      'client-id', 'us-east-1', 'user@example.com', 'MyPassword1!',
+      undefined,
+      async () => '123456',
+    );
+
+    expect(capturedSavedCredentials).not.toBeNull();
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('new-access-token');
+    expect(mockRespondToAuthChallenge).toHaveBeenCalled();
+  });
+
+  it('handles SMS_MFA challenge', async () => {
+    mockInitiateAuth.mockImplementation(async () => ({
+      ChallengeName: 'SMS_MFA',
+      Session: 'sms-session-xyz',
+    }));
+
+    const { terminalLogin } = await import('../../commands/login');
+    await terminalLogin(
+      'client-id', 'us-east-1', 'user@example.com', 'MyPassword1!',
+      undefined,
+      async () => '654321',
+    );
+
+    expect(capturedSavedCredentials).not.toBeNull();
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('new-access-token');
+    expect(mockRespondToAuthChallenge).toHaveBeenCalled();
+  });
+
+  it('handles MFA_SETUP flow (AssociateSoftwareToken + VerifySoftwareToken)', async () => {
+    mockInitiateAuth.mockImplementation(async () => ({
+      ChallengeName: 'MFA_SETUP',
+      Session: 'setup-session-abc',
+    }));
+    // RespondToAuthChallenge (MFA_SETUP) returns tokens
+    mockRespondToAuthChallenge.mockImplementation(async () => ({
+      AuthenticationResult: {
+        AccessToken: 'setup-access-token',
+        IdToken: 'setup-id-token',
+        RefreshToken: 'setup-refresh-token',
+        ExpiresIn: 3600,
+      },
+    }));
+
+    const { terminalLogin } = await import('../../commands/login');
+    await terminalLogin(
+      'client-id', 'us-east-1', 'user@example.com', 'MyPassword1!',
+      undefined,
+      async () => '777777',
+    );
+
+    expect(mockAssociateSoftwareToken).toHaveBeenCalled();
+    expect(mockVerifySoftwareToken).toHaveBeenCalled();
+    expect(mockRespondToAuthChallenge).toHaveBeenCalled();
+    expect(capturedSavedCredentials).not.toBeNull();
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('setup-access-token');
+  });
+
+  it('handles challenge chaining (NEW_PASSWORD_REQUIRED then MFA_SETUP)', async () => {
+    mockInitiateAuth.mockImplementation(async () => ({
+      ChallengeName: 'NEW_PASSWORD_REQUIRED',
+      Session: 'first-session',
+    }));
+
+    let respondCallCount = 0;
+    mockRespondToAuthChallenge.mockImplementation(async () => {
+      respondCallCount++;
+      if (respondCallCount === 1) {
+        // After new password → MFA_SETUP challenge
+        return { ChallengeName: 'MFA_SETUP', Session: 'mfa-setup-session' };
+      }
+      // After MFA_SETUP respond → tokens
+      return {
+        AuthenticationResult: {
+          AccessToken: 'chained-access-token',
+          IdToken: 'chained-id-token',
+          RefreshToken: 'chained-refresh-token',
+          ExpiresIn: 3600,
+        },
+      };
+    });
+
+    const { terminalLogin } = await import('../../commands/login');
+    await terminalLogin(
+      'client-id', 'us-east-1', 'user@example.com', 'TempPass1!',
+      async () => 'NewSecurePass1!',
+      async () => '112233',
+    );
+
+    expect(respondCallCount).toBe(2);
+    expect(mockAssociateSoftwareToken).toHaveBeenCalled();
+    expect(mockVerifySoftwareToken).toHaveBeenCalled();
+    const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
+    expect(auth.access_token).toBe('chained-access-token');
   });
 
   it('throws when Cognito returns no tokens', async () => {
