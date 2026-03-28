@@ -5,10 +5,11 @@
 #   bun build packages/chat-gateway/src/server.ts --outdir packages/chat-gateway/dist --target bun
 # The Docker image simply copies and runs the pre-built bundle — no workspace resolution needed.
 #
-# Base: debian:bookworm-slim — avoids Docker Hub rate limits from oven/bun:1.3-alpine.
+# Base: public.ecr.aws/debian/debian:bookworm-slim — ECR Public mirror of Docker Hub
+# debian:bookworm-slim. No rate limits in AWS CodeBuild.
 # Bun runtime installed via curl https://bun.sh/install to bypass Docker Hub entirely.
 
-FROM debian:bookworm-slim
+FROM public.ecr.aws/debian/debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
