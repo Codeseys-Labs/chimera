@@ -12,8 +12,14 @@ export interface ChimeraBucketProps {
   serverAccessLogsBucket?: s3.IBucket;
   /** Set true if this bucket IS the access log bucket (disables self-logging) */
   isAccessLogBucket?: boolean;
-  /** Days before noncurrent versions expire (default: 90) */
+  /** Enable versioning (default: true). Set false for append-only buckets where version history adds no value. */
+  versioned?: boolean;
+  /** Remove all objects on bucket deletion — for non-prod cleanup (default: false) */
+  autoDeleteObjects?: boolean;
+  /** Days before noncurrent versions expire (default: 90). Ignored when versioned is false. */
   noncurrentVersionExpiration?: cdk.Duration;
+  /** Lifecycle rules to append beyond ChimeraBucket defaults */
+  additionalLifecycleRules?: s3.LifecycleRule[];
   /** Removal policy (default: RETAIN) */
   removalPolicy?: cdk.RemovalPolicy;
 }
@@ -23,12 +29,16 @@ export interface ChimeraBucketProps {
  *
  * Mandatory invariants (cannot be overridden):
  * - KMS encryption (never S3-managed / AES256)
- * - Versioning always enabled
  * - All public access blocked
  * - SSL enforced
  * - Access logging enabled (unless isAccessLogBucket: true)
  * - Lifecycle: abort incomplete multipart uploads after 7 days
- * - Lifecycle: noncurrent version expiry (default 90 days)
+ *
+ * Configurable invariants (with safe defaults):
+ * - Versioning: enabled by default; disable for append-only buckets
+ * - Noncurrent version expiry: 90 days by default (only when versioned: true)
+ * - Additional lifecycle rules: stack-specific rules merged after defaults
+ * - Auto-delete objects: false by default; enable for dev/test teardown
  */
 export class ChimeraBucket extends Construct {
   readonly bucket: s3.Bucket;
@@ -38,10 +48,14 @@ export class ChimeraBucket extends Construct {
   constructor(scope: Construct, id: string, props: ChimeraBucketProps = {}) {
     super(scope, id);
 
+    const versioned = props.versioned ?? true;
+    const removalPolicy = props.removalPolicy ?? cdk.RemovalPolicy.RETAIN;
+    const autoDeleteObjects = props.autoDeleteObjects ?? false;
+
     this.encryptionKey = props.encryptionKey ?? new kms.Key(this, 'Key', {
       description: props.bucketName ? `CMK for ${props.bucketName}` : `CMK for bucket`,
       enableKeyRotation: true,
-      removalPolicy: props.removalPolicy ?? cdk.RemovalPolicy.RETAIN,
+      removalPolicy,
     });
 
     // Create internal access log bucket if not an access log bucket and no external one provided
@@ -54,7 +68,8 @@ export class ChimeraBucket extends Construct {
         versioned: false,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         enforceSSL: true,
-        removalPolicy: props.removalPolicy ?? cdk.RemovalPolicy.RETAIN,
+        removalPolicy,
+        autoDeleteObjects,
         lifecycleRules: [
           {
             // Access logs don't need long retention
@@ -66,22 +81,28 @@ export class ChimeraBucket extends Construct {
       logBucket = this.accessLogBucket;
     }
 
-    const noncurrentVersionExpiration = props.noncurrentVersionExpiration ?? cdk.Duration.days(90);
+    // Build default lifecycle rules: abort incomplete MPU always;
+    // noncurrent expiry only when versioning is enabled.
+    const defaultLifecycleRule: s3.LifecycleRule = {
+      abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+      ...(versioned
+        ? { noncurrentVersionExpiration: props.noncurrentVersionExpiration ?? cdk.Duration.days(90) }
+        : {}),
+    };
 
     this.bucket = new s3.Bucket(this, 'Bucket', {
       bucketName: props.bucketName,
       encryption: s3.BucketEncryption.KMS,
       encryptionKey: this.encryptionKey,
-      versioned: true,
+      versioned,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       serverAccessLogsBucket: logBucket,
-      removalPolicy: props.removalPolicy ?? cdk.RemovalPolicy.RETAIN,
+      removalPolicy,
+      autoDeleteObjects,
       lifecycleRules: [
-        {
-          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
-          noncurrentVersionExpiration,
-        },
+        defaultLifecycleRule,
+        ...(props.additionalLifecycleRules ?? []),
       ],
     });
   }

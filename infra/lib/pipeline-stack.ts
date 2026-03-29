@@ -15,6 +15,7 @@ import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+import { ChimeraBucket } from '../constructs/chimera-bucket';
 
 export interface PipelineStackProps extends cdk.StackProps {
   envName: string;
@@ -120,26 +121,33 @@ export class PipelineStack extends cdk.Stack {
       emptyOnDelete: !isProd,
     });
 
+    // TODO(chimera-b2b9): ECR image signing via AWS Signer / Notation (OCI signing).
+    // Full implementation requires: (1) aws-cdk-lib/aws-signer SigningProfile for container images,
+    // (2) CodeBuild post-push step calling `notation sign` with the signing profile,
+    // (3) ECR repository policy enforcing signed images only via OPA/Kyverno or ECR signing rules.
+    // Deferred: complexity of Notation toolchain setup and key management in CodeBuild outweighs
+    // current risk profile. Re-evaluate when prod traffic warrants supply-chain attestation.
+
     // ======================================================================
-    // Artifact Bucket
+    // Artifact Bucket — customer-managed KMS via ChimeraBucket
+    // ChimeraBucket enforces: CMK encryption, versioning, SSL, access logging,
+    // and abort-incomplete-MPU lifecycle. Stack-specific rules are appended.
     // ======================================================================
 
-    this.artifactBucket = new s3.Bucket(this, 'ArtifactBucket', {
+    const artifactChimera = new ChimeraBucket(this, 'ArtifactBucket', {
       bucketName: `chimera-pipeline-artifacts-${props.envName}-${this.account}`,
-      versioned: true,
-      encryption: s3.BucketEncryption.KMS_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: !isProd,
-      lifecycleRules: [
+      noncurrentVersionExpiration: cdk.Duration.days(7),
+      additionalLifecycleRules: [
         {
           id: 'DeleteOldArtifacts',
           enabled: true,
           expiration: cdk.Duration.days(30),
-          noncurrentVersionExpiration: cdk.Duration.days(7),
         },
       ],
     });
+    this.artifactBucket = artifactChimera.bucket;
 
     // ======================================================================
     // SNS Topic for Pipeline Notifications
