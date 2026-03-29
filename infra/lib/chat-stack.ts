@@ -104,17 +104,37 @@ export class ChatStack extends cdk.Stack {
     props.sessionsTable.grantReadWriteData(taskRole);
     props.skillsTable.grantReadData(taskRole);
 
-    // Grant Bedrock access (for AgentCore Runtime invocations)
+    // Grant Bedrock model invocation — scoped to Anthropic Claude foundation models
+    // and inference profiles (cross-region system profiles + account application profiles).
+    // Foundation model ARNs use an empty account segment (AWS-managed resources).
     taskRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: [
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
+          `arn:aws:bedrock:*::inference-profile/*`,
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+        ],
+      }),
+    );
+
+    // Grant Bedrock Agent Runtime — scoped to agents and knowledge bases
+    // owned by this account/region (agent-runtime resources include account ID).
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
           'bedrock-agent-runtime:InvokeAgent',
           'bedrock-agent-runtime:Retrieve',
         ],
-        resources: ['*'], // Bedrock models don't support resource-level permissions
+        resources: [
+          `arn:aws:bedrock:${this.region}:${this.account}:agent/*`,
+          `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`,
+        ],
       }),
     );
 
