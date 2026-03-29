@@ -11,22 +11,7 @@ import { CodeCommitClient } from '@aws-sdk/client-codecommit';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
 import { pushToCodeCommit, getFilesFromCodeCommit } from '../utils/codecommit.js';
 import { color } from '../lib/color.js';
-
-/**
- * Find project root by walking up directory tree looking for package.json
- */
-export function findProjectRoot(): string {
-  let dir = process.cwd();
-  while (dir !== path.dirname(dir)) {
-    if (existsSync(path.join(dir, 'package.json'))) {
-      return dir;
-    }
-    dir = path.dirname(dir);
-  }
-  throw new Error(
-    'Could not find project root (no package.json found). Run from within the project directory.',
-  );
-}
+import { findProjectRoot } from '../utils/project.js';
 
 /**
  * Run a git command using Bun.$ (safe: arguments are app-controlled, no shell injection risk)

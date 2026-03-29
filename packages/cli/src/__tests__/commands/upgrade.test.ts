@@ -8,13 +8,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Command } from 'commander';
+import { findProjectRoot } from '../../utils/project';
 import {
-  findProjectRoot,
   git,
   hasUncommittedChanges,
   getGitHubUrl,
+  registerUpgradeCommand,
 } from '../../commands/upgrade';
-import { registerUpgradeCommand } from '../../commands/upgrade';
 
 let tmpDir: string;
 
