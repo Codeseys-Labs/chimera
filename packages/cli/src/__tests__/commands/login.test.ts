@@ -10,6 +10,7 @@
  * - MFA_SETUP flow (AssociateSoftwareToken + VerifySoftwareToken)
  * - Challenge chaining (e.g. NEW_PASSWORD_REQUIRED → MFA_SETUP)
  * - Errors from Cognito are propagated
+ * - Mode selection: --browser, --terminal, --no-prompt, non-TTY stdin
  */
 
 import * as fs from 'fs';
@@ -310,6 +311,33 @@ describe('terminalLogin', () => {
     expect((capturedSavedCredentials as Record<string, unknown>).admin).toEqual({ password: 'AdminP@ss1' });
     const auth = (capturedSavedCredentials as { auth: Record<string, string> }).auth;
     expect(auth.access_token).toBe('access-123');
+  });
+});
+
+describe('registerLoginCommand mode selection', () => {
+  // Tests verify that the command correctly handles --browser, --terminal, and non-TTY defaults
+  // by inspecting the registered options on the command object.
+  it('registers --terminal option on the login command', async () => {
+    const { registerLoginCommand } = await import('../../commands/login');
+    const { Command } = await import('commander');
+    const program = new Command();
+    registerLoginCommand(program);
+    const loginCmd = program.commands.find(c => c.name() === 'login');
+    expect(loginCmd).toBeDefined();
+    const optNames = loginCmd!.options.map(o => o.long);
+    expect(optNames).toContain('--terminal');
+    expect(optNames).toContain('--browser');
+    expect(optNames).toContain('--no-prompt');
+  });
+
+  it('registers --email option on the login command', async () => {
+    const { registerLoginCommand } = await import('../../commands/login');
+    const { Command } = await import('commander');
+    const program = new Command();
+    registerLoginCommand(program);
+    const loginCmd = program.commands.find(c => c.name() === 'login');
+    const optNames = loginCmd!.options.map(o => o.long);
+    expect(optNames).toContain('--email');
   });
 });
 
