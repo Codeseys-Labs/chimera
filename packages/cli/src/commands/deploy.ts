@@ -7,8 +7,6 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import * as path from 'path';
-import * as fs from 'fs';
 import {
   CodeCommitClient,
   CreateRepositoryCommand,
@@ -26,6 +24,7 @@ import {
 } from '../utils/source.js';
 import { pushToCodeCommit } from '../utils/codecommit.js';
 import { color } from '../lib/color.js';
+import { findProjectRoot } from '../utils/project.js';
 
 
 /**
@@ -38,21 +37,6 @@ async function getAccountId(): Promise<string> {
   } catch {
     throw new Error('Failed to get AWS account ID. Ensure AWS credentials are configured.');
   }
-}
-
-/**
- * Find project root by walking up directory tree looking for package.json.
- * Returns null if not found.
- */
-function findProjectRoot(): string | null {
-  let dir = process.cwd();
-  while (dir !== path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) {
-      return dir;
-    }
-    dir = path.dirname(dir);
-  }
-  return null;
 }
 
 /**
@@ -184,11 +168,6 @@ export function registerDeployCommands(program: Command): void {
           if (!options.json) spinner.succeed(color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`));
         } else if (options.source === 'local') {
           const localRoot = findProjectRoot();
-          if (!localRoot) {
-            throw new Error(
-              'Could not find project root (no package.json found). Run from within the project directory or use --source github.',
-            );
-          }
           sourceLocation = { type: 'local', path: localRoot };
           if (!options.json) spinner.succeed(color.green(`Source: Local project (${localRoot})`));
         } else if (options.source === 'github') {
