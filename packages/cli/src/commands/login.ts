@@ -200,7 +200,9 @@ export function registerLoginCommand(program: Command): void {
     .description('Authenticate with the Chimera platform')
     .option('--email <email>', 'Email address (skips prompt)')
     .option('--browser', 'Use custom browser login UI at localhost:9999')
-    .action(async (options: { email?: string; browser?: boolean }) => {
+    .option('--terminal', 'Use terminal email/password login (skips mode prompt)')
+    .option('--no-prompt', 'Non-interactive: default to terminal mode without prompting')
+    .action(async (options: { email?: string; browser?: boolean; terminal?: boolean; prompt?: boolean }) => {
       const config = loadWorkspaceConfig();
       const clientId = config.endpoints?.cognito_client_id;
       const region = config.aws?.region ?? 'us-east-1';
@@ -213,7 +215,28 @@ export function registerLoginCommand(program: Command): void {
 
       console.log(color.bold('Chimera Login\n'));
 
-      if (options.browser) {
+      // Determine auth mode: explicit flags take precedence, then prompt if interactive
+      let useBrowser = options.browser === true;
+
+      if (!useBrowser && !options.terminal) {
+        // Only prompt when stdin is a TTY and --no-prompt was not passed
+        const isInteractive = process.stdin.isTTY && options.prompt !== false;
+        if (isInteractive) {
+          const { mode } = await inquirer.prompt<{ mode: 'terminal' | 'browser' }>([{
+            type: 'list',
+            name: 'mode',
+            message: 'How would you like to sign in?',
+            choices: [
+              { name: 'Terminal  — enter credentials here', value: 'terminal' },
+              { name: 'Browser   — open login page in browser', value: 'browser' },
+            ],
+          }]);
+          useBrowser = mode === 'browser';
+        }
+        // Non-interactive (piped stdin or --no-prompt): default to terminal silently
+      }
+
+      if (useBrowser) {
         try {
           // Dynamic import keeps browser-server out of terminal-only test paths
           const { startBrowserLogin } = await import('../auth/browser-server.js');
