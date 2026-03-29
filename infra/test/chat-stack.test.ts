@@ -186,6 +186,58 @@ describe('ChatStack', () => {
     });
   });
 
+  describe('Cognito env vars', () => {
+    it('should pass Cognito user pool and client IDs to ECS container environment', () => {
+      const cognitoStack = new ChatStack(app, 'TestChatStackCognito', {
+        envName: 'dev',
+        vpc,
+        albSecurityGroup,
+        ecsSecurityGroup,
+        tenantsTable,
+        sessionsTable,
+        skillsTable,
+        cognitoUserPoolId: 'us-east-1_TestPool',
+        cognitoUserPoolClientId: 'testclientid123',
+      });
+      const cognitoTemplate = Template.fromStack(cognitoStack);
+
+      cognitoTemplate.hasResourceProperties('AWS::ECS::TaskDefinition', {
+        ContainerDefinitions: Match.arrayWith([
+          Match.objectLike({
+            Environment: Match.arrayWith([
+              Match.objectLike({ Name: 'COGNITO_USER_POOL_ID', Value: 'us-east-1_TestPool' }),
+              Match.objectLike({ Name: 'COGNITO_CLIENT_ID', Value: 'testclientid123' }),
+            ]),
+          }),
+        ]),
+      });
+    });
+
+    it('should set empty string Cognito env vars when not provided', () => {
+      const noAuthStack = new ChatStack(app, 'TestChatStackNoAuth', {
+        envName: 'dev',
+        vpc,
+        albSecurityGroup,
+        ecsSecurityGroup,
+        tenantsTable,
+        sessionsTable,
+        skillsTable,
+      });
+      const noAuthTemplate = Template.fromStack(noAuthStack);
+
+      noAuthTemplate.hasResourceProperties('AWS::ECS::TaskDefinition', {
+        ContainerDefinitions: Match.arrayWith([
+          Match.objectLike({
+            Environment: Match.arrayWith([
+              Match.objectLike({ Name: 'COGNITO_USER_POOL_ID', Value: '' }),
+              Match.objectLike({ Name: 'COGNITO_CLIENT_ID', Value: '' }),
+            ]),
+          }),
+        ]),
+      });
+    });
+  });
+
   describe('Prod Environment', () => {
     let stack: ChatStack;
     let template: Template;

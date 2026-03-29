@@ -83,7 +83,7 @@ export class SecurityStack extends cdk.Stack {
         requireDigits: true,
         requireSymbols: true,
       },
-      mfa: cognito.Mfa.REQUIRED,
+      mfa: cognito.Mfa.OPTIONAL,
       mfaSecondFactor: {
         sms: false,
         otp: true,
