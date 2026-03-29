@@ -33,7 +33,7 @@ describe('ChimeraBucket', () => {
     });
   });
 
-  it('enables versioning', () => {
+  it('enables versioning by default', () => {
     template.hasResourceProperties('AWS::S3::Bucket', {
       VersioningConfiguration: {
         Status: 'Enabled',
@@ -87,7 +87,7 @@ describe('ChimeraBucket', () => {
     });
   });
 
-  it('configures noncurrent version expiration lifecycle rule', () => {
+  it('configures noncurrent version expiration lifecycle rule when versioned', () => {
     template.hasResourceProperties('AWS::S3::Bucket', {
       LifecycleConfiguration: {
         Rules: Match.arrayWith([
@@ -142,6 +142,101 @@ describe('ChimeraBucket', () => {
 
     it('does not create an additional KMS key', () => {
       keyTemplate.resourceCountIs('AWS::KMS::Key', 1);
+    });
+  });
+
+  describe('with versioned: false', () => {
+    let unversionedStack: cdk.Stack;
+    let unversionedTemplate: Template;
+
+    beforeAll(() => {
+      const app4 = new cdk.App();
+      unversionedStack = new cdk.Stack(app4, 'UnversionedStack');
+      new ChimeraBucket(unversionedStack, 'UnversionedBucket', {
+        versioned: false,
+      });
+      unversionedTemplate = Template.fromStack(unversionedStack);
+    });
+
+    it('does not enable versioning', () => {
+      // No bucket should have versioning enabled
+      const buckets = unversionedTemplate.findResources('AWS::S3::Bucket');
+      for (const bucket of Object.values(buckets)) {
+        const props = (bucket as { Properties: Record<string, unknown> }).Properties;
+        expect(props['VersioningConfiguration']).toBeUndefined();
+      }
+    });
+
+    it('still adds the abort-incomplete-MPU lifecycle rule', () => {
+      unversionedTemplate.hasResourceProperties('AWS::S3::Bucket', {
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              AbortIncompleteMultipartUpload: {
+                DaysAfterInitiation: 7,
+              },
+              Status: 'Enabled',
+            }),
+          ]),
+        },
+      });
+    });
+
+    it('does not add noncurrent version expiration when unversioned', () => {
+      // The main bucket lifecycle rule should not contain NoncurrentVersionExpiration
+      const buckets = unversionedTemplate.findResources('AWS::S3::Bucket', {
+        Properties: {
+          VersioningConfiguration: Match.absent(),
+          LifecycleConfiguration: Match.anyValue(),
+        },
+      });
+      for (const bucket of Object.values(buckets)) {
+        const rules = ((bucket as Record<string, unknown>).Properties as Record<string, unknown>)?.['LifecycleConfiguration'] as { Rules?: unknown[] } | undefined;
+        if (rules?.Rules) {
+          for (const rule of rules.Rules) {
+            expect((rule as Record<string, unknown>)['NoncurrentVersionExpiration']).toBeUndefined();
+          }
+        }
+      }
+    });
+  });
+
+  describe('with additionalLifecycleRules', () => {
+    let extraRulesStack: cdk.Stack;
+    let extraRulesTemplate: Template;
+
+    beforeAll(() => {
+      const app5 = new cdk.App();
+      extraRulesStack = new cdk.Stack(app5, 'ExtraRulesStack');
+      new ChimeraBucket(extraRulesStack, 'ExtraRulesBucket', {
+        additionalLifecycleRules: [
+          {
+            id: 'expire-old-objects',
+            expiration: cdk.Duration.days(30),
+            prefix: 'artifacts/',
+          },
+        ],
+      });
+      extraRulesTemplate = Template.fromStack(extraRulesStack);
+    });
+
+    it('appends the additional lifecycle rule alongside the default MPU rule', () => {
+      extraRulesTemplate.hasResourceProperties('AWS::S3::Bucket', {
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+              Status: 'Enabled',
+            }),
+            Match.objectLike({
+              Id: 'expire-old-objects',
+              ExpirationInDays: 30,
+              Prefix: 'artifacts/',
+              Status: 'Enabled',
+            }),
+          ]),
+        },
+      });
     });
   });
 });
