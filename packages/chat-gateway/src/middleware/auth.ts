@@ -87,16 +87,12 @@ export async function authenticateJWT(
     const payload = await verifier.verify(token);
 
     // Extract custom claims
-    const tenantId = payload['custom:tenant_id'];
-    if (!tenantId || typeof tenantId !== 'string') {
-      return c.json({
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Token missing required tenant_id claim',
-        },
-        timestamp: new Date().toISOString(),
-      }, 403);
-    }
+    // Admin users created via `chimera setup` may not have custom:tenant_id set;
+    // fall back to sub so they still receive a valid auth context.
+    const customTenantId = payload['custom:tenant_id'];
+    const tenantId = (typeof customTenantId === 'string' && customTenantId)
+      ? customTenantId
+      : payload.sub;
 
     // Populate auth context in Hono context
     c.set('auth', {
@@ -177,17 +173,19 @@ export async function optionalAuth(
   try {
     if (verifier) {
       const payload = await verifier.verify(token);
-      const tenantId = payload['custom:tenant_id'];
+      // Fall back to sub for admin users without custom:tenant_id
+      const customTenantId = payload['custom:tenant_id'];
+      const tenantId = (typeof customTenantId === 'string' && customTenantId)
+        ? customTenantId
+        : payload.sub;
 
-      if (tenantId && typeof tenantId === 'string') {
-        c.set('auth', {
-          sub: payload.sub,
-          email: payload.email as string | undefined,
-          tenantId: tenantId,
-          tenantTier: payload['custom:tenant_tier'] as string | undefined,
-          groups: payload['cognito:groups'] as string[] | undefined,
-        });
-      }
+      c.set('auth', {
+        sub: payload.sub,
+        email: payload.email as string | undefined,
+        tenantId: tenantId,
+        tenantTier: payload['custom:tenant_tier'] as string | undefined,
+        groups: payload['cognito:groups'] as string[] | undefined,
+      });
     }
   } catch (error) {
     // Ignore verification errors for optional auth
