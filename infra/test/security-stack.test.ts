@@ -76,9 +76,9 @@ describe('SecurityStack', () => {
         });
       });
 
-      it('should require MFA with TOTP', () => {
+      it('should configure MFA as optional with TOTP', () => {
         template.hasResourceProperties('AWS::Cognito::UserPool', {
-          MfaConfiguration: 'ON',
+          MfaConfiguration: 'OPTIONAL',
           EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
         });
       });

@@ -13,6 +13,7 @@
 import { Context, Next } from 'hono';
 import { TenantContext } from '../types';
 import { TenantService } from '@chimera/core';
+import { AuthContext } from './auth';
 
 // Local DynamoDBClient type (matches TenantService interface)
 interface DynamoDBClient {
@@ -66,7 +67,19 @@ export async function extractTenantContext(
   c: Context,
   next: Next
 ): Promise<Response | void> {
-  const tenantId = c.req.header('x-tenant-id');
+  // Primary: extract from X-Tenant-Id header (API Gateway / direct header path)
+  let tenantId = c.req.header('x-tenant-id');
+  let userId = c.req.header('x-user-id');
+
+  // Fallback: populate from JWT auth context set by optionalAuth/authenticateJWT
+  // This enables direct CLI access via Bearer JWT without X-Tenant-Id header
+  if (!tenantId) {
+    const auth = c.get('auth') as AuthContext | undefined;
+    if (auth) {
+      tenantId = auth.tenantId;
+      userId = userId || auth.sub;
+    }
+  }
 
   if (!tenantId) {
     return c.json({
@@ -77,8 +90,6 @@ export async function extractTenantContext(
       timestamp: new Date().toISOString(),
     }, 401);
   }
-
-  const userId = c.req.header('x-user-id');
 
   // For development/testing: accept header-provided tier without DynamoDB lookup
   // In production, this would be replaced with actual DynamoDB validation

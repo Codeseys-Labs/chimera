@@ -162,11 +162,14 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   sessionsTable: dataStack.sessionsTable,
   skillsTable: dataStack.skillsTable,
   ecrRepository: pipelineStack.chatGatewayEcrRepository,
+  cognitoUserPoolId: securityStack.userPool.userPoolId,
+  cognitoUserPoolClientId: securityStack.userPoolClient.userPoolClientId,
 });
 applyChatStackSuppressions(chatStack);
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 chatStack.addDependency(pipelineStack);
+chatStack.addDependency(securityStack);
 
 // --- Stack 9: Orchestration ---
 // EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
