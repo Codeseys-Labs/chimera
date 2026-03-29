@@ -16,6 +16,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { ChimeraBucket } from '../constructs/chimera-bucket';
 
 export interface EmailStackProps extends cdk.StackProps {
   envName: string;
@@ -91,28 +92,39 @@ export class EmailStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // S3 Bucket: Inbound Email Storage
+    // S3 Bucket: Inbound Email Storage — customer-managed KMS via ChimeraBucket
     // SES writes raw MIME emails here. Lambda fetches and parses them.
+    // versioned: false — emails are append-only; version history adds no value here.
+    // SES needs kms:GenerateDataKey* on the CMK to encrypt objects it writes.
     // ======================================================================
 
-    this.inboundEmailBucket = new s3.Bucket(this, 'InboundEmailBucket', {
+    const inboundEmailChimera = new ChimeraBucket(this, 'InboundEmailBucket', {
       bucketName: `chimera-inbound-email-${props.envName}-${this.account}`,
-      encryption: s3.BucketEncryption.KMS_MANAGED,
       versioned: false,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      // Retain in prod, destroy in dev
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: !isProd,
       // Lifecycle: delete raw MIME after 90 days (parsed content lives in DDB)
-      lifecycleRules: [{
+      additionalLifecycleRules: [{
         id: 'expire-raw-email',
         expiration: cdk.Duration.days(90),
         prefix: 'inbound/',
       }],
-      // Enable EventBridge notifications so S3 events flow to the SES receipt target
-      eventBridgeEnabled: false, // We use direct SQS notifications below
     });
+    this.inboundEmailBucket = inboundEmailChimera.bucket;
+
+    // Grant SES kms:GenerateDataKey* so it can encrypt objects it writes to this bucket.
+    // SES writes using its own service principal; the CMK must explicitly allow this.
+    inboundEmailChimera.encryptionKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowSESKMSGenerateDataKey',
+      principals: [new iam.ServicePrincipal('ses.amazonaws.com')],
+      actions: ['kms:GenerateDataKey*'],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          'aws:SourceAccount': this.account,
+        },
+      },
+    }));
 
     // SES requires a bucket policy allowing ses.amazonaws.com to write to this bucket
     this.inboundEmailBucket.addToResourcePolicy(new iam.PolicyStatement({

@@ -1,9 +1,11 @@
 import * as cdk from 'aws-cdk-lib';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import { Construct } from 'constructs';
+import { ChimeraBucket } from '../constructs/chimera-bucket';
 
 export interface FrontendStackProps extends cdk.StackProps {
   envName: string;
@@ -31,18 +33,17 @@ export class FrontendStack extends cdk.Stack {
     const isProd = props.envName === 'prod';
 
     // ======================================================================
-    // S3 Bucket for React SPA Assets
-    // Private bucket — CloudFront accesses via OAC (Origin Access Control).
-    // OAC is used instead of OAI because OAI does not support SSE-KMS.
+    // S3 Bucket for React SPA Assets — customer-managed KMS via ChimeraBucket
+    // OAC is required for SSE-KMS encrypted buckets (OAI does not support SSE-KMS).
+    // CloudFront is granted kms:Decrypt on the CMK after the distribution is created.
     // ======================================================================
-    this.bucket = new s3.Bucket(this, 'FrontendBucket', {
+    const frontendChimera = new ChimeraBucket(this, 'FrontendBucket', {
       bucketName: `chimera-frontend-${props.envName}-${this.account}`,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.KMS_MANAGED,
       versioned: isProd,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: !isProd,
     });
+    this.bucket = frontendChimera.bucket;
 
     // ======================================================================
     // Cache Policies
@@ -133,6 +134,32 @@ export class FrontendStack extends cdk.Stack {
         },
       ],
     });
+
+    // ======================================================================
+    // CloudFront OAC → KMS grant
+    // CloudFront requires kms:Decrypt on the bucket's CMK to serve SSE-KMS
+    // encrypted objects. OAI (the older mechanism) cannot access KMS-encrypted
+    // buckets at all — OAC is mandatory here.
+    //
+    // NOTE: We scope to all distributions in the account rather than to the
+    // specific distribution ARN. Using `this.distribution.distributionArn`
+    // would create a CDK circular dependency:
+    //   KMS Key (key policy) → Distribution → Bucket → KMS Key
+    // The account-level wildcard is still safe: the key only encrypts this
+    // bucket, so only the CloudFront distribution targeting this bucket can
+    // meaningfully use it, and cross-account access is blocked.
+    // ======================================================================
+    frontendChimera.encryptionKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowCloudFrontDecrypt',
+      principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
+      actions: ['kms:Decrypt'],
+      resources: ['*'],
+      conditions: {
+        ArnLike: {
+          'AWS:SourceArn': `arn:aws:cloudfront::${this.account}:distribution/*`,
+        },
+      },
+    }));
 
     // ======================================================================
     // Stack Outputs
