@@ -103,6 +103,11 @@
         "chimera": "./bin/chimera",
       },
       "dependencies": {
+        "@aws-sdk/client-cloudformation": "^3.0.0",
+        "@aws-sdk/client-codecommit": "^3.0.0",
+        "@aws-sdk/client-codepipeline": "^3.0.0",
+        "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
+        "@aws-sdk/client-dynamodb": "^3.0.0",
         "@chimera/core": "workspace:*",
         "@chimera/shared": "workspace:*",
         "commander": "^11.1.0",
@@ -127,13 +132,6 @@
         "eslint": "8.57.1",
         "ink-testing-library": "^4.0.0",
         "typescript": "~5.7.0",
-      },
-      "peerDependencies": {
-        "@aws-sdk/client-cloudformation": "^3.0.0",
-        "@aws-sdk/client-codecommit": "^3.0.0",
-        "@aws-sdk/client-codepipeline": "^3.0.0",
-        "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
-        "@aws-sdk/client-dynamodb": "^3.0.0",
       },
     },
     "packages/core": {
