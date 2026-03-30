@@ -8,6 +8,7 @@
  */
 
 import { loadWorkspaceConfig, loadCredentials as wsLoadCredentials } from '../utils/workspace.js';
+import { isOfflineError } from '../utils/aws-errors.js';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -144,6 +145,7 @@ async function request<T>(method: string, urlPath: string, body?: unknown, crede
     });
   } catch (err: any) {
     if (err.name === 'AbortError') throw new ChimeraTimeoutError();
+    if (isOfflineError(err)) throw new Error('Cannot reach API server. Check your network connection or VPN and try again.');
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -180,6 +182,7 @@ async function requestStream(method: string, urlPath: string, body?: unknown, cr
     });
   } catch (err: any) {
     if (err.name === 'AbortError') throw new ChimeraTimeoutError();
+    if (isOfflineError(err)) throw new Error('Cannot reach API server. Check your network connection or VPN and try again.');
     throw err;
   } finally {
     clearTimeout(timeoutId);

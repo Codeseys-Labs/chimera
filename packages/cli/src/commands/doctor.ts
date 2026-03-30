@@ -1,20 +1,24 @@
 /**
  * chimera doctor — Pre-flight checks for the Chimera platform
  *
- * Runs 5 checks and prints pass/fail for each:
+ * Runs 7 checks and prints pass/fail for each:
  *   1. AWS credentials
  *   2. Chimera auth tokens
  *   3. API connectivity
  *   4. Cognito pool config
  *   5. CloudFormation stack status (all 11 stacks)
+ *   6. chimera.toml schema (required fields)
+ *   7. Toolchain (bun, npx, aws CLI)
  */
 
 import { Command } from 'commander';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
-import { loadWorkspaceConfig } from '../utils/workspace';
+import { loadWorkspaceConfig, findWorkspaceConfig } from '../utils/workspace';
+import { isOfflineError } from '../utils/aws-errors';
 import TOML from 'smol-toml';
 import { color } from '../lib/color';
 
@@ -89,7 +93,8 @@ export async function checkApiConnectivity(baseUrl: string, chatUrl?: string): P
     return { label: 'API connectivity', ok: false, detail: `Health check returned ${res.status}` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { label: 'API connectivity', ok: false, detail: `Unreachable: ${msg}` };
+    const hint = isOfflineError(err) ? '. Check your network connection or VPN' : '';
+    return { label: 'API connectivity', ok: false, detail: `Unreachable: ${msg}${hint}` };
   }
 }
 
@@ -153,7 +158,14 @@ export async function checkStackStatus(region?: string, env?: string): Promise<C
         if (!ok) allOk = false;
         results.push(`${stackName}: ${status}`);
       }
-    } catch {
+    } catch (err) {
+      if (isOfflineError(err)) {
+        return {
+          label: 'Stack status',
+          ok: false,
+          detail: 'Cannot reach AWS CloudFormation. Check your network connection or VPN.',
+        };
+      }
       results.push(`${stackName}: NOT FOUND`);
       allOk = false;
     }
@@ -164,6 +176,53 @@ export async function checkStackStatus(region?: string, env?: string): Promise<C
     ok: allOk,
     detail: results.join(', '),
   };
+}
+
+export function checkTomlSchema(): CheckResult {
+  const tomlPath = findWorkspaceConfig();
+  if (!tomlPath) {
+    return {
+      label: 'chimera.toml schema',
+      ok: false,
+      detail: 'No chimera.toml found. Run "chimera init" in your project directory.',
+    };
+  }
+  const config = loadWorkspaceConfig();
+  const missing: string[] = [];
+  if (!config.aws?.region) missing.push('[aws] region');
+  if (!config.workspace?.environment) missing.push('[workspace] environment');
+  if (missing.length > 0) {
+    return {
+      label: 'chimera.toml schema',
+      ok: false,
+      detail: `Missing required fields: ${missing.join(', ')}`,
+    };
+  }
+  return { label: 'chimera.toml schema', ok: true, detail: tomlPath };
+}
+
+export function checkToolchain(): CheckResult {
+  const tools: { name: string; args: string[] }[] = [
+    { name: 'bun', args: ['--version'] },
+    { name: 'npx', args: ['--version'] },
+    { name: 'aws', args: ['--version'] },
+  ];
+  const missing: string[] = [];
+  for (const tool of tools) {
+    try {
+      execFileSync(tool.name, tool.args, { stdio: 'ignore' });
+    } catch {
+      missing.push(tool.name);
+    }
+  }
+  if (missing.length > 0) {
+    return {
+      label: 'Toolchain',
+      ok: false,
+      detail: `Missing: ${missing.join(', ')}. Install the missing tools and retry.`,
+    };
+  }
+  return { label: 'Toolchain', ok: true };
 }
 
 // ─── Output formatting ────────────────────────────────────────────────────────
@@ -200,6 +259,8 @@ export function registerDoctorCommand(program: Command): void {
         checkApiConnectivity(baseUrl, chatUrl),
         Promise.resolve(checkCognitoConfig()),
         checkStackStatus(region, env),
+        Promise.resolve(checkTomlSchema()),
+        Promise.resolve(checkToolchain()),
       ]);
 
       if (options.json) {
