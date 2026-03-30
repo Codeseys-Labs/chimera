@@ -125,6 +125,12 @@ export function registerStatusCommand(program: Command): void {
     .option('--env <environment>', 'Environment name')
     .option('--pipeline', 'Show pipeline execution status')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera status
+  $ chimera status --env prod --pipeline
+  $ chimera status --region us-west-2
+  $ chimera status --json`)
     .action(async (options) => {
       const spinner = ora('Checking deployment status').start();
       if (options.json) spinner.stop();
