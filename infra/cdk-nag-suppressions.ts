@@ -369,6 +369,15 @@ export function applyFrontendStackSuppressions(stack: Stack): void {
 }
 
 /**
+ * Suppressions for DiscoveryStack.
+ */
+export function applyDiscoveryStackSuppressions(stack: Stack): void {
+  applyCommonSuppressions(stack);
+  // Cloud Map HTTP namespaces have no additional CDK Nag rules beyond the common set.
+  // Non-IP instance registrations don't carry IAM, encryption, or network surface rules.
+}
+
+/**
  * Suppressions for stacks that use EventBridge event bus without resource policy.
  */
 export function applyEventBridgeSuppressions(stack: Stack): void {
