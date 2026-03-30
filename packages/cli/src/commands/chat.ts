@@ -4,6 +4,9 @@
  * Reads user input via readline, POSTs to /chat/stream,
  * streams response tokens to stdout as they arrive.
  * Ctrl+C gracefully ends the session.
+ *
+ * --message flag enables single-shot non-interactive mode.
+ * --json combined with --message outputs structured JSON response.
  */
 
 import { Command } from 'commander';
@@ -52,6 +55,43 @@ async function* streamChatResponse(response: Response): AsyncGenerator<ChatChunk
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+// ─── Single-shot message ──────────────────────────────────────────────────────
+
+async function sendSingleMessage(
+  message: string,
+  sessionId: string | undefined,
+  json: boolean,
+): Promise<void> {
+  const body = sessionId ? { message, sessionId } : { message };
+  const response = await apiClient.postStream('/chat/stream', body);
+
+  let fullContent = '';
+  for await (const chunk of streamChatResponse(response)) {
+    if (chunk.type === 'token' && chunk.content) {
+      if (json) {
+        fullContent += chunk.content;
+      } else {
+        process.stdout.write(chunk.content);
+      }
+    } else if (chunk.type === 'error') {
+      if (json) {
+        console.log(JSON.stringify({ status: 'error', error: chunk.error, code: 'CHAT_ERROR' }));
+        process.exit(1);
+      }
+      process.stdout.write(color.red(`\n[Error: ${chunk.error}]`));
+      return;
+    } else if (chunk.type === 'done') {
+      break;
+    }
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ status: 'ok', data: { message: fullContent, sessionId } }));
+  } else {
+    process.stdout.write('\n');
   }
 }
 
@@ -128,8 +168,45 @@ export function registerChatCommand(program: Command): void {
     .command('chat')
     .description('Start an interactive chat session with the Chimera platform')
     .option('-s, --session-id <id>', 'Resume an existing session by ID')
+    .option('-m, --message <text>', 'Send a single message and exit (non-interactive)')
+    .option('--json', 'Output response as JSON (requires --message)')
     .option('--classic', 'Use the classic readline REPL instead of the TUI')
-    .action(async (options: { sessionId?: string; classic?: boolean }) => {
+    .addHelpText('after', `
+Examples:
+  $ chimera chat                              # interactive TUI session
+  $ chimera chat --classic                    # readline REPL
+  $ chimera chat -s sess-abc123              # resume a session
+  $ chimera chat -m "What is Chimera?"       # single-shot message
+  $ chimera chat -m "ping" --json            # machine-readable output`)
+    .action(async (options: { sessionId?: string; message?: string; json?: boolean; classic?: boolean }) => {
+      if (options.message) {
+        try {
+          await sendSingleMessage(options.message, options.sessionId, options.json ?? false);
+        } catch (err) {
+          if (err instanceof ChimeraAuthError) {
+            if (options.json) {
+              console.log(JSON.stringify({ status: 'error', error: err.message, code: 'AUTH_ERROR' }));
+            } else {
+              console.error(color.red(`✗ ${err.message}`));
+            }
+            process.exit(1);
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: msg, code: 'CHAT_FAILED' }));
+          } else {
+            console.error(color.red(`✗ Error: ${msg}`));
+          }
+          process.exit(1);
+        }
+        return;
+      }
+
+      if (options.json) {
+        console.error(color.red('✗ --json requires --message for non-interactive use'));
+        process.exit(1);
+      }
+
       if (options.classic) {
         await runChatLoop(options.sessionId);
       } else {

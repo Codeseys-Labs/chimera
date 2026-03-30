@@ -3,6 +3,7 @@
  */
 
 import { Command } from 'commander';
+import inquirer from 'inquirer';
 import ora from 'ora';
 import { table } from 'table';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
@@ -19,12 +20,22 @@ interface Skill {
 export function registerSkillCommands(program: Command): void {
   const skill = program
     .command('skill')
-    .description('Manage agent skills');
+    .description('Manage agent skills')
+    .addHelpText('after', `
+Examples:
+  $ chimera skill list                        # list installed skills
+  $ chimera skill install summarizer          # install a skill
+  $ chimera skill install summarizer@1.2.0   # install specific version
+  $ chimera skill enable summarizer          # enable an installed skill
+  $ chimera skill disable summarizer         # disable a skill
+  $ chimera skill uninstall summarizer       # uninstall with confirmation
+  $ chimera skill list --json                # machine-readable output`);
 
   skill
     .command('list')
     .description('List installed skills')
     .option('--category <category>', 'Filter by category')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const wsConfig = loadWorkspaceConfig();
@@ -81,6 +92,7 @@ export function registerSkillCommands(program: Command): void {
     .command('install <skill-name>')
     .description('Install a skill from the marketplace')
     .option('-v, --version <version>', 'Skill version', 'latest')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (skillName: string, options) => {
       const wsConfig = loadWorkspaceConfig();
@@ -110,7 +122,7 @@ export function registerSkillCommands(program: Command): void {
           console.log(JSON.stringify({ status: 'ok', data: installed }));
         } else {
           spinner.succeed(color.green(`Skill installed: ${skillName}@${options.version}`));
-          console.log(color.gray('Run "chimera skill enable <skill-name>" to activate'));
+          console.log(color.dim('Run "chimera skill enable <skill-name>" to activate'));
         }
       } catch (error: any) {
         if (options.json) {
@@ -126,6 +138,7 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('enable <skill-name>')
     .description('Enable an installed skill')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (skillName: string, options) => {
       const spinner = ora(`Enabling skill: ${skillName}`).start();
@@ -155,6 +168,7 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('disable <skill-name>')
     .description('Disable a skill')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (skillName: string, options) => {
       const spinner = ora(`Disabling skill: ${skillName}`).start();
@@ -183,9 +197,27 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('uninstall <skill-name>')
     .description('Uninstall a skill')
-    .option('--force', 'Skip confirmation')
+    .option('--force', 'Skip confirmation prompt')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (skillName: string, options) => {
+      // Confirm before uninstalling unless --force or --json (non-interactive)
+      if (!options.force && !options.json) {
+        const { confirm } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'confirm',
+            message: `Uninstall skill "${skillName}"?`,
+            default: false,
+          },
+        ]);
+
+        if (!confirm) {
+          console.log(color.yellow('Uninstall cancelled'));
+          return;
+        }
+      }
+
       const spinner = ora(`Uninstalling skill: ${skillName}`).start();
       if (options.json) spinner.stop();
 

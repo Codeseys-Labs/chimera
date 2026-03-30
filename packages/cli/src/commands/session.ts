@@ -22,16 +22,35 @@ interface Session {
 export function registerSessionCommands(program: Command): void {
   const session = program
     .command('session')
-    .description('Manage agent sessions');
+    .description('Manage agent sessions')
+    .addHelpText('after', `
+Examples:
+  $ chimera session list                      # list sessions for current tenant
+  $ chimera session create -u alice           # create a session for user alice
+  $ chimera session terminate sess-abc123     # terminate a session
+  $ chimera session list --json               # machine-readable output
+  $ chimera session create --region us-west-2 # use specific region`);
 
   session
     .command('create')
     .description('Create a new agent session')
     .option('-u, --user <userId>', 'User ID')
     .option('-m, --model <model>', 'Model ID (e.g., claude-opus-4-6)', 'claude-sonnet-4-5')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const wsConfig = loadWorkspaceConfig();
+      const region = options.region ?? wsConfig?.aws?.region;
+
+      if (!region) {
+        const msg = 'No AWS region configured. Run "chimera init" to configure your workspace.';
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_REGION' }));
+          process.exit(1);
+        }
+        console.error(color.red(msg));
+        process.exit(1);
+      }
 
       if (!(wsConfig as any).current_tenant) {
         const msg = 'No tenant selected. Use "chimera tenant switch <id>" first.';
@@ -52,6 +71,7 @@ export function registerSessionCommands(program: Command): void {
           tenantId: (wsConfig as any).current_tenant,
           userId: options.user || 'default-user',
           model: options.model,
+          region,
         });
 
         if (options.json) {
@@ -75,9 +95,21 @@ export function registerSessionCommands(program: Command): void {
     .command('list')
     .description('List active sessions')
     .option('-u, --user <userId>', 'Filter by user ID')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const wsConfig = loadWorkspaceConfig();
+      const region = options.region ?? wsConfig?.aws?.region;
+
+      if (!region) {
+        const msg = 'No AWS region configured. Run "chimera init" to configure your workspace.';
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_REGION' }));
+          process.exit(1);
+        }
+        console.error(color.red(msg));
+        process.exit(1);
+      }
 
       if (!(wsConfig as any).current_tenant) {
         const msg = 'No tenant selected. Use "chimera tenant switch <id>" first.';
@@ -135,6 +167,7 @@ export function registerSessionCommands(program: Command): void {
     .command('terminate <session-id>')
     .description('Terminate an active session')
     .option('--force', 'Skip confirmation')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
     .action(async (sessionId: string, options) => {
       if (!options.force && !options.json) {
