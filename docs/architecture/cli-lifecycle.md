@@ -41,18 +41,12 @@ Every invocation goes through these stages before a command handler runs:
 
 ```mermaid
 flowchart TD
-    ENTRY["bin/chimera
-    process.argv"]
-    PARSE["Commander.js
-    parse version + commands"]
-    LOAD["loadWorkspaceConfig
-    chimera.toml → WorkspaceConfig"]
-    AUTH_CHECK{"command
-    needs auth?"}
-    CREDS["loadCredentials
-    ~/.chimera/credentials TOML"]
-    EXEC["command handler
-    .action callback"]
+    ENTRY["bin/chimera<br/>process.argv"]
+    PARSE["Commander.js<br/>parse version + commands"]
+    LOAD["loadWorkspaceConfig<br/>chimera.toml → WorkspaceConfig"]
+    AUTH_CHECK{"command<br/>needs auth?"}
+    CREDS["loadCredentials<br/>~/.chimera/credentials TOML"]
+    EXEC["command handler<br/>.action() callback"]
     EXIT[process.exit]
 
     ENTRY --> PARSE --> LOAD --> AUTH_CHECK
@@ -74,34 +68,13 @@ The 7-stage lifecycle for taking a blank AWS account to a working Chimera deploy
 
 ```mermaid
 flowchart TD
-    S1["Stage 1 — Init
-    chimera init
-    Creates chimera.toml with
-    AWS region, environment, admin email"]
-    S2["Stage 2 — Deploy
-    chimera deploy --source local
-    ① Resolve source
-    ② Push to CodeCommit
-    ③ npx cdk deploy Pipeline stack"]
-    S3["Stage 3 — Wait
-    CodePipeline auto-runs
-    Build → Test → Deploy all stacks"]
-    S4["Stage 4 — Connect
-    chimera connect
-    Fetches stack outputs
-    (api_url, chat_url, cognito_client_id)"]
-    S5["Stage 5 — Setup
-    chimera setup
-    Creates admin Cognito user
-    with temporary password"]
-    S6["Stage 6 — Login
-    chimera login
-    Cognito InitiateAuth → JWT tokens
-    Stored in ~/.chimera/credentials"]
-    S7["Stage 7 — Chat
-    chimera chat
-    ink TUI or classic readline
-    POST /chat/stream via ALB"]
+    S1["Stage 1 — Init<br/>chimera init<br/>Creates chimera.toml with<br/>AWS region, environment, admin email"]
+    S2["Stage 2 — Deploy<br/>chimera deploy --source local<br/>① Resolve source<br/>② Push to CodeCommit<br/>③ npx cdk deploy Pipeline stack"]
+    S3["Stage 3 — Wait<br/>CodePipeline auto-runs<br/>Build → Test → Deploy all stacks"]
+    S4["Stage 4 — Connect<br/>chimera connect<br/>Fetches stack outputs<br/>api_url, chat_url, cognito_client_id"]
+    S5["Stage 5 — Setup<br/>chimera setup<br/>Creates admin Cognito user<br/>with temporary password"]
+    S6["Stage 6 — Login<br/>chimera login<br/>Cognito InitiateAuth → JWT tokens<br/>Stored in ~/.chimera/credentials"]
+    S7["Stage 7 — Chat<br/>chimera chat<br/>ink TUI or classic readline<br/>POST /chat/stream via ALB"]
 
     S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
 
@@ -118,29 +91,17 @@ flowchart TD
 ```mermaid
 flowchart TD
     START[chimera deploy]
-    STS[AWS STS
-    get-caller-identity]
+    STS["AWS STS<br/>get-caller-identity"]
     SOURCE{--source mode}
-    LOCAL[local
-    findProjectRoot]
-    GITHUB[github
-    download release archive]
-    GIT[git
-    git clone --remote]
-    AUTO[auto
-    github default]
-    RESOLVE[resolveSourcePath
-    extract / clone to temp dir]
-    CC[CodeCommit
-    ensureRepo + pushToCodeCommit
-    batched 5 MB CreateCommit]
-    STACK_CHECK{Pipeline stack
-    already deployed?}
-    CDK[npx cdk deploy
-    Chimera-dev-Pipeline
-    --require-approval never]
-    DONE[Done
-    update chimera.toml deployment block]
+    LOCAL["local<br/>findProjectRoot"]
+    GITHUB["github<br/>download release archive"]
+    GIT["git<br/>git clone --remote"]
+    AUTO["auto<br/>github default"]
+    RESOLVE["resolveSourcePath<br/>extract / clone to temp dir"]
+    CC["CodeCommit<br/>ensureRepo + pushToCodeCommit<br/>batched 5 MB CreateCommit"]
+    STACK_CHECK{"Pipeline stack<br/>already deployed?"}
+    CDK["npx cdk deploy<br/>Chimera-dev-Pipeline<br/>--require-approval never"]
+    DONE["Done<br/>update chimera.toml deployment block"]
 
     START --> STS --> SOURCE
     SOURCE -- local --> LOCAL
@@ -164,8 +125,7 @@ Cognito can require multiple challenge responses before issuing tokens. The CLI 
 
 ```mermaid
 stateDiagram-v2
-    [*] --> InitiateAuth : USER_PASSWORD_AUTH
-    (email + password)
+    [*] --> InitiateAuth : USER_PASSWORD_AUTH (email + password)
 
     InitiateAuth --> Authenticated : AuthenticationResult returned
     InitiateAuth --> NewPasswordRequired : ChallengeName = NEW_PASSWORD_REQUIRED
@@ -173,22 +133,16 @@ stateDiagram-v2
     InitiateAuth --> SmsMFA : ChallengeName = SMS_MFA
     InitiateAuth --> MfaSetup : ChallengeName = MFA_SETUP
 
-    NewPasswordRequired --> Authenticated : RespondToAuthChallenge
-    new password accepted
+    NewPasswordRequired --> Authenticated : RespondToAuthChallenge — new password accepted
     NewPasswordRequired --> SoftwareTokenMFA : MFA also required
 
-    SoftwareTokenMFA --> Authenticated : RespondToAuthChallenge
-    TOTP code accepted
+    SoftwareTokenMFA --> Authenticated : RespondToAuthChallenge — TOTP code accepted
 
-    SmsMFA --> Authenticated : RespondToAuthChallenge
-    SMS code accepted
+    SmsMFA --> Authenticated : RespondToAuthChallenge — SMS code accepted
 
-    MfaSetup --> SoftwareTokenMFA : AssociateSoftwareToken
-    → VerifySoftwareToken
-    → RespondToAuthChallenge
+    MfaSetup --> SoftwareTokenMFA : AssociateSoftwareToken → VerifySoftwareToken → RespondToAuthChallenge
 
-    Authenticated --> [*] : saveCredentials()
-    ~/.chimera/credentials (TOML)
+    Authenticated --> [*] : saveCredentials() — ~/.chimera/credentials TOML
 ```
 
 The loop condition: `while (!authResult && challengeName)` — continues until Cognito returns `AuthenticationResult` with `AccessToken`.
@@ -204,25 +158,17 @@ flowchart TD
     CMD[chimera chat]
     FLAG{--classic flag?}
 
-    READLINE[Classic readline REPL
-    readline.createInterface
-    process.stdout.write tokens]
-    INK[ink TUI
-    React + ink v5
-    ChatView component
-    Static + live ChatBubble]
+    READLINE["Classic readline REPL<br/>readline.createInterface<br/>process.stdout.write tokens"]
+    INK["ink TUI<br/>React + ink v5<br/>ChatView component<br/>Static + live ChatBubble"]
 
     CMD --> FLAG
     FLAG -- yes --> READLINE
     FLAG -- no --> INK
 
-    READLINE --> STREAM[POST /chat/stream
-    SSE parse loop
-    yield token chunks]
+    READLINE --> STREAM["POST /chat/stream<br/>SSE parse loop<br/>yield token chunks"]
     INK --> STREAM
 
-    STREAM --> SSE["AsyncGenerator<ChatChunk>
-    type: token | done | error"]
+    STREAM --> SSE["AsyncGenerator&lt;ChatChunk&gt;<br/>type: token | done | error"]
 ```
 
 **ink module resolution:** ink v5 requires `moduleResolution: 'bundler'` (or `node16/nodenext`) in `tsconfig.json`. When compiling with `bun build --compile`, use `--external react-devtools-core` to avoid bundling errors.
@@ -235,20 +181,11 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    D1[checkAwsCredentials
-    AWS_PROFILE · AWS_DEFAULT_PROFILE
-    AWS_ACCESS_KEY_ID]
-    D2[checkChimeraAuth
-    loadCredentials TOML
-    check token expiry]
-    D3["checkStackStatus
-    Chimera-dev-{Stack}
-    CloudFormation describe"]
-    D4[checkApiConnectivity
-    chat_url ECS ALB /health
-    not api_url API GW]
-    D5[checkCognitoConfig
-    cognito_client_id present]
+    D1["checkAwsCredentials<br/>AWS_PROFILE · AWS_DEFAULT_PROFILE<br/>AWS_ACCESS_KEY_ID"]
+    D2["checkChimeraAuth<br/>loadCredentials TOML<br/>check token expiry"]
+    D3["checkStackStatus<br/>Chimera-dev-{Stack}<br/>CloudFormation describe"]
+    D4["checkApiConnectivity<br/>chat_url ECS ALB /health<br/>not api_url API GW"]
+    D5["checkCognitoConfig<br/>cognito_client_id present"]
 
     D1 --> D2 --> D3 --> D4 --> D5
 ```
