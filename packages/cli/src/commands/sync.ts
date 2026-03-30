@@ -45,9 +45,9 @@ async function syncWithCodeCommit(
   const client = new CodeCommitClient({ region });
 
   // Step 1: Pull — fetch all files from CodeCommit and write to local disk
-  console.log(color.gray('  Pulling files from CodeCommit...'));
+  console.log(color.dim('  Pulling files from CodeCommit...'));
   const ccFiles = await getFilesFromCodeCommit(client, repoName, 'main');
-  console.log(color.gray(`  Received ${ccFiles.length} files from CodeCommit`));
+  console.log(color.dim(`  Received ${ccFiles.length} files from CodeCommit`));
 
   if (ccFiles.length > 0) {
     const confirmed = await confirmOverwrite(ccFiles.length, yes);
@@ -65,12 +65,12 @@ async function syncWithCodeCommit(
     }
     fs.writeFileSync(localPath, file.content);
   }
-  console.log(color.gray('  Local workspace updated'));
+  console.log(color.dim('  Local workspace updated'));
 
   // Step 2: Push — send local state back to CodeCommit
-  console.log(color.gray('  Pushing local state to CodeCommit...'));
+  console.log(color.dim('  Pushing local state to CodeCommit...'));
   await pushToCodeCommit(client, repoName, repoRoot, 'main', 'Sync: local workspace');
-  console.log(color.gray('  Push complete'));
+  console.log(color.dim('  Push complete'));
 }
 
 export function registerSyncCommand(program: Command): void {
@@ -80,14 +80,21 @@ export function registerSyncCommand(program: Command): void {
       'Bidirectional sync between local workspace and CodeCommit (merge agent edits with local changes)',
     )
     .option('--yes', 'Skip overwrite confirmation prompt')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera sync                    # sync local workspace with CodeCommit
+  $ chimera sync --yes              # sync without overwrite confirmation
+  $ chimera sync --region us-west-2 # use specific region
+  $ chimera sync --json             # machine-readable output`)
     .action(async (options) => {
       const spinner = ora('Starting sync operation').start();
       if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
-        const region = wsConfig?.aws?.region;
+        const region = options.region ?? wsConfig?.aws?.region;
         const repositoryName = wsConfig?.workspace?.repository;
         if (!region || !repositoryName) {
           if (options.json) {
@@ -119,10 +126,10 @@ export function registerSyncCommand(program: Command): void {
           console.log(JSON.stringify({ status: 'ok', data: { repository: repositoryName, region } }));
         } else {
           console.log(color.green('\n✓ Local workspace synced with CodeCommit'));
-          console.log(color.gray('\nWhat happened:'));
-          console.log(color.gray('  1. Fetched latest agent edits from CodeCommit'));
-          console.log(color.gray('  2. Applied agent edits to local workspace'));
-          console.log(color.gray('  3. Pushed merged result back to CodeCommit'));
+          console.log(color.dim('\nWhat happened:'));
+          console.log(color.dim('  1. Fetched latest agent edits from CodeCommit'));
+          console.log(color.dim('  2. Applied agent edits to local workspace'));
+          console.log(color.dim('  3. Pushed merged result back to CodeCommit'));
         }
       } catch (error: any) {
         if (options.json) {

@@ -80,29 +80,29 @@ async function upgradeFromGitHub(
 
   const client = new CodeCommitClient({ region });
 
-  console.log(color.gray('  Fetching CodeCommit state via SDK...'));
+  console.log(color.dim('  Fetching CodeCommit state via SDK...'));
   const ccFiles = await getFilesFromCodeCommit(client, repoName, 'main');
-  console.log(color.gray(`  Received ${ccFiles.length} files from CodeCommit`));
+  console.log(color.dim(`  Received ${ccFiles.length} files from CodeCommit`));
 
   try {
     await git(repoRoot, ['remote', 'get-url', 'origin']);
     await git(repoRoot, ['remote', 'set-url', 'origin', githubUrl]);
-    console.log(color.gray('  Updated GitHub remote (origin)'));
+    console.log(color.dim('  Updated GitHub remote (origin)'));
   } catch {
     await git(repoRoot, ['remote', 'add', 'origin', githubUrl]);
-    console.log(color.gray('  Added GitHub remote (origin)'));
+    console.log(color.dim('  Added GitHub remote (origin)'));
   }
 
-  console.log(color.gray('  Fetching from GitHub...'));
+  console.log(color.dim('  Fetching from GitHub...'));
   await git(repoRoot, ['fetch', 'origin', 'main']);
 
   const originalBranch = await git(repoRoot, ['branch', '--show-current']);
   const upgradeBranch = `upgrade-${Date.now()}`;
-  console.log(color.gray(`  Creating upgrade branch: ${upgradeBranch}`));
+  console.log(color.dim(`  Creating upgrade branch: ${upgradeBranch}`));
   await git(repoRoot, ['checkout', '-b', upgradeBranch]);
 
   try {
-    console.log(color.gray('  Applying CodeCommit state to upgrade branch...'));
+    console.log(color.dim('  Applying CodeCommit state to upgrade branch...'));
     let changedCount = 0;
     const totalCount = ccFiles.length;
     for (const file of ccFiles) {
@@ -118,7 +118,7 @@ async function upgradeFromGitHub(
       changedCount++;
     }
     console.log(
-      color.gray(
+      color.dim(
         `  Applied ${changedCount} changed file(s) (skipped ${totalCount - changedCount} unchanged)`,
       ),
     );
@@ -127,11 +127,11 @@ async function upgradeFromGitHub(
     try {
       await git(repoRoot, ['commit', '-m', 'CodeCommit state (agent edits)']);
     } catch {
-      console.log(color.gray('  No changes from CodeCommit (already up to date)'));
+      console.log(color.dim('  No changes from CodeCommit (already up to date)'));
     }
 
     if (dryRun) {
-      console.log(color.gray('  Dry run: computing diff against upstream GitHub...'));
+      console.log(color.dim('  Dry run: computing diff against upstream GitHub...'));
       const diffStat = await git(repoRoot, ['diff', '--stat', 'HEAD', 'origin/main'], true);
       if (diffStat.trim()) {
         console.log(color.yellow('\nFiles that would change:'));
@@ -142,7 +142,7 @@ async function upgradeFromGitHub(
       return;
     }
 
-    console.log(color.gray('  Merging upstream GitHub changes...'));
+    console.log(color.dim('  Merging upstream GitHub changes...'));
     try {
       await git(repoRoot, [
         'merge',
@@ -151,26 +151,26 @@ async function upgradeFromGitHub(
         '-m',
         'Upgrade: merge upstream GitHub changes',
       ]);
-      console.log(color.gray('  Merge successful (no conflicts)'));
+      console.log(color.dim('  Merge successful (no conflicts)'));
     } catch (error: any) {
       const status = await git(repoRoot, ['status'], true);
 
       if (status.includes('Unmerged paths') || status.includes('both modified')) {
         console.error(color.yellow('\nMerge conflicts detected during upgrade.'));
-        console.error(color.gray('To resolve:'));
-        console.error(color.gray('  1. Review conflicts: git status'));
-        console.error(color.gray('  2. Edit conflicted files to resolve'));
-        console.error(color.gray('  3. Stage resolved files: git add <files>'));
-        console.error(color.gray('  4. Complete merge: git commit'));
-        console.error(color.gray(`  5. Push to CodeCommit: chimera sync`));
-        console.error(color.gray(`  6. Return to original branch: git checkout ${originalBranch}`));
+        console.error(color.dim('To resolve:'));
+        console.error(color.dim('  1. Review conflicts: git status'));
+        console.error(color.dim('  2. Edit conflicted files to resolve'));
+        console.error(color.dim('  3. Stage resolved files: git add <files>'));
+        console.error(color.dim('  4. Complete merge: git commit'));
+        console.error(color.dim(`  5. Push to CodeCommit: chimera sync`));
+        console.error(color.dim(`  6. Return to original branch: git checkout ${originalBranch}`));
         throw new Error('Merge conflicts require manual resolution');
       }
 
       throw error;
     }
 
-    console.log(color.gray('  Pushing merged result to CodeCommit...'));
+    console.log(color.dim('  Pushing merged result to CodeCommit...'));
     try {
       await pushToCodeCommit(
         client,
@@ -179,7 +179,7 @@ async function upgradeFromGitHub(
         'main',
         'Upgrade: merge upstream GitHub changes',
       );
-      console.log(color.gray('  Push successful'));
+      console.log(color.dim('  Push successful'));
     } catch (pushError: any) {
       console.error(color.yellow('\n  Push to CodeCommit failed — rolling back local changes'));
       throw new Error(
@@ -187,7 +187,7 @@ async function upgradeFromGitHub(
       );
     }
   } finally {
-    console.log(color.gray(`  Returning to original branch: ${originalBranch}`));
+    console.log(color.dim(`  Returning to original branch: ${originalBranch}`));
     await git(repoRoot, ['checkout', originalBranch], true);
     await git(repoRoot, ['branch', '-D', upgradeBranch], true);
   }
@@ -199,14 +199,22 @@ export function registerUpgradeCommand(program: Command): void {
     .description('Apply upstream GitHub changes to CodeCommit while preserving agent edits')
     .option('--github-url <url>', 'GitHub repository URL (defaults to package.json repository field)')
     .option('--dry-run', 'Show what changes would be applied without merging')
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera upgrade                              # upgrade from GitHub upstream
+  $ chimera upgrade --dry-run                    # preview changes without applying
+  $ chimera upgrade --github-url <url>           # explicit GitHub URL
+  $ chimera upgrade --region us-west-2           # use specific region
+  $ chimera upgrade --json                       # machine-readable output`)
     .action(async (options) => {
       const spinner = ora('Starting upgrade operation').start();
       if (options.json) spinner.stop();
 
       try {
         const wsConfig = loadWorkspaceConfig();
-        const region = wsConfig?.aws?.region;
+        const region = options.region ?? wsConfig?.aws?.region;
         const repositoryName = wsConfig?.workspace?.repository;
         if (!region || !repositoryName) {
           if (options.json) {
@@ -257,12 +265,12 @@ export function registerUpgradeCommand(program: Command): void {
           );
         } else if (!options.dryRun) {
           console.log(color.green('\n✓ CodeCommit upgraded with latest upstream changes'));
-          console.log(color.gray('\nWhat happened:'));
-          console.log(color.gray('  1. Fetched latest from GitHub (upstream)'));
-          console.log(color.gray('  2. Fetched current state from CodeCommit (agent edits)'));
-          console.log(color.gray('  3. Merged upstream changes with agent edits'));
-          console.log(color.gray('  4. Pushed merged result to CodeCommit'));
-          console.log(color.gray('\nNext: Run "chimera sync" to sync your local workspace'));
+          console.log(color.dim('\nWhat happened:'));
+          console.log(color.dim('  1. Fetched latest from GitHub (upstream)'));
+          console.log(color.dim('  2. Fetched current state from CodeCommit (agent edits)'));
+          console.log(color.dim('  3. Merged upstream changes with agent edits'));
+          console.log(color.dim('  4. Pushed merged result to CodeCommit'));
+          console.log(color.dim('\nNext: Run "chimera sync" to sync your local workspace'));
         }
       } catch (error: any) {
         if (options.json) {
