@@ -23,6 +23,7 @@ import { registerSetupCommand } from './commands/setup';
 import { registerLoginCommand } from './commands/login';
 import { registerChatCommand } from './commands/chat';
 import { registerDoctorCommand } from './commands/doctor';
+import { registerMonitorCommand } from './commands/monitor';
 import { color } from './lib/color';
 
 function getVersion(): string {
@@ -58,6 +59,7 @@ registerSetupCommand(program);
 registerLoginCommand(program);
 registerChatCommand(program);
 registerDoctorCommand(program);
+registerMonitorCommand(program);
 
 // Error handling
 program.exitOverride();
