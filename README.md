@@ -171,6 +171,14 @@ chimera/
 - **[CLAUDE.md](CLAUDE.md)** — Development workflow and Overstory conventions
 - **[AGENTS.md](AGENTS.md)** — Mulch, Seeds, Canopy quick reference
 
+### Architecture Diagrams
+
+- **[System Architecture](docs/architecture/system-architecture.md)** — 9 mermaid diagrams covering CDK stacks, request flows, auth, self-evolution, multi-tenant isolation, skill lifecycle, deploy pipeline, and session state
+- **[CLI Lifecycle](docs/architecture/cli-lifecycle.md)** — Command registry, 7-stage operator workflow, deploy internals, Cognito challenge loop, doctor health checks
+- **[Deployment Architecture](docs/architecture/deployment-architecture.md)** — 14-stack CDK topology, deployment order, CDK Nag compliance, custom aspects
+- **[Agent Architecture](docs/architecture/agent-architecture.md)** — Strands ReAct loop, AWS tool tiers, skill runtime, evolution engine, memory architecture
+- **[Canonical Data Model](docs/architecture/canonical-data-model.md)** — 6-table DynamoDB schema, GSI design, multi-tenant isolation patterns
+
 ### Codebase Metrics
 
 **Production Implementation:**

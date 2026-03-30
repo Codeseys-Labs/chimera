@@ -12,7 +12,9 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 **Core Differentiator:** The agent has AWS account access, not computer access. This is an AWS-native rebuild of OpenClaw/NemoClaw patterns, purpose-built for cloud infrastructure operations.
 
-**Architecture:** Bun monorepo, 11 CDK stacks, 6 packages, 30 ADRs, AgentCore Runtime (MicroVM isolation).
+**Architecture:** Bun monorepo, 14 CDK stacks, 6 packages, 30 ADRs, AgentCore Runtime (MicroVM isolation).
+
+**Architecture diagrams:** See [System Architecture](architecture/system-architecture.md) (9 mermaid diagrams: CDK stacks, request flow, auth, self-evolution, multi-tenant data, skill lifecycle, deploy pipeline, session state) and [CLI Lifecycle](architecture/cli-lifecycle.md) (command registry, operator workflow, deploy internals).
 
 ---
 
