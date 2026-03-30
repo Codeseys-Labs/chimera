@@ -128,11 +128,12 @@ export function checkCognitoConfig(): CheckResult {
 }
 
 // Chimera stack suffixes — actual names follow Chimera-{env}-{Suffix} pattern.
-// Kept in sync with STACK_DESTROY_ORDER in destroy.ts (all 11 deployed stacks).
+// Kept in sync with STACK_DESTROY_ORDER in destroy.ts (all 15 deployed stacks).
 const CHIMERA_STACK_SUFFIXES = [
   'Network', 'Data', 'Security', 'Observability',
   'Api', 'Pipeline', 'SkillPipeline', 'Chat',
   'Orchestration', 'Evolution', 'TenantOnboarding',
+  'Frontend', 'Discovery', 'GatewayRegistration', 'Email',
 ];
 
 export async function checkStackStatus(region?: string, env?: string): Promise<CheckResult> {

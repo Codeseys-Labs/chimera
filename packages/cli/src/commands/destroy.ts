@@ -24,9 +24,15 @@ import {
   DynamoDBClient,
   ScanCommand,
   BatchWriteItemCommand,
+  UpdateTableCommand,
   type AttributeValue,
   type WriteRequest,
 } from '@aws-sdk/client-dynamodb';
+import {
+  S3Client,
+  ListObjectVersionsCommand,
+  DeleteObjectsCommand,
+} from '@aws-sdk/client-s3';
 import * as os from 'os';
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
@@ -206,13 +212,120 @@ async function deleteCodeCommitRepo(
 }
 
 /**
- * Reverse dependency order for stack teardown (most dependent stacks first)
+ * Reverse dependency order for stack teardown (most dependent stacks first).
+ * Must stay in sync with CHIMERA_STACK_SUFFIXES in doctor.ts.
  */
 const STACK_DESTROY_ORDER = [
-  'TenantOnboarding', 'Evolution', 'Orchestration', 'Chat',
-  'SkillPipeline', 'Api', 'Observability', 'Pipeline',
-  'Data', 'Security', 'Network',
+  // Tier 1: no dependents — leaf stacks
+  'Frontend', 'Discovery', 'GatewayRegistration',
+  // Tier 2: depend on Data/Security
+  'Evolution', 'SkillPipeline', 'Email', 'TenantOnboarding',
+  // Tier 3: depend on Network/Data/Pipeline
+  'Chat', 'Orchestration',
+  // Tier 4: depend on Security
+  'Observability', 'Api',
+  // Tier 5: depends on Network
+  'Pipeline',
+  // Tier 6: base infrastructure (Security/Data before Network)
+  'Security', 'Data',
+  // Tier 7: last — all stacks depend on Network
+  'Network',
 ];
+
+/**
+ * Stacks that contain S3 buckets requiring pre-delete emptying.
+ * CloudFormation cannot delete non-empty S3 buckets.
+ */
+const S3_STACK_SUFFIXES = new Set(['Frontend', 'Email', 'Pipeline', 'Data']);
+
+/**
+ * Empty all objects (and versions) from an S3 bucket.
+ * ListObjectVersions covers both versioned and non-versioned buckets.
+ */
+async function emptyS3Bucket(bucketName: string, s3Client: S3Client): Promise<void> {
+  let keyMarker: string | undefined;
+  let versionIdMarker: string | undefined;
+
+  let isTruncated = true;
+  while (isTruncated) {
+    const resp = await s3Client.send(new ListObjectVersionsCommand({
+      Bucket: bucketName,
+      KeyMarker: keyMarker,
+      VersionIdMarker: versionIdMarker,
+    }));
+
+    const toDelete = [
+      ...(resp.Versions ?? []).map(v => ({ Key: v.Key!, VersionId: v.VersionId })),
+      ...(resp.DeleteMarkers ?? []).map(m => ({ Key: m.Key!, VersionId: m.VersionId })),
+    ].filter(o => o.Key);
+
+    if (toDelete.length > 0) {
+      await s3Client.send(new DeleteObjectsCommand({
+        Bucket: bucketName,
+        Delete: { Objects: toDelete, Quiet: true },
+      }));
+    }
+
+    isTruncated = !!resp.IsTruncated;
+    keyMarker = resp.NextKeyMarker;
+    versionIdMarker = resp.NextVersionIdMarker;
+  }
+}
+
+/**
+ * Enumerate S3 buckets in a CFN stack via DescribeStackResources and empty each.
+ * No-op if the stack does not exist (already deleted or never deployed).
+ */
+async function emptyStackS3Buckets(
+  stackName: string,
+  cfClient: CloudFormationClient,
+  s3Client: S3Client,
+): Promise<void> {
+  let resources;
+  try {
+    const resp = await cfClient.send(new DescribeStackResourcesCommand({ StackName: stackName }));
+    resources = resp.StackResources ?? [];
+  } catch {
+    return; // Stack doesn't exist — nothing to empty
+  }
+
+  const buckets = resources
+    .filter(r => r.ResourceType === 'AWS::S3::Bucket' && r.PhysicalResourceId)
+    .map(r => r.PhysicalResourceId!);
+
+  for (const bucket of buckets) {
+    await emptyS3Bucket(bucket, s3Client);
+  }
+}
+
+/**
+ * Disable DynamoDB deletion protection on all tables in the Data stack.
+ * CDK stacks cannot delete DDB tables that have deletion protection enabled.
+ */
+async function disableDdbDeletionProtection(
+  stackName: string,
+  cfClient: CloudFormationClient,
+  ddbClient: DynamoDBClient,
+): Promise<void> {
+  let resources;
+  try {
+    const resp = await cfClient.send(new DescribeStackResourcesCommand({ StackName: stackName }));
+    resources = resp.StackResources ?? [];
+  } catch {
+    return; // Stack doesn't exist — nothing to do
+  }
+
+  const tables = resources
+    .filter(r => r.ResourceType === 'AWS::DynamoDB::Table' && r.PhysicalResourceId)
+    .map(r => r.PhysicalResourceId!);
+
+  for (const table of tables) {
+    await ddbClient.send(new UpdateTableCommand({
+      TableName: table,
+      DeletionProtectionEnabled: false,
+    }));
+  }
+}
 
 /**
  * Reseed DynamoDB tables from a local archive produced by exportDataArchive.
@@ -342,6 +455,8 @@ Examples:
         const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
         const repoName = wsConfig?.workspace?.repository ?? 'chimera';
         const cfClient = new CloudFormationClient({ region });
+        const ddbClient = new DynamoDBClient({ region });
+        const s3Client = new S3Client({ region });
 
         if (options.monitor && !options.json) {
           spinner.stop();
@@ -352,6 +467,19 @@ Examples:
 
         for (const stackSuffix of STACK_DESTROY_ORDER) {
           const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
+
+          // Pre-delete: disable DDB deletion protection before Data stack teardown
+          if (stackSuffix === 'Data') {
+            if (!options.json && !options.monitor) spinner.text = `Disabling DynamoDB deletion protection in ${stackName}...`;
+            await disableDdbDeletionProtection(stackName, cfClient, ddbClient);
+          }
+
+          // Pre-delete: empty S3 buckets so CloudFormation can delete them
+          if (S3_STACK_SUFFIXES.has(stackSuffix)) {
+            if (!options.json && !options.monitor) spinner.text = `Emptying S3 buckets in ${stackName}...`;
+            await emptyStackS3Buckets(stackName, cfClient, s3Client);
+          }
+
           if (!options.json && !options.monitor) spinner.text = `Destroying ${stackName}...`;
           if (!options.json && options.monitor) console.log(color.bold(`\n→ Destroying ${stackName}`));
 
