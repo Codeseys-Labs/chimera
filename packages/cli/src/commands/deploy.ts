@@ -15,8 +15,17 @@ import {
 import {
   CloudFormationClient,
   DescribeStacksCommand,
+  DescribeStackEventsCommand,
 } from '@aws-sdk/client-cloudformation';
-import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
+import {
+  CognitoIdentityProviderClient,
+} from '@aws-sdk/client-cognito-identity-provider';
+import {
+  loadWorkspaceConfig,
+  saveWorkspaceConfig,
+  loadCredentials,
+  saveCredentials,
+} from '../utils/workspace.js';
 import {
   resolveSourcePath,
   cleanupSource,
@@ -25,6 +34,8 @@ import {
 import { pushToCodeCommit } from '../utils/codecommit.js';
 import { color } from '../lib/color.js';
 import { findProjectRoot } from '../utils/project.js';
+import { provisionAdminUser } from './setup.js';
+import { terminalLogin } from './login.js';
 
 
 /**
@@ -84,6 +95,259 @@ async function pipelineStackExists(
   }
 }
 
+/**
+ * Get all outputs from a CloudFormation stack.
+ * Returns an empty object if the stack doesn't exist yet (graceful skip).
+ */
+async function getStackOutputs(
+  client: CloudFormationClient,
+  stackName: string,
+): Promise<Record<string, string>> {
+  try {
+    const response = await client.send(new DescribeStacksCommand({ StackName: stackName }));
+    const outputs: Record<string, string> = {};
+    for (const output of response.Stacks?.[0]?.Outputs ?? []) {
+      if (output.OutputKey && output.OutputValue) {
+        outputs[output.OutputKey] = output.OutputValue;
+      }
+    }
+    return outputs;
+  } catch (error: any) {
+    if (error.name === 'ValidationError') return {};
+    throw error;
+  }
+}
+
+/**
+ * Collect API/Cognito endpoints from deployed CloudFormation stacks and save
+ * them to chimera.toml. Returns false when the stacks aren't deployed yet
+ * (fresh deploy — CodePipeline hasn't finished running).
+ */
+async function autoCollectEndpoints(
+  cfnClient: CloudFormationClient,
+  region: string,
+  env: string,
+): Promise<boolean> {
+  const [apiOutputs, chatOutputs, secOutputs] = await Promise.all([
+    getStackOutputs(cfnClient, `Chimera-${env}-Api`),
+    getStackOutputs(cfnClient, `Chimera-${env}-Chat`),
+    getStackOutputs(cfnClient, `Chimera-${env}-Security`),
+  ]);
+
+  const apiUrl = apiOutputs.ApiUrl ?? apiOutputs.RestApiUrl;
+  const cognitoUserPoolId = secOutputs.UserPoolId;
+
+  // Core stacks not yet deployed — skip silently
+  if (!apiUrl || !cognitoUserPoolId) return false;
+
+  const albDns = chatOutputs.AlbDnsName;
+  const webSocketUrl = apiOutputs.WebSocketUrl ?? apiOutputs.WebSocketApiUrl;
+  const cognitoClientId = secOutputs.WebClientId ?? secOutputs.UserPoolClientId;
+  const cognitoDomain = secOutputs.HostedUIDomain;
+
+  const current = loadWorkspaceConfig();
+  saveWorkspaceConfig({
+    ...current,
+    aws: { ...current?.aws, region },
+    endpoints: {
+      api_url: apiUrl,
+      ...(albDns ? { chat_url: `http://${albDns}` } : {}),
+      ...(webSocketUrl ? { websocket_url: webSocketUrl } : {}),
+      cognito_user_pool_id: cognitoUserPoolId,
+      ...(cognitoClientId ? { cognito_client_id: cognitoClientId } : {}),
+      ...(cognitoDomain ? { cognito_domain: cognitoDomain } : {}),
+    },
+  });
+
+  return true;
+}
+
+/**
+ * Generate a cryptographically random password satisfying Cognito's default
+ * policy: ≥12 chars, at least one uppercase, lowercase, digit, and symbol.
+ */
+function generatePassword(): string {
+  const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lower = 'abcdefghijklmnopqrstuvwxyz';
+  const digits = '0123456789';
+  const special = '!@#$%^&*';
+  const all = upper + lower + digits + special;
+
+  const pick = (chars: string): string => {
+    const b = new Uint8Array(1);
+    crypto.getRandomValues(b);
+    return chars[b[0] % chars.length];
+  };
+
+  // Guarantee at least one character from each required category
+  const parts = [pick(upper), pick(lower), pick(digits), pick(special)];
+  const buf = new Uint8Array(12);
+  crypto.getRandomValues(buf);
+  Array.from(buf).forEach(byte => parts.push(all[byte % all.length]));
+
+  // Fisher-Yates shuffle
+  for (let i = parts.length - 1; i > 0; i--) {
+    const b = new Uint8Array(1);
+    crypto.getRandomValues(b);
+    const j = b[0] % (i + 1);
+    [parts[i], parts[j]] = [parts[j], parts[i]];
+  }
+  return parts.join('');
+}
+
+/**
+ * Ensure admin password is in ~/.chimera/credentials. Prompts interactively
+ * unless autoGenerate is true. Returns the password, or null if user skipped.
+ */
+async function ensureAdminCredentials(
+  email: string,
+  autoGenerate = false,
+): Promise<string | null> {
+  const creds = loadCredentials();
+  if (creds.admin?.password) return creds.admin.password;
+
+  if (autoGenerate) {
+    const password = generatePassword();
+    saveCredentials({ ...creds, admin: { password } });
+    console.log(color.green(`\nGenerated admin password: ${password}`));
+    console.log(color.yellow('  Save this password — it will not be shown again.'));
+    return password;
+  }
+
+  const inquirer = await import('inquirer');
+  const { action } = await inquirer.default.prompt<{ action: string }>([
+    {
+      type: 'list',
+      name: 'action',
+      message: `Admin password for ${email} is not set. What would you like to do?`,
+      choices: [
+        { name: 'Enter a password now', value: 'enter' },
+        { name: 'Auto-generate a password', value: 'generate' },
+        { name: 'Skip — run "chimera setup" manually later', value: 'skip' },
+      ],
+    },
+  ]);
+
+  if (action === 'skip') return null;
+
+  if (action === 'generate') {
+    const password = generatePassword();
+    saveCredentials({ ...creds, admin: { password } });
+    console.log(color.green(`\nGenerated admin password: ${password}`));
+    console.log(color.yellow('  Save this password — it will not be shown again.'));
+    return password;
+  }
+
+  // action === 'enter'
+  const { entered } = await inquirer.default.prompt<{ entered: string }>([
+    {
+      type: 'password',
+      name: 'entered',
+      message: `Admin password for ${email}:`,
+      validate: (v: string) => v.length >= 12 ? true : 'Minimum 12 characters required',
+    },
+  ]);
+  saveCredentials({ ...creds, admin: { password: entered } });
+  return entered;
+}
+
+/**
+ * Provision the admin Cognito user. Resolves user pool ID from chimera.toml
+ * endpoints or CloudFormation. Throws if the Security stack isn't deployed yet.
+ * Returns true if the user was created, false if they already existed.
+ */
+async function runAutoSetup(
+  region: string,
+  env: string,
+  email: string,
+  password: string,
+): Promise<boolean> {
+  const wsConfig = loadWorkspaceConfig();
+  let userPoolId = wsConfig?.endpoints?.cognito_user_pool_id;
+
+  if (!userPoolId) {
+    const cfnClient = new CloudFormationClient({ region });
+    const secOutputs = await getStackOutputs(cfnClient, `Chimera-${env}-Security`);
+    userPoolId = secOutputs.UserPoolId;
+  }
+
+  if (!userPoolId) {
+    throw new Error(
+      'Cognito user pool not found. Security stack may not be deployed yet. ' +
+      'Run "chimera setup" after the pipeline finishes.',
+    );
+  }
+
+  const cognitoClient = new CognitoIdentityProviderClient({ region });
+  return provisionAdminUser(cognitoClient, userPoolId, email, password);
+}
+
+/**
+ * Poll CloudFormation stack events until the stack reaches a terminal state.
+ * Prints each new event as it arrives. Polls every 10 seconds.
+ */
+async function monitorStackEvents(
+  client: CloudFormationClient,
+  stackName: string,
+): Promise<void> {
+  const terminalStatuses = new Set([
+    'CREATE_COMPLETE', 'CREATE_FAILED',
+    'ROLLBACK_COMPLETE', 'ROLLBACK_FAILED',
+    'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE', 'UPDATE_ROLLBACK_FAILED',
+    'DELETE_COMPLETE', 'DELETE_FAILED',
+  ]);
+
+  console.log(color.gray(`\nMonitoring stack: ${stackName}`));
+  console.log(color.gray('(Ctrl+C stops monitoring — deployment continues in background)\n'));
+
+  const seenIds = new Set<string>();
+  let currentStatus = '';
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const stackResp = await client.send(new DescribeStacksCommand({ StackName: stackName }));
+      currentStatus = stackResp.Stacks?.[0]?.StackStatus ?? '';
+
+      const eventsResp = await client.send(
+        new DescribeStackEventsCommand({ StackName: stackName }),
+      );
+      // Reverse so events display oldest-first
+      const events = (eventsResp.StackEvents ?? []).slice().reverse();
+      for (const event of events) {
+        if (!event.EventId || seenIds.has(event.EventId)) continue;
+        seenIds.add(event.EventId);
+
+        const ts = event.Timestamp?.toISOString().slice(11, 19) ?? '';
+        const resource = (event.LogicalResourceId ?? '').padEnd(40);
+        const status = event.ResourceStatus ?? '';
+        const reason = event.ResourceStatusReason ? ` — ${event.ResourceStatusReason}` : '';
+        const statusStr = status.includes('FAILED') ? color.red(status)
+          : status.includes('COMPLETE') ? color.green(status)
+          : color.gray(status);
+
+        console.log(`${color.gray(ts)} ${resource} ${statusStr}${color.gray(reason)}`);
+      }
+
+      if (terminalStatuses.has(currentStatus)) break;
+    } catch (error: any) {
+      if (error.name === 'ValidationError') {
+        console.log(color.gray(`Stack ${stackName} not yet available — waiting...`));
+      } else {
+        throw error;
+      }
+    }
+
+    await new Promise<void>(resolve => setTimeout(resolve, 10_000));
+  }
+
+  if (currentStatus.includes('FAILED') || currentStatus.includes('ROLLBACK')) {
+    console.log(color.red(`\n✗ Stack reached ${currentStatus}`));
+  } else {
+    console.log(color.green(`\n✓ Stack reached ${currentStatus}`));
+  }
+}
+
 
 /**
  * Deploy only the Pipeline CDK stack via npx (not bunx).
@@ -117,6 +381,9 @@ export function registerDeployCommands(program: Command): void {
     .option('--remote <url>', 'Custom git remote URL to clone (implies --source git)')
     .option('--branch <branch>', 'Branch to checkout when using --source git')
     .option('--tag <tag>', 'Tag to checkout when using --source git')
+    .option('--no-setup', 'Skip admin user provisioning after deploy')
+    .option('--skip-setup-prompt', 'Auto-generate admin password without prompting')
+    .option('--monitor', 'Watch CloudFormation stack events in real-time (10s polling)')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
@@ -208,12 +475,34 @@ export function registerDeployCommands(program: Command): void {
           if (!options.json) {
             spinner.succeed(color.green('Pipeline stack exists - CodePipeline will handle deployment'));
             console.log(color.gray('\nCodePipeline will automatically deploy infrastructure updates from the pushed code.'));
-            console.log(color.gray('Monitor deployment progress in the AWS CodePipeline console.'));
           }
         } else {
           if (!options.json) spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
           await deployCdkStacks(sourcePath, env);
           if (!options.json) spinner.succeed(color.green('Pipeline stack deployed - future pushes will auto-deploy'));
+        }
+
+        // --monitor: watch Pipeline stack events in real-time
+        if (options.monitor && !options.json) {
+          await monitorStackEvents(cfnClient, `Chimera-${env}-Pipeline`);
+        } else if (!options.monitor && !options.json && !stackExists) {
+          console.log(color.gray('\nRun "chimera monitor" to watch deployment progress in real-time.'));
+        }
+
+        // Auto-collect endpoints (succeeds only if full infra is already deployed)
+        let endpointsCollected = false;
+        if (!options.json) {
+          spinner.start('Collecting API endpoints...');
+          try {
+            endpointsCollected = await autoCollectEndpoints(cfnClient, region, env);
+            if (endpointsCollected) {
+              spinner.succeed(color.green('API endpoints saved to chimera.toml'));
+            } else {
+              spinner.warn(color.yellow('Endpoints not available yet — run "chimera endpoints" after the pipeline finishes'));
+            }
+          } catch (err: any) {
+            spinner.warn(color.yellow(`Endpoint collection skipped: ${err.message}`));
+          }
         }
 
         const updatedConfig = loadWorkspaceConfig();
@@ -229,17 +518,80 @@ export function registerDeployCommands(program: Command): void {
           },
         });
 
+        // Auto-setup: prompt for admin password and provision Cognito user
+        const adminEmail = loadWorkspaceConfig()?.auth?.admin_email;
+        let setupDone = false;
+        let adminPassword: string | null = null;
+
+        if (!options.json && options.setup && adminEmail) {
+          console.log('');
+          adminPassword = await ensureAdminCredentials(adminEmail, options.skipSetupPrompt);
+          if (adminPassword) {
+            spinner.start(`Provisioning admin user ${adminEmail}...`);
+            try {
+              const created = await runAutoSetup(region, env, adminEmail, adminPassword);
+              spinner.succeed(color.green(
+                created
+                  ? `Admin user created: ${adminEmail}`
+                  : `Admin user updated: ${adminEmail}`,
+              ));
+              setupDone = true;
+            } catch (err: any) {
+              spinner.warn(color.yellow(`Admin setup deferred: ${err.message}`));
+              console.log(color.gray('Password saved. Run "chimera setup" after the pipeline finishes.'));
+            }
+          } else {
+            console.log(color.gray('Password not set. Run "chimera setup" when ready.'));
+          }
+        }
+
+        // Auto-login: authenticate with stored credentials after successful setup
+        if (!options.json && setupDone && adminEmail && adminPassword) {
+          const freshConfig = loadWorkspaceConfig();
+          const clientId = freshConfig.endpoints?.cognito_client_id;
+          if (clientId) {
+            spinner.start('Logging in as admin...');
+            try {
+              await terminalLogin(clientId, region, adminEmail, adminPassword);
+              spinner.succeed(color.green('Logged in as admin'));
+            } catch (err: any) {
+              spinner.warn(color.yellow(`Auto-login failed: ${err.message}`));
+              console.log(color.gray('Run "chimera login" to authenticate manually.'));
+            }
+          }
+        }
+
         if (options.json) {
           console.log(JSON.stringify({
             status: 'ok',
-            data: { accountId, repoName, env, region, stackExists, sourceCommitSha, codecommitCommitId },
+            data: {
+              accountId,
+              repoName,
+              env,
+              region,
+              stackExists,
+              sourceCommitSha,
+              codecommitCommitId,
+              endpointsCollected,
+              setupDone,
+            },
           }));
         } else {
           console.log(color.green('\n✓ Deployment complete!'));
-          console.log(color.gray('\nNext steps:'));
-          console.log(color.gray('  1. Run "chimera endpoints" to save API endpoints'));
-          console.log(color.gray('  2. Run "chimera setup" to provision the admin user'));
-          console.log(color.gray('  3. Run "chimera login" to authenticate'));
+          const remaining: string[] = [];
+          if (!endpointsCollected) {
+            remaining.push('Run "chimera endpoints" after the pipeline finishes to save API endpoints');
+          }
+          if (!setupDone && adminEmail) {
+            remaining.push('Run "chimera setup" to provision the admin user');
+          }
+          if (remaining.length > 0) {
+            console.log(color.gray('\nNext steps:'));
+            remaining.forEach((step, i) => console.log(color.gray(`  ${i + 1}. ${step}`)));
+          }
+          if (!setupDone || !endpointsCollected) {
+            console.log(color.gray('  Run "chimera login" to authenticate when ready'));
+          }
         }
       } catch (error: any) {
         if (options.json) {
