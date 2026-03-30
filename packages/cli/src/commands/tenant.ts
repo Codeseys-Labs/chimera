@@ -8,7 +8,7 @@ import ora from 'ora';
 import { table } from 'table';
 import { formatOutput } from '../utils/output.js';
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
-import { apiClient } from '../lib/api-client.js';
+import { apiClient, guardAuth } from '../lib/api-client.js';
 import { color } from '../lib/color.js';
 
 interface Tenant {
@@ -75,6 +75,7 @@ export function registerTenantCommands(program: Command): void {
           throw new Error(msg);
         }
 
+        guardAuth();
         const created = await apiClient.post<Tenant>('/tenants', {
           name,
           tier,
@@ -97,7 +98,8 @@ export function registerTenantCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to create tenant'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -110,6 +112,7 @@ export function registerTenantCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         const tenants = await apiClient.get<Tenant[]>('/tenants');
         const wsConfig = loadWorkspaceConfig() as any;
         const currentTenantId = wsConfig?.current_tenant as string | undefined;
@@ -146,7 +149,8 @@ export function registerTenantCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to list tenants'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -185,6 +189,7 @@ export function registerTenantCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         await apiClient.delete(`/tenants/${encodeURIComponent(tenantId)}`);
 
         // Clear current tenant if we just deleted it
@@ -204,7 +209,8 @@ export function registerTenantCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to delete tenant'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 }
