@@ -205,7 +205,13 @@ export function registerLoginCommand(program: Command): void {
     .action(async (options: { email?: string; browser?: boolean; terminal?: boolean; prompt?: boolean }) => {
       const config = loadWorkspaceConfig();
       const clientId = config.endpoints?.cognito_client_id;
-      const region = config.aws?.region ?? 'us-east-1';
+      const region = config.aws?.region;
+
+      if (!region) {
+        console.error(color.red('✗ No AWS region configured'));
+        console.error(color.dim('  Run "chimera init" to set up your workspace'));
+        process.exit(1);
+      }
 
       if (!clientId) {
         console.error(color.red('✗ Missing Cognito client ID in chimera.toml'));
