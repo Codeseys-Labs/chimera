@@ -24,6 +24,7 @@ import { registerLoginCommand } from './commands/login';
 import { registerChatCommand } from './commands/chat';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerMonitorCommand } from './commands/monitor';
+import { registerCompletionCommand } from './commands/completion';
 import { color } from './lib/color';
 
 // Version embedded at build time via `bun build --define '__CHIMERA_VERSION__="x.y.z"'`.
@@ -43,6 +44,15 @@ function getVersion(): string {
     return '0.0.0';
   }
 }
+
+// Command groups for grouped help output
+const COMMAND_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'Setup', names: ['init', 'deploy', 'endpoints', 'setup'] },
+  { label: 'Operations', names: ['status', 'sync', 'upgrade', 'destroy', 'monitor'] },
+  { label: 'Auth', names: ['login'] },
+  { label: 'Data', names: ['tenant', 'session', 'skill', 'chat'] },
+  { label: 'Diagnostic', names: ['doctor', 'completion'] },
+];
 
 const program = new Command();
 
@@ -78,6 +88,93 @@ registerLoginCommand(program);
 registerChatCommand(program);
 registerDoctorCommand(program);
 registerMonitorCommand(program);
+registerCompletionCommand(program);
+
+// Custom grouped help formatter (Commander v11 compatible)
+program.configureHelp({
+  formatHelp(cmd, helper) {
+    const width = helper.helpWidth ?? process.stdout.columns ?? 80;
+
+    // Build a map of visible commands by name
+    const cmdMap = new Map<string, Command>(
+      helper.visibleCommands(cmd).map((c) => [c.name(), c]),
+    );
+
+    // Compute column width: longest visible subcommand term + padding
+    let maxTerm = 0;
+    for (const c of cmdMap.values()) {
+      const t = helper.subcommandTerm(c);
+      if (t.length > maxTerm) maxTerm = t.length;
+    }
+    // Also account for option terms
+    for (const o of helper.visibleOptions(cmd)) {
+      const t = helper.optionTerm(o);
+      if (t.length > maxTerm) maxTerm = t.length;
+    }
+    const col = Math.min(maxTerm + 2, Math.floor(width / 3));
+    const indent = '  ';
+    const gap = '  ';
+
+    const line = (term: string, desc: string): string => {
+      const padded = term.padEnd(col);
+      // Wrap description if it would exceed terminal width
+      const available = width - indent.length - col - gap.length;
+      if (available > 0 && desc.length > available) {
+        return `${indent}${padded}${gap}${desc.slice(0, available - 3)}...`;
+      }
+      return `${indent}${padded}${gap}${desc}`;
+    };
+
+    const parts: string[] = [];
+
+    // Usage
+    parts.push(`Usage: ${helper.commandUsage(cmd)}\n`);
+
+    // Description
+    const desc = helper.commandDescription(cmd);
+    if (desc) parts.push(`${desc}\n`);
+
+    // Options
+    const opts = helper.visibleOptions(cmd);
+    if (opts.length) {
+      parts.push('Options:');
+      for (const o of opts) {
+        parts.push(line(helper.optionTerm(o), helper.optionDescription(o)));
+      }
+      parts.push('');
+    }
+
+    // Grouped commands
+    const placed = new Set<string>();
+    for (const group of COMMAND_GROUPS) {
+      const cmds = group.names
+        .map((n) => cmdMap.get(n))
+        .filter((c): c is Command => !!c);
+      if (!cmds.length) continue;
+
+      parts.push(`${group.label}:`);
+      for (const c of cmds) {
+        parts.push(line(helper.subcommandTerm(c), helper.subcommandDescription(c)));
+        placed.add(c.name());
+      }
+      parts.push('');
+    }
+
+    // Safety net: any ungrouped visible commands
+    const ungrouped = [...cmdMap.values()].filter((c) => !placed.has(c.name()));
+    if (ungrouped.length) {
+      parts.push('Other:');
+      for (const c of ungrouped) {
+        parts.push(line(helper.subcommandTerm(c), helper.subcommandDescription(c)));
+      }
+      parts.push('');
+    }
+
+    parts.push('Run "chimera [command] --help" for more information about a command.\n');
+
+    return parts.join('\n');
+  },
+});
 
 // exitOverride() converts Commander's process.exit() into thrown CommanderError.
 // Exit code semantics: 0 = success (help/version), 2 = usage error, 1 = runtime.

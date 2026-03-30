@@ -14,3 +14,4 @@ export * from './commands/sync';
 export * from './commands/upgrade';
 export * from './utils/project';
 export * from './utils/output';
+export * from './commands/completion';
