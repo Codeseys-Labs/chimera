@@ -272,6 +272,12 @@ export function registerDestroyCommands(program: Command): void {
     .option('--keep-repo', 'Preserve the CodeCommit repository (skip deletion)')
     .option('--monitor', 'Stream CloudFormation stack events in real-time during destruction')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera destroy
+  $ chimera destroy --force --env prod
+  $ chimera destroy --retain-data --export-path ./backup
+  $ chimera destroy --json`)
     .action(async (options) => {
       const spinner = ora('Starting Chimera destruction').start();
       if (options.json) spinner.stop();

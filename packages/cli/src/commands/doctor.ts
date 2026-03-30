@@ -242,6 +242,11 @@ export function registerDoctorCommand(program: Command): void {
     .description('Run pre-flight checks for the Chimera platform')
     .option('--json', 'Output results as JSON')
     .option('--region <region>', 'AWS region override (default: read from chimera.toml [aws] region)')
+    .addHelpText('after', `
+Examples:
+  $ chimera doctor
+  $ chimera doctor --region us-west-2
+  $ chimera doctor --json`)
     .action(async (options: { json?: boolean; region?: string }) => {
       const config = loadWorkspaceConfig();
       const region = options.region ?? config.aws?.region;

@@ -102,6 +102,12 @@ export function registerSetupCommand(program: Command): void {
     .option('--user-pool-id <id>', 'Cognito user pool ID (overrides chimera.toml endpoints)')
     .option('--email <email>', 'Admin email (overrides chimera.toml auth.admin_email)')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera setup
+  $ chimera setup --email admin@example.com
+  $ chimera setup --env prod --user-pool-id us-east-1_abc123
+  $ chimera setup --json`)
     .action(async (options) => {
       const spinner = ora('Setting up admin user').start();
       if (options.json) spinner.stop();
