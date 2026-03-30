@@ -116,8 +116,8 @@ export async function terminalLogin(
       const otpauthUri = `otpauth://totp/Chimera:${email}?secret=${secretCode}&issuer=Chimera`;
 
       console.log(color.yellow('\nMFA setup required. Configure your authenticator app:'));
-      console.log(color.dim(`\n  Secret:  ${secretCode}`));
-      console.log(color.dim(`  URI:     ${otpauthUri}\n`));
+      console.log(color.gray(`\n  Secret:  ${secretCode}`));
+      console.log(color.gray(`  URI:     ${otpauthUri}\n`));
 
       const code = mfaCodeFn
         ? await mfaCodeFn()
@@ -223,7 +223,7 @@ Examples:
           process.exit(1);
         }
         console.error(color.red('✗ No AWS region configured'));
-        console.error(color.dim('  Run "chimera init" to set up your workspace'));
+        console.error(color.gray('  Run "chimera init" to set up your workspace'));
         process.exit(1);
       }
 
@@ -233,7 +233,7 @@ Examples:
           process.exit(1);
         }
         console.error(color.red('✗ Missing Cognito client ID in chimera.toml'));
-        console.error(color.dim('  Run `chimera endpoints` to fetch configuration'));
+        console.error(color.gray('  Run `chimera endpoints` to fetch configuration'));
         process.exit(1);
       }
 

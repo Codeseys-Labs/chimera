@@ -148,12 +148,12 @@ async function runChatLoop(sessionId: string | undefined): Promise<void> {
 
   console.log(color.bold('Chimera Chat'));
   if (sessionId) {
-    console.log(color.dim(`Session: ${sessionId}`));
+    console.log(color.gray(`Session: ${sessionId}`));
   }
-  console.log(color.dim('Type a message and press Enter. Press Ctrl+C to exit.\n'));
+  console.log(color.gray('Type a message and press Enter. Press Ctrl+C to exit.\n'));
 
   rl.on('SIGINT', () => {
-    console.log(color.dim('\n\nSession ended.'));
+    console.log(color.gray('\n\nSession ended.'));
     rl.close();
     process.exit(0);
   });
