@@ -6,7 +6,7 @@
  * in the AWS Chimera multi-tenant agent platform.
  */
 
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import { registerTenantCommands } from './commands/tenant';
@@ -26,9 +26,16 @@ import { registerDoctorCommand } from './commands/doctor';
 import { registerMonitorCommand } from './commands/monitor';
 import { color } from './lib/color';
 
+// Version embedded at build time via `bun build --define '__CHIMERA_VERSION__="x.y.z"'`.
+// Falls back to reading package.json in dev mode (bun run src/cli.ts).
+declare const __CHIMERA_VERSION__: string | undefined;
+
 function getVersion(): string {
+  if (typeof __CHIMERA_VERSION__ !== 'undefined') {
+    return __CHIMERA_VERSION__;
+  }
   try {
-    const pkgPath = path.join(__dirname, '../package.json');
+    const pkgPath = path.join(import.meta.dir, '../package.json');
     const raw = fs.readFileSync(pkgPath, 'utf8');
     const pkg = JSON.parse(raw) as { version?: string };
     return pkg.version ?? '0.0.0';
@@ -42,7 +49,18 @@ const program = new Command();
 program
   .name('chimera')
   .description('AWS Chimera multi-tenant agent platform CLI')
-  .version(getVersion());
+  .version(getVersion())
+  .option('--verbose', 'Enable verbose/debug output')
+  .option('--debug', 'Alias for --verbose');
+
+// Propagate verbose/debug to CHIMERA_DEBUG before each command runs.
+// api-client.ts and other modules gate debug stderr on process.env.CHIMERA_DEBUG.
+program.hook('preAction', (thisCommand) => {
+  const opts = thisCommand.opts() as { verbose?: boolean; debug?: boolean };
+  if (opts.verbose ?? opts.debug) {
+    process.env.CHIMERA_DEBUG = '1';
+  }
+});
 
 // Register command groups
 registerTenantCommands(program);
@@ -61,10 +79,21 @@ registerChatCommand(program);
 registerDoctorCommand(program);
 registerMonitorCommand(program);
 
-// Error handling
+// exitOverride() converts Commander's process.exit() into thrown CommanderError.
+// Exit code semantics: 0 = success (help/version), 2 = usage error, 1 = runtime.
 program.exitOverride();
 
-program.parse(process.argv);
+try {
+  program.parse(process.argv);
+} catch (err) {
+  if (err instanceof CommanderError) {
+    if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
+      process.exit(0);
+    }
+    process.exit(err.exitCode ?? 2);
+  }
+  throw err;
+}
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {
