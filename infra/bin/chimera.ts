@@ -15,6 +15,7 @@ import { OrchestrationStack } from '../lib/orchestration-stack';
 import { EvolutionStack } from '../lib/evolution-stack';
 import { EmailStack } from '../lib/email-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { DiscoveryStack } from '../lib/discovery-stack';
 import {
   applyNetworkStackSuppressions,
   applyDataStackSuppressions,
@@ -29,6 +30,7 @@ import {
   applyTenantOnboardingStackSuppressions,
   applyEmailStackSuppressions,
   applyFrontendStackSuppressions,
+  applyDiscoveryStackSuppressions,
 } from '../cdk-nag-suppressions';
 
 const app = new cdk.App();
@@ -249,8 +251,47 @@ const frontendStack = new FrontendStack(app, `${prefix}-Frontend`, {
 });
 applyFrontendStackSuppressions(frontendStack);
 
+// --- Stack 14: Discovery ---
+// Cloud Map HTTP namespace + service registrations for agent self-awareness.
+// Agents call DiscoverInstances to learn the runtime state of the infrastructure.
+// Props are resolved CDK tokens — Cloud Map stores them as concrete strings at deploy time.
+const discoveryStack = new DiscoveryStack(app, `${prefix}-Discovery`, {
+  env: envConfig,
+  description: 'Chimera discovery layer: Cloud Map HTTP namespace + service registrations for agent self-awareness',
+  envName,
+  restApiUrl: apiStack.api.url,
+  webSocketUrl: 'wss://' + apiStack.webSocketApi.ref + '.execute-api.' + envConfig.region + '.amazonaws.com/' + envName,
+  albDnsName: chatStack.alb.loadBalancerDnsName,
+  ecsClusterName: chatStack.ecsCluster.clusterName,
+  ecsServiceName: chatStack.ecsService.serviceName,
+  userPoolId: securityStack.userPool.userPoolId,
+  userPoolClientId: securityStack.userPoolClient.userPoolClientId,
+  tableNames: {
+    tenants: dataStack.tenantsTable.tableName,
+    sessions: dataStack.sessionsTable.tableName,
+    skills: dataStack.skillsTable.tableName,
+    rateLimits: dataStack.rateLimitsTable.tableName,
+    costTracking: dataStack.costTrackingTable.tableName,
+    audit: dataStack.auditTable.tableName,
+  },
+  bucketNames: {
+    tenant: dataStack.tenantBucket.bucketName,
+    skills: dataStack.skillsBucket.bucketName,
+  },
+  pipelineName: pipelineStack.pipeline.pipelineName,
+  cloudFrontDomain: frontendStack.distribution.distributionDomainName,
+  frontendBucketName: frontendStack.bucket.bucketName,
+});
+applyDiscoveryStackSuppressions(discoveryStack);
+discoveryStack.addDependency(apiStack);
+discoveryStack.addDependency(chatStack);
+discoveryStack.addDependency(securityStack);
+discoveryStack.addDependency(dataStack);
+discoveryStack.addDependency(pipelineStack);
+discoveryStack.addDependency(frontendStack);
+
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack, emailStack, frontendStack]) {
+for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack, emailStack, frontendStack, discoveryStack]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -270,5 +311,6 @@ for (const stack of [networkStack, dataStack, securityStack, observabilityStack,
 // Stack 11 (TenantOnboardingStack): Cedar policy store ID/ARN, onboarding state machine ARN, evaluation Lambda ARN
 // Stack 12 (EmailStack): inbound email bucket name, email KMS key ARN, parser/sender queue URLs, Lambda ARNs, rule set name
 // Stack 13 (FrontendStack): S3 bucket name/ARN, CloudFront distribution ID/domain, frontend URL
+// Stack 14 (DiscoveryStack): Cloud Map namespace ID/ARN/name
 
 app.synth();
