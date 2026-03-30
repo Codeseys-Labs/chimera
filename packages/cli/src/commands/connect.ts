@@ -186,10 +186,10 @@ Examples:
     .action((options) => runEndpoints(options));
 
   // Deprecated alias: chimera connect (hidden from help)
+  // Commander v11 uses { hidden: true } option on .command() — .hideHelp() is Option-only
   program
-    .command('connect')
+    .command('connect', { hidden: true })
     .description('(deprecated) Use "chimera endpoints" instead')
-    .hideHelp()
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--json', 'Output result as JSON')
