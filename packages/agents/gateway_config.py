@@ -42,6 +42,7 @@ _TOOL_TIER_REGISTRY: Dict[str, tuple] = {
     # Core (tier 0 — always available)
     'tools.hello_world': (0, ['hello_world_tool']),
     'tools.background_task_tools': (0, ['start_background_task', 'check_background_task']),
+    'tools.cloudmap_tools': (0, ['discover_infrastructure', 'get_service_instances', 'get_namespace_summary']),
 
     # Tier 1: Core Compute & Storage
     'tools.lambda_tools': (1, [
@@ -148,6 +149,9 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     'hello_world_tool': 'Say hello to test agent connectivity',
     'start_background_task': 'Start a long-running background task via EventBridge',
     'check_background_task': 'Check the status of a running background task',
+    'discover_infrastructure': 'Discover all Chimera infrastructure components registered in Cloud Map (runtime state)',
+    'get_service_instances': 'Get all registered instances for a specific Cloud Map service',
+    'get_namespace_summary': 'Get a summary of the Chimera Cloud Map namespace with service and instance counts',
     # Tier 1: Compute & Storage
     'list_lambda_functions': 'List all Lambda functions in the AWS account',
     'get_lambda_function': 'Get details of a specific Lambda function',
