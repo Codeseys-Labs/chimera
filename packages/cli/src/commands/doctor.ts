@@ -6,7 +6,7 @@
  *   2. Chimera auth tokens
  *   3. API connectivity
  *   4. Cognito pool config
- *   5. CloudFormation stack status
+ *   5. CloudFormation stack status (all 11 stacks)
  */
 
 import { Command } from 'commander';
@@ -122,8 +122,13 @@ export function checkCognitoConfig(): CheckResult {
   return { label: 'Cognito pool config', ok: true, detail: `Pool: ${poolId}` };
 }
 
-// Chimera stack suffixes — actual names follow Chimera-{env}-{Suffix} pattern
-const CHIMERA_STACK_SUFFIXES = ['Network', 'Data', 'Security', 'Api', 'Chat'];
+// Chimera stack suffixes — actual names follow Chimera-{env}-{Suffix} pattern.
+// Kept in sync with STACK_DESTROY_ORDER in destroy.ts (all 11 deployed stacks).
+const CHIMERA_STACK_SUFFIXES = [
+  'Network', 'Data', 'Security', 'Observability',
+  'Api', 'Pipeline', 'SkillPipeline', 'Chat',
+  'Orchestration', 'Evolution', 'TenantOnboarding',
+];
 
 export async function checkStackStatus(region?: string, env?: string): Promise<CheckResult> {
   const resolvedEnv = env ?? 'dev';
