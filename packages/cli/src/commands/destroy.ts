@@ -13,8 +13,13 @@ import {
   ListStacksCommand,
   DeleteStackCommand,
   DescribeStackResourcesCommand,
+  DescribeStackEventsCommand,
   StackStatus,
 } from '@aws-sdk/client-cloudformation';
+import {
+  CodeCommitClient,
+  DeleteRepositoryCommand,
+} from '@aws-sdk/client-codecommit';
 import {
   DynamoDBClient,
   ScanCommand,
@@ -137,6 +142,70 @@ async function exportDataArchive(options: { env: string; region: string; exportP
 }
 
 /**
+ * Poll CloudFormation stack events every 10 seconds and print new entries.
+ * Stops when stopSignal.done is set (caller sets it after CDK process exits).
+ * Uses a seen-set to avoid re-printing events across poll cycles.
+ */
+async function monitorStackEvents(
+  client: CloudFormationClient,
+  stackName: string,
+  stopSignal: { done: boolean },
+): Promise<void> {
+  const seen = new Set<string>();
+
+  while (!stopSignal.done) {
+    try {
+      const resp = await client.send(new DescribeStackEventsCommand({ StackName: stackName }));
+      const events = resp.StackEvents ?? [];
+
+      // Emit only new events, oldest first
+      for (const event of [...events].reverse()) {
+        if (event.EventId && !seen.has(event.EventId)) {
+          seen.add(event.EventId);
+          const ts = event.Timestamp?.toISOString().replace('T', ' ').slice(0, 19) ?? '';
+          const status = event.ResourceStatus ?? '';
+          const reason = event.ResourceStatusReason ? ` — ${event.ResourceStatusReason}` : '';
+          const statusStr = status.includes('FAILED')
+            ? color.red(status)
+            : status.includes('COMPLETE')
+              ? color.green(status)
+              : color.gray(status);
+          console.log(`  ${color.gray(ts)} ${event.LogicalResourceId} ${statusStr}${reason}`);
+        }
+      }
+    } catch {
+      // Stack may be fully deleted mid-poll — exit gracefully
+      break;
+    }
+
+    await new Promise<void>(r => setTimeout(r, 10_000));
+  }
+}
+
+/**
+ * Delete the CodeCommit repository created by chimera deploy.
+ * The repo is not CDK-managed (created via SDK in deploy.ts), so CDK destroy
+ * leaves it orphaned — we must delete it explicitly here.
+ */
+async function deleteCodeCommitRepo(
+  client: CodeCommitClient,
+  repoName: string,
+  keepRepo: boolean,
+): Promise<void> {
+  if (keepRepo) {
+    return;
+  }
+  try {
+    await client.send(new DeleteRepositoryCommand({ repositoryName: repoName }));
+  } catch (error: any) {
+    if (error.name !== 'RepositoryDoesNotExistException') {
+      throw error;
+    }
+    // Repo already gone — nothing to do
+  }
+}
+
+/**
  * Reverse dependency order for stack teardown (most dependent stacks first)
  */
 const STACK_DESTROY_ORDER = [
@@ -200,6 +269,8 @@ export function registerDestroyCommands(program: Command): void {
     .option('--force', 'Skip confirmation prompt')
     .option('--retain-data', 'Export DynamoDB table data to a local archive before destroying')
     .option('--export-path <path>', 'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)')
+    .option('--keep-repo', 'Preserve the CodeCommit repository (skip deletion)')
+    .option('--monitor', 'Stream CloudFormation stack events in real-time during destruction')
     .option('--json', 'Output result as JSON')
     .action(async (options) => {
       const spinner = ora('Starting Chimera destruction').start();
@@ -254,26 +325,64 @@ export function registerDestroyCommands(program: Command): void {
 
         const repoRoot = findProjectRoot();
         const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
+        const repoName = wsConfig?.workspace?.repository ?? 'chimera';
+        const cfClient = new CloudFormationClient({ region });
+
+        if (options.monitor && !options.json) {
+          spinner.stop();
+          console.log(color.bold('\nMonitoring CloudFormation events (Ctrl-C to abort):\n'));
+        } else if (!options.json) {
+          console.log(color.gray("  Tip: use --monitor to stream CloudFormation events in real-time"));
+        }
 
         for (const stackSuffix of STACK_DESTROY_ORDER) {
           const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
-          if (!options.json) spinner.text = `Destroying ${stackName}...`;
-          try {
-            // npx spawns Node.js — CDK module resolution works correctly
-            await Bun.$`npx cdk destroy ${stackName} --force --context environment=${safeEnv}`
-              .cwd(`${repoRoot}/infra`)
-              .quiet()
-              .nothrow();
-          } catch { /* Stack may not exist — continue */ }
+          if (!options.json && !options.monitor) spinner.text = `Destroying ${stackName}...`;
+          if (!options.json && options.monitor) console.log(color.bold(`\n→ Destroying ${stackName}`));
+
+          if (options.monitor && !options.json) {
+            // Run CDK destroy in background so we can poll events in parallel
+            const stopSignal = { done: false };
+            const monitorPromise = monitorStackEvents(cfClient, stackName, stopSignal);
+            const proc = Bun.spawn(
+              ['npx', 'cdk', 'destroy', stackName, '--force', '--context', `environment=${safeEnv}`],
+              { cwd: `${repoRoot}/infra`, stdout: 'ignore', stderr: 'ignore' },
+            );
+            await proc.exited;
+            stopSignal.done = true;
+            await monitorPromise;
+          } else {
+            try {
+              // npx spawns Node.js — CDK module resolution works correctly
+              await Bun.$`npx cdk destroy ${stackName} --force --context environment=${safeEnv}`
+                .cwd(`${repoRoot}/infra`)
+                .quiet()
+                .nothrow();
+            } catch { /* Stack may not exist — continue */ }
+          }
         }
 
-        if (!options.json) spinner.succeed(color.green('All CloudFormation stacks destroyed'));
+        if (!options.json && !options.monitor) spinner.succeed(color.green('All CloudFormation stacks destroyed'));
+        if (!options.json && options.monitor) console.log(color.bold('\n✓ All CloudFormation stacks destroyed'));
+
+        // Delete CodeCommit repo after CDK stacks are gone (Pipeline must be
+        // destroyed first so the repo is no longer referenced by any trigger).
+        if (!options.json) spinner.start(`Deleting CodeCommit repository "${repoName}"...`);
+        const ccClient = new CodeCommitClient({ region });
+        await deleteCodeCommitRepo(ccClient, repoName, !!options.keepRepo);
+        if (!options.json) {
+          if (options.keepRepo) {
+            spinner.info(color.gray(`CodeCommit repository "${repoName}" preserved (--keep-repo)`));
+          } else {
+            spinner.succeed(color.green(`CodeCommit repository "${repoName}" deleted`));
+          }
+        }
 
         const cur = loadWorkspaceConfig();
         saveWorkspaceConfig({ ...cur, deployment: undefined });
 
         if (options.json) {
-          console.log(JSON.stringify({ status: 'ok', data: { env, region, archivePath } }));
+          console.log(JSON.stringify({ status: 'ok', data: { env, region, repoName, repoDeleted: !options.keepRepo, archivePath } }));
         } else {
           console.log(color.green('\n✓ Infrastructure destroyed'));
         }
