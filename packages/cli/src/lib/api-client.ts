@@ -30,8 +30,10 @@ export interface Credentials {
 export function loadCredentials(filePath = DEFAULT_CREDENTIALS_FILE): Credentials | null {
   const creds = wsLoadCredentials(filePath);
   if (!creds.auth?.access_token) {
-    const authKeys = creds.auth ? Object.keys(creds.auth).join(',') || 'none' : 'section missing';
-    process.stderr.write(`[chimera debug] loadCredentials: access_token absent (file=${filePath} auth=${authKeys})\n`);
+    if (process.env.CHIMERA_DEBUG) {
+      const authKeys = creds.auth ? Object.keys(creds.auth).join(',') || 'none' : 'section missing';
+      process.stderr.write(`[chimera debug] loadCredentials: access_token absent (file=${filePath} auth=${authKeys})\n`);
+    }
     return null;
   }
   return {
@@ -83,11 +85,15 @@ async function getAuthHeaders(credentialsFile?: string): Promise<Record<string, 
   const file = credentialsFile ?? DEFAULT_CREDENTIALS_FILE;
   const creds = loadCredentials(file);
   if (!creds) {
-    process.stderr.write(`[chimera debug] getAuthHeaders: no valid credentials at ${file}\n`);
+    if (process.env.CHIMERA_DEBUG) {
+      process.stderr.write(`[chimera debug] getAuthHeaders: no valid credentials at ${file}\n`);
+    }
     throw new ChimeraAuthError();
   }
   if (new Date(creds.expiresAt) <= new Date()) {
-    process.stderr.write(`[chimera debug] getAuthHeaders: token expired at ${creds.expiresAt}\n`);
+    if (process.env.CHIMERA_DEBUG) {
+      process.stderr.write(`[chimera debug] getAuthHeaders: token expired at ${creds.expiresAt}\n`);
+    }
     throw new ChimeraAuthError('Token expired. Run "chimera login" again.');
   }
   return {
@@ -96,16 +102,52 @@ async function getAuthHeaders(credentialsFile?: string): Promise<Record<string, 
   };
 }
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+export class ChimeraTimeoutError extends Error {
+  constructor() {
+    super('Connection timed out. Check that your API server is reachable.');
+    this.name = 'ChimeraTimeoutError';
+  }
+}
+
+/**
+ * Pre-flight credential check. Call before API operations to fail fast with a
+ * clean error instead of surfacing a stack trace from a deeper auth failure.
+ */
+export function guardAuth(credentialsFile?: string): void {
+  const file = credentialsFile ?? DEFAULT_CREDENTIALS_FILE;
+  const creds = loadCredentials(file);
+  if (!creds) {
+    throw new ChimeraAuthError();
+  }
+  if (new Date(creds.expiresAt) <= new Date()) {
+    throw new ChimeraAuthError('Token expired. Run "chimera login" again.');
+  }
+}
+
 async function request<T>(method: string, urlPath: string, body?: unknown, credentialsFile?: string): Promise<T> {
   const url = getUrlForPath(urlPath);
 
   const headers = await getAuthHeaders(credentialsFile);
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw new ChimeraTimeoutError();
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 401) {
     throw new ChimeraAuthError();
@@ -125,11 +167,23 @@ async function requestStream(method: string, urlPath: string, body?: unknown, cr
   const headers = await getAuthHeaders(credentialsFile);
   headers['Accept'] = 'text/event-stream';
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw new ChimeraTimeoutError();
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 401) {
     throw new ChimeraAuthError();

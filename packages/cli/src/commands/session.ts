@@ -3,10 +3,11 @@
  */
 
 import { Command } from 'commander';
+import inquirer from 'inquirer';
 import ora from 'ora';
 import { table } from 'table';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
-import { apiClient } from '../lib/api-client.js';
+import { apiClient, guardAuth } from '../lib/api-client.js';
 import { color } from '../lib/color.js';
 
 interface Session {
@@ -46,6 +47,7 @@ export function registerSessionCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         const created = await apiClient.post<Session>('/sessions', {
           tenantId: (wsConfig as any).current_tenant,
           userId: options.user || 'default-user',
@@ -64,7 +66,8 @@ export function registerSessionCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to create session'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -90,6 +93,7 @@ export function registerSessionCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         const url = options.user ? `/sessions?userId=${encodeURIComponent(options.user)}` : '/sessions';
         const sessions = await apiClient.get<Session[]>(url);
 
@@ -122,19 +126,38 @@ export function registerSessionCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to list sessions'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
   session
     .command('terminate <session-id>')
     .description('Terminate an active session')
+    .option('--force', 'Skip confirmation')
     .option('--json', 'Output result as JSON')
     .action(async (sessionId: string, options) => {
+      if (!options.force && !options.json) {
+        const { confirm } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'confirm',
+            message: `Terminate session "${sessionId}"?`,
+            default: false,
+          },
+        ]);
+
+        if (!confirm) {
+          console.log(color.yellow('Termination cancelled'));
+          return;
+        }
+      }
+
       const spinner = ora(`Terminating session ${sessionId}`).start();
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         await apiClient.delete(`/sessions/${encodeURIComponent(sessionId)}`);
 
         if (options.json) {
@@ -148,7 +171,8 @@ export function registerSessionCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to terminate session'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 }
