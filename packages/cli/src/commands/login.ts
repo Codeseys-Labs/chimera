@@ -202,24 +202,42 @@ export function registerLoginCommand(program: Command): void {
     .option('--browser', 'Use custom browser login UI at localhost:9999')
     .option('--terminal', 'Use terminal email/password login (skips mode prompt)')
     .option('--no-prompt', 'Non-interactive: default to terminal mode without prompting')
-    .action(async (options: { email?: string; browser?: boolean; terminal?: boolean; prompt?: boolean }) => {
+    .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
+    .option('--json', 'Output result as JSON (status + expires_at)')
+    .addHelpText('after', `
+Examples:
+  $ chimera login                     # interactive mode selection
+  $ chimera login --terminal          # terminal credentials prompt
+  $ chimera login --browser           # browser-based login
+  $ chimera login --email me@co.com   # skip email prompt
+  $ chimera login --no-prompt         # non-interactive terminal login
+  $ chimera login --json              # output JSON result after login`)
+    .action(async (options: { email?: string; browser?: boolean; terminal?: boolean; prompt?: boolean; region?: string; json?: boolean }) => {
       const config = loadWorkspaceConfig();
       const clientId = config.endpoints?.cognito_client_id;
-      const region = config.aws?.region;
+      const region = options.region ?? config.aws?.region;
 
       if (!region) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: 'No AWS region configured', code: 'NO_REGION' }));
+          process.exit(1);
+        }
         console.error(color.red('✗ No AWS region configured'));
         console.error(color.dim('  Run "chimera init" to set up your workspace'));
         process.exit(1);
       }
 
       if (!clientId) {
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: 'Missing Cognito client ID in chimera.toml', code: 'NO_CLIENT_ID' }));
+          process.exit(1);
+        }
         console.error(color.red('✗ Missing Cognito client ID in chimera.toml'));
         console.error(color.dim('  Run `chimera endpoints` to fetch configuration'));
         process.exit(1);
       }
 
-      console.log(color.bold('Chimera Login\n'));
+      if (!options.json) console.log(color.bold('Chimera Login\n'));
 
       // Determine auth mode: explicit flags take precedence, then prompt if interactive
       let useBrowser = options.browser === true;
@@ -247,10 +265,19 @@ export function registerLoginCommand(program: Command): void {
           // Dynamic import keeps browser-server out of terminal-only test paths
           const { startBrowserLogin } = await import('../auth/browser-server.js');
           await startBrowserLogin(clientId, region);
-          console.log(color.green('\n✓ Logged in successfully'));
+          if (options.json) {
+            const creds = loadCredentials();
+            console.log(JSON.stringify({ status: 'ok', data: { loggedIn: true, expires_at: creds?.auth?.expires_at } }));
+          } else {
+            console.log(color.green('\n✓ Logged in successfully'));
+          }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(color.red(`\n✗ Login failed: ${msg}`));
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: msg, code: 'LOGIN_FAILED' }));
+          } else {
+            console.error(color.red(`\n✗ Login failed: ${msg}`));
+          }
           process.exit(1);
         }
         return;
@@ -277,10 +304,19 @@ export function registerLoginCommand(program: Command): void {
 
       try {
         await terminalLogin(clientId, region, options.email ?? email, password);
-        console.log(color.green('\n✓ Logged in successfully'));
+        if (options.json) {
+          const creds = loadCredentials();
+          console.log(JSON.stringify({ status: 'ok', data: { loggedIn: true, expires_at: creds?.auth?.expires_at } }));
+        } else {
+          console.log(color.green('\n✓ Logged in successfully'));
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(color.red(`\n✗ Login failed: ${msg}`));
+        if (options.json) {
+          console.log(JSON.stringify({ status: 'error', error: msg, code: 'LOGIN_FAILED' }));
+        } else {
+          console.error(color.red(`\n✗ Login failed: ${msg}`));
+        }
         process.exit(1);
       }
     });

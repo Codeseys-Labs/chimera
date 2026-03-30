@@ -23,7 +23,14 @@ interface Tenant {
 export function registerTenantCommands(program: Command): void {
   const tenant = program
     .command('tenant')
-    .description('Manage Chimera tenants');
+    .description('Manage Chimera tenants')
+    .addHelpText('after', `
+Examples:
+  $ chimera tenant list                       # list all tenants
+  $ chimera tenant create -n "My Org"         # create a tenant
+  $ chimera tenant switch ten-abc123          # switch active tenant
+  $ chimera tenant delete ten-abc123 --force  # delete without prompt
+  $ chimera tenant list --json                # machine-readable list`);
 
   tenant
     .command('create')
@@ -142,7 +149,7 @@ export function registerTenantCommands(program: Command): void {
         ];
 
         console.log(table(rows));
-        console.log(color.gray('* = current tenant'));
+        console.log(color.dim('* = current tenant'));
       } catch (error: any) {
         if (options.json) {
           console.log(JSON.stringify({ status: 'error', error: error.message, code: 'TENANT_LIST_FAILED' }));
@@ -157,10 +164,15 @@ export function registerTenantCommands(program: Command): void {
   tenant
     .command('switch <tenant-id>')
     .description('Switch to a different tenant (updates current tenant in chimera.toml)')
-    .action((tenantId: string) => {
+    .option('--json', 'Output result as JSON')
+    .action((tenantId: string, options: { json?: boolean }) => {
       const wsConfig = loadWorkspaceConfig();
       saveWorkspaceConfig({ ...wsConfig, current_tenant: tenantId } as any);
-      console.log(color.green(`Switched to tenant: ${tenantId}`));
+      if (options.json) {
+        console.log(JSON.stringify({ status: 'ok', data: { tenantId, status: 'switched' } }));
+      } else {
+        console.log(color.green(`Switched to tenant: ${tenantId}`));
+      }
     });
 
   tenant
