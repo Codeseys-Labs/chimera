@@ -1,165 +1,220 @@
-/**
- * Shell completion command — generate tab-completion scripts for bash/zsh/fish
+ /**
+ * chimera completion — Output shell completion scripts for bash, zsh, or fish.
  *
  * Usage:
- *   chimera completion bash   >> ~/.bashrc
- *   chimera completion zsh    >> ~/.zshrc
- *   chimera completion fish   > ~/.config/fish/completions/chimera.fish
+ *   chimera completion bash   → add to ~/.bashrc or eval "$(chimera completion bash)"
+ *   chimera completion zsh    → add to ~/.zshrc or save to ~/.zfunc/_chimera
+ *   chimera completion fish   → chimera completion fish | source
  */
 
 import { Command } from 'commander';
 import { color } from '../lib/color.js';
 
-const TOP_LEVEL_COMMANDS = [
-  'init', 'deploy', 'endpoints', 'setup',
-  'status', 'sync', 'upgrade', 'destroy', 'monitor',
-  'login', 'tenant', 'session', 'skill', 'chat',
-  'doctor', 'completion',
-];
-
 const BASH_SCRIPT = `
-# chimera bash completion
 _chimera_completions() {
-  local cur prev words cword
-  _init_completion 2>/dev/null || {
-    COMPREPLY=()
-    cur="\${COMP_WORDS[COMP_CWORD]}"
-    prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  }
+  local cur prev
+  cur="\${COMP_WORDS[COMP_CWORD]}"
+  prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-  local commands="${TOP_LEVEL_COMMANDS.join(' ')}"
+  local commands="init deploy endpoints setup status sync upgrade destroy cleanup redeploy monitor login chat session tenant skill doctor completion help"
 
-  if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+  if [ "\${COMP_CWORD}" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
     return 0
   fi
 
-  case "$prev" in
-    tenant)
-      COMPREPLY=( $(compgen -W "create list switch delete" -- "$cur") )
-      ;;
+  case "\${prev}" in
     session)
-      COMPREPLY=( $(compgen -W "create list get delete" -- "$cur") )
+      COMPREPLY=( $(compgen -W "create list terminate" -- "\${cur}") )
+      ;;
+    tenant)
+      COMPREPLY=( $(compgen -W "create list use delete" -- "\${cur}") )
       ;;
     skill)
-      COMPREPLY=( $(compgen -W "list install enable disable uninstall" -- "$cur") )
+      COMPREPLY=( $(compgen -W "list install enable disable uninstall" -- "\${cur}") )
       ;;
     completion)
-      COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
+      COMPREPLY=( $(compgen -W "bash zsh fish" -- "\${cur}") )
       ;;
-    --region)
-      COMPREPLY=( $(compgen -W "us-east-1 us-west-2 eu-west-1 ap-southeast-1" -- "$cur") )
+    --region|--env)
+      COMPREPLY=()
       ;;
     *)
-      COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--help --verbose --debug --version" -- "\${cur}") )
       ;;
   esac
 }
 
 complete -F _chimera_completions chimera
-`.trimStart();
+`.trim();
 
 const ZSH_SCRIPT = `
-# chimera zsh completion
 #compdef chimera
 
 _chimera() {
-  local state
+  local context state line
+  typeset -A opt_args
 
   _arguments \\
-    '(-V --version)'{-V,--version}'[output the version number]' \\
-    '(-h --help)'{-h,--help}'[display help for command]' \\
-    '1: :_chimera_commands' \\
-    '*::arg:->args'
-
-  case $state in
-    args)
-      case $words[1] in
-        tenant)
-          _arguments '1: :(create list switch delete)'
-          ;;
-        session)
-          _arguments '1: :(create list get delete)'
-          ;;
-        skill)
-          _arguments '1: :(list install enable disable uninstall)'
-          ;;
-        completion)
-          _arguments '1: :(bash zsh fish)'
-          ;;
-      esac
-      ;;
-  esac
+    '(-V --version)'{-V,--version}'[Output the version number]' \\
+    '--verbose[Enable verbose/debug output]' \\
+    '--debug[Alias for --verbose]' \\
+    '(-h --help)'{-h,--help}'[Display help]' \\
+    '1:command:_chimera_commands' \\
+    '*::args:_chimera_subcommand'
 }
 
 _chimera_commands() {
-  local commands
+  local -a commands
   commands=(
-    'init:Create a chimera.toml workspace configuration file'
-    'deploy:Deploy Chimera to AWS account'
-    'endpoints:Fetch deployed API endpoints and save to local config'
-    'setup:Provision admin user in Cognito after infrastructure deployment'
+    'init:Initialize chimera workspace'
+    'deploy:Deploy Chimera to AWS'
+    'endpoints:Fetch deployed API endpoints and save to config'
+    'setup:Provision admin user in Cognito after deployment'
     'status:Check Chimera deployment health and status'
-    'sync:Bidirectional sync between local workspace and CodeCommit'
-    'upgrade:Apply upstream GitHub changes to CodeCommit'
-    'destroy:Tear down Chimera infrastructure'
-    'monitor:Watch active CloudFormation stack operations in real-time'
+    'sync:Apply upstream GitHub changes to CodeCommit'
+    'upgrade:Upgrade CLI to the latest version'
+    'destroy:Tear down all Chimera stacks from AWS'
+    'cleanup:Delete stacks stuck in ROLLBACK_COMPLETE state'
+    'redeploy:Clean up failed stacks then retry CDK deployment'
+    'monitor:Watch active CloudFormation stack operations'
     'login:Authenticate with the Chimera platform'
-    'tenant:Manage Chimera tenants'
-    'session:Manage agent sessions'
-    'skill:Manage agent skills'
     'chat:Start an interactive chat session'
+    'session:Manage agent sessions'
+    'tenant:Manage Chimera tenants'
+    'skill:Manage agent skills'
     'doctor:Run pre-flight checks for the Chimera platform'
-    'completion:Generate shell completion scripts'
+    'completion:Output shell completion script'
   )
   _describe 'command' commands
 }
 
-_chimera
-`.trimStart();
+_chimera_subcommand() {
+  case "\${words[1]}" in
+    session)
+      local -a subcmds
+      subcmds=(
+        'create:Create a new agent session'
+        'list:List active sessions'
+        'terminate:Terminate an active session'
+      )
+      _describe 'session subcommand' subcmds
+      ;;
+    tenant)
+      local -a subcmds
+      subcmds=(
+        'create:Create a new tenant'
+        'list:List all tenants'
+        'use:Switch to a different tenant'
+        'delete:Delete a tenant'
+      )
+      _describe 'tenant subcommand' subcmds
+      ;;
+    skill)
+      local -a subcmds
+      subcmds=(
+        'list:List installed skills'
+        'install:Install a skill from the marketplace'
+        'enable:Enable an installed skill'
+        'disable:Disable a skill'
+        'uninstall:Uninstall a skill'
+      )
+      _describe 'skill subcommand' subcmds
+      ;;
+    completion)
+      local -a subcmds
+      subcmds=(
+        'bash:Output bash completion script'
+        'zsh:Output zsh completion script'
+        'fish:Output fish completion script'
+      )
+      _describe 'completion subcommand' subcmds
+      ;;
+  esac
+}
+
+_chimera "$@"
+`.trim();
 
 const FISH_SCRIPT = `
-# chimera fish completion
+# chimera shell completions for fish
+# Install: chimera completion fish | source
+# Or save: chimera completion fish > ~/.config/fish/completions/chimera.fish
 
-set -l chimera_commands ${TOP_LEVEL_COMMANDS.join(' ')}
-
-# Disable file completions for all subcommands
+# Disable file completion for chimera
 complete -c chimera -f
 
+# Helper: true when no subcommand has been given yet
+function __chimera_no_subcommand
+  set -l cmd (commandline -poc)
+  for sub in init deploy endpoints setup status sync upgrade destroy cleanup redeploy monitor login chat session tenant skill doctor completion help
+    if contains -- $sub $cmd
+      return 1
+    end
+  end
+  return 0
+end
+
 # Top-level commands
-complete -c chimera -n "__fish_use_subcommand" -a "init"       -d "Create a chimera.toml workspace configuration file"
-complete -c chimera -n "__fish_use_subcommand" -a "deploy"     -d "Deploy Chimera to AWS account"
-complete -c chimera -n "__fish_use_subcommand" -a "endpoints"  -d "Fetch deployed API endpoints and save to local config"
-complete -c chimera -n "__fish_use_subcommand" -a "setup"      -d "Provision admin user in Cognito"
-complete -c chimera -n "__fish_use_subcommand" -a "status"     -d "Check Chimera deployment health and status"
-complete -c chimera -n "__fish_use_subcommand" -a "sync"       -d "Bidirectional sync with CodeCommit"
-complete -c chimera -n "__fish_use_subcommand" -a "upgrade"    -d "Apply upstream changes to CodeCommit"
-complete -c chimera -n "__fish_use_subcommand" -a "destroy"    -d "Tear down Chimera infrastructure"
-complete -c chimera -n "__fish_use_subcommand" -a "monitor"    -d "Watch CloudFormation stack operations"
-complete -c chimera -n "__fish_use_subcommand" -a "login"      -d "Authenticate with the Chimera platform"
-complete -c chimera -n "__fish_use_subcommand" -a "tenant"     -d "Manage Chimera tenants"
-complete -c chimera -n "__fish_use_subcommand" -a "session"    -d "Manage agent sessions"
-complete -c chimera -n "__fish_use_subcommand" -a "skill"      -d "Manage agent skills"
-complete -c chimera -n "__fish_use_subcommand" -a "chat"       -d "Start an interactive chat session"
-complete -c chimera -n "__fish_use_subcommand" -a "doctor"     -d "Run pre-flight checks"
-complete -c chimera -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion scripts"
+complete -c chimera -n '__chimera_no_subcommand' -a init       -d 'Initialize chimera workspace'
+complete -c chimera -n '__chimera_no_subcommand' -a deploy     -d 'Deploy Chimera to AWS'
+complete -c chimera -n '__chimera_no_subcommand' -a endpoints  -d 'Fetch deployed API endpoints'
+complete -c chimera -n '__chimera_no_subcommand' -a setup      -d 'Provision admin user after deployment'
+complete -c chimera -n '__chimera_no_subcommand' -a status     -d 'Check deployment health and status'
+complete -c chimera -n '__chimera_no_subcommand' -a sync       -d 'Apply upstream GitHub changes'
+complete -c chimera -n '__chimera_no_subcommand' -a upgrade    -d 'Upgrade CLI to the latest version'
+complete -c chimera -n '__chimera_no_subcommand' -a destroy    -d 'Tear down all Chimera stacks'
+complete -c chimera -n '__chimera_no_subcommand' -a cleanup    -d 'Delete stacks in ROLLBACK_COMPLETE'
+complete -c chimera -n '__chimera_no_subcommand' -a redeploy   -d 'Clean up and retry CDK deployment'
+complete -c chimera -n '__chimera_no_subcommand' -a monitor    -d 'Watch CloudFormation stack operations'
+complete -c chimera -n '__chimera_no_subcommand' -a login      -d 'Authenticate with the Chimera platform'
+complete -c chimera -n '__chimera_no_subcommand' -a chat       -d 'Start an interactive chat session'
+complete -c chimera -n '__chimera_no_subcommand' -a session    -d 'Manage agent sessions'
+complete -c chimera -n '__chimera_no_subcommand' -a tenant     -d 'Manage Chimera tenants'
+complete -c chimera -n '__chimera_no_subcommand' -a skill      -d 'Manage agent skills'
+complete -c chimera -n '__chimera_no_subcommand' -a doctor     -d 'Run pre-flight checks'
+complete -c chimera -n '__chimera_no_subcommand' -a completion -d 'Output shell completion script'
 
-# Subcommand completions
-complete -c chimera -n "__fish_seen_subcommand_from tenant"     -a "create list switch delete"
-complete -c chimera -n "__fish_seen_subcommand_from session"    -a "create list get delete"
-complete -c chimera -n "__fish_seen_subcommand_from skill"      -a "list install enable disable uninstall"
-complete -c chimera -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
+# Global flags
+complete -c chimera -l verbose -d 'Enable verbose/debug output'
+complete -c chimera -l debug   -d 'Alias for --verbose'
+complete -c chimera -s V -l version -d 'Output the version number'
+complete -c chimera -s h -l help    -d 'Display help'
 
-# Common flags
-complete -c chimera -l "json"   -d "Output result as JSON"
-complete -c chimera -l "region" -d "AWS region"            -r
-complete -c chimera -l "env"    -d "Environment name"      -r
-`.trimStart();
+# session subcommands
+complete -c chimera -n '__fish_seen_subcommand_from session' -a create    -d 'Create a new agent session'
+complete -c chimera -n '__fish_seen_subcommand_from session' -a list      -d 'List active sessions'
+complete -c chimera -n '__fish_seen_subcommand_from session' -a terminate -d 'Terminate an active session'
+
+# tenant subcommands
+complete -c chimera -n '__fish_seen_subcommand_from tenant' -a create -d 'Create a new tenant'
+complete -c chimera -n '__fish_seen_subcommand_from tenant' -a list   -d 'List all tenants'
+complete -c chimera -n '__fish_seen_subcommand_from tenant' -a use    -d 'Switch to a different tenant'
+complete -c chimera -n '__fish_seen_subcommand_from tenant' -a delete -d 'Delete a tenant'
+
+# skill subcommands
+complete -c chimera -n '__fish_seen_subcommand_from skill' -a list      -d 'List installed skills'
+complete -c chimera -n '__fish_seen_subcommand_from skill' -a install   -d 'Install a skill'
+complete -c chimera -n '__fish_seen_subcommand_from skill' -a enable    -d 'Enable a skill'
+complete -c chimera -n '__fish_seen_subcommand_from skill' -a disable   -d 'Disable a skill'
+complete -c chimera -n '__fish_seen_subcommand_from skill' -a uninstall -d 'Uninstall a skill'
+
+# completion subcommands
+complete -c chimera -n '__fish_seen_subcommand_from completion' -a bash -d 'Output bash completion script'
+complete -c chimera -n '__fish_seen_subcommand_from completion' -a zsh  -d 'Output zsh completion script'
+complete -c chimera -n '__fish_seen_subcommand_from completion' -a fish -d 'Output fish completion script'
+`.trim();
+
+const SHELL_SCRIPTS: Record<string, string> = {
+  bash: BASH_SCRIPT,
+  zsh: ZSH_SCRIPT,
+  fish: FISH_SCRIPT,
+};
 
 export function registerCompletionCommand(program: Command): void {
   program
     .command('completion')
-    .description('Generate shell completion scripts')
+    .description('Output shell completion script for bash, zsh, or fish')
     .argument('<shell>', 'Shell type: bash, zsh, or fish')
     .addHelpText('after', `
 Examples:
@@ -167,20 +222,12 @@ Examples:
   $ chimera completion zsh  >> ~/.zshrc
   $ chimera completion fish > ~/.config/fish/completions/chimera.fish`)
     .action((shell: string) => {
-      switch (shell.toLowerCase()) {
-        case 'bash':
-          process.stdout.write(BASH_SCRIPT);
-          break;
-        case 'zsh':
-          process.stdout.write(ZSH_SCRIPT);
-          break;
-        case 'fish':
-          process.stdout.write(FISH_SCRIPT);
-          break;
-        default:
-          console.error(color.red(`Unknown shell: ${shell}`));
-          console.error(color.gray('Supported shells: bash, zsh, fish'));
-          process.exit(1);
+      const script = SHELL_SCRIPTS[shell];
+      if (!script) {
+        console.error(color.red(`Unknown shell: ${shell}`));
+        console.error(color.gray('Supported shells: bash, zsh, fish'));
+        process.exit(1);
       }
+      console.log(script);
     });
 }
