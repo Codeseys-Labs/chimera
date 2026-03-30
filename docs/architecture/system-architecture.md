@@ -18,20 +18,20 @@ The full infrastructure is expressed as 14 CloudFormation stacks synthesized und
 
 ```mermaid
 flowchart TD
-    NET[Network\nVPC · subnets · NAT\nVPC endpoints · SGs]
-    DATA[Data\n6 DynamoDB tables · 3 S3 buckets\nDAX cluster]
-    SEC[Security\nCognito · WAF WebACL\nKMS CMK]
-    OBS[Observability\nCloudWatch · SNS alarms\nX-Ray]
-    API[Api\nREST API · WebSocket\nJWT authorizer]
-    PIPE[Pipeline\nCodePipeline · CodeCommit\nCodeBuild · ECR repos]
-    SKILL[SkillPipeline\nStep Functions\n7-stage scanner]
-    CHAT[Chat\nECS Fargate · ALB\nCloudFront OAC]
-    ORCH[Orchestration\nEventBridge · SQS FIFO\nA2A queues]
-    EVO[Evolution\nStep Functions engine\nDynamoDB state · S3 artifacts]
-    TENANT[TenantOnboarding\nStep Functions workflow\nCedar policy store · Lambdas]
-    EMAIL[Email\nSES receipt rules · S3\nParser / Sender Lambdas]
-    FRONT[Frontend\nS3 + CloudFront OAC\nReact SPA]
-    GW[GatewayRegistration\nAgentCore Gateway targets\nMCP endpoint registry]
+    NET["Network<br/>VPC · subnets · NAT<br/>VPC endpoints · SGs"]
+    DATA["Data<br/>6 DynamoDB tables · 3 S3 buckets<br/>DAX cluster"]
+    SEC["Security<br/>Cognito · WAF WebACL<br/>KMS CMK"]
+    OBS["Observability<br/>CloudWatch · SNS alarms<br/>X-Ray"]
+    API["Api<br/>REST API · WebSocket<br/>JWT authorizer"]
+    PIPE["Pipeline<br/>CodePipeline · CodeCommit<br/>CodeBuild · ECR repos"]
+    SKILL["SkillPipeline<br/>Step Functions<br/>7-stage scanner"]
+    CHAT["Chat<br/>ECS Fargate · ALB<br/>CloudFront OAC"]
+    ORCH["Orchestration<br/>EventBridge · SQS FIFO<br/>A2A queues"]
+    EVO["Evolution<br/>Step Functions engine<br/>DynamoDB state · S3 artifacts"]
+    TENANT["TenantOnboarding<br/>Step Functions workflow<br/>Cedar policy store · Lambdas"]
+    EMAIL["Email<br/>SES receipt rules · S3<br/>Parser / Sender Lambdas"]
+    FRONT["Frontend<br/>S3 + CloudFront OAC<br/>React SPA"]
+    GW["GatewayRegistration<br/>AgentCore Gateway targets<br/>MCP endpoint registry"]
 
     NET --> DATA
     NET --> CHAT
@@ -76,12 +76,12 @@ The primary happy path from a fresh machine to active chat session.
 
 ```mermaid
 flowchart LR
-    A([chimera init]) -->|chimera.toml created\nadmin email stored| B([chimera deploy])
-    B -->|source → CodeCommit\nnpx cdk deploy Pipeline| C([chimera setup])
-    C -->|provisions admin\nCognito user| D([chimera connect])
-    D -->|fetches endpoints\ninto chimera.toml| E([chimera login])
-    E -->|Cognito tokens\n→ ~/.chimera/credentials| F([chimera chat])
-    F -->|SSE stream\nvia ALB /chat/stream| G([agent response])
+    A([chimera init]) -->|chimera.toml created<br/>admin email stored| B([chimera deploy])
+    B -->|source → CodeCommit<br/>npx cdk deploy Pipeline| C([chimera setup])
+    C -->|provisions admin<br/>Cognito user| D([chimera connect])
+    D -->|fetches endpoints<br/>into chimera.toml| E([chimera login])
+    E -->|Cognito tokens<br/>→ ~/.chimera/credentials| F([chimera chat])
+    F -->|SSE stream<br/>via ALB /chat/stream| G([agent response])
 
     style A fill:#2d6a4f,color:#fff
     style G fill:#1d3557,color:#fff
@@ -98,31 +98,31 @@ From user keystroke to streamed token, showing every hop across components.
 
 ```mermaid
 sequenceDiagram
-    participant U as User (CLI / Web)
-    participant CLI as chimera chat\n(ink TUI / readline)
-    participant ALB as ALB\n(ECS Fargate)
-    participant GW as Hono\nchat-gateway
-    participant AUTH as optionalAuth\nmiddleware
-    participant TC as extractTenantContext\nmiddleware
+    participant U as "User (CLI / Web)"
+    participant CLI as "chimera chat (ink TUI / readline)"
+    participant ALB as "ALB (ECS Fargate)"
+    participant GW as "Hono chat-gateway"
+    participant AUTH as "optionalAuth middleware"
+    participant TC as "extractTenantContext middleware"
     participant RL as rateLimitMiddleware
-    participant AGENT as AgentCore\nRuntime (MicroVM)
-    participant STRANDS as Strands\nReAct Loop
-    participant TOOLS as AWS Tools\n(40 implementations)
+    participant AGENT as "AgentCore Runtime (MicroVM)"
+    participant STRANDS as "Strands ReAct Loop"
+    participant TOOLS as "AWS Tools (40 implementations)"
 
     U->>CLI: user types message
-    CLI->>ALB: POST /chat/stream\nAuthorization: Bearer <JWT>
+    CLI->>ALB: POST /chat/stream — Authorization: Bearer JWT
     ALB->>GW: HTTP request
     GW->>AUTH: optionalAuth (extracts JWT claims)
-    AUTH->>TC: extractTenantContext\n(tenantId from JWT or header)
-    TC->>RL: rateLimitMiddleware\n(token bucket check)
-    RL->>AGENT: invoke agent\n(tenantId · userId · message)
-    AGENT->>STRANDS: hydrate session\n(AgentCore Memory STM)
+    AUTH->>TC: extractTenantContext (tenantId from JWT or header)
+    TC->>RL: rateLimitMiddleware (token bucket check)
+    RL->>AGENT: invoke agent (tenantId · userId · message)
+    AGENT->>STRANDS: hydrate session (AgentCore Memory STM)
     loop ReAct iterations (max 20)
         STRANDS->>TOOLS: tool call (Cedar policy check)
         TOOLS-->>STRANDS: tool result
     end
     STRANDS-->>AGENT: final response
-    AGENT-->>GW: SSE stream (data: {"type":"token",...})
+    AGENT-->>GW: SSE stream — {type:token,...}
     GW-->>ALB: chunked SSE response
     ALB-->>CLI: stream tokens
     CLI-->>U: render via ink / stdout
@@ -137,18 +137,18 @@ Terminal login path: `chimera login` → Cognito challenge loop → credentials 
 ```mermaid
 sequenceDiagram
     participant CLI as chimera login
-    participant INQ as inquirer\nprompt
-    participant COG as Cognito\nInitiateAuth
+    participant INQ as "inquirer prompt"
+    participant COG as "Cognito InitiateAuth"
     participant CHAL as RespondToAuthChallenge
-    participant CREDS as ~/.chimera/credentials\n(TOML)
-    participant API as api-client.ts\n(chat requests)
-    participant GW as chat-gateway\noptionalAuth
+    participant CREDS as "~/.chimera/credentials (TOML)"
+    participant API as "api-client.ts (chat requests)"
+    participant GW as "chat-gateway optionalAuth"
 
     CLI->>INQ: mode prompt (Terminal / Browser)
     INQ-->>CLI: terminal selected
     CLI->>INQ: email + password prompts
     INQ-->>CLI: credentials
-    CLI->>COG: InitiateAuth\nUSER_PASSWORD_AUTH
+    CLI->>COG: InitiateAuth — USER_PASSWORD_AUTH
     COG-->>CLI: ChallengeName or AuthResult
 
     loop Challenge chain (NEW_PASSWORD_REQUIRED · SOFTWARE_TOKEN_MFA · SMS_MFA · MFA_SETUP)
@@ -158,11 +158,11 @@ sequenceDiagram
         CHAL-->>CLI: next challenge or AuthResult
     end
 
-    CLI->>CREDS: saveCredentials()\naccess_token · id_token · refresh_token · expires_at
+    CLI->>CREDS: saveCredentials() — access_token · id_token · refresh_token · expires_at
     Note over CREDS: ~/.chimera/credentials (TOML format)
 
     API->>CREDS: loadCredentials()
-    API->>GW: POST /chat/stream\nAuthorization: Bearer <access_token>
+    API->>GW: POST /chat/stream — Authorization: Bearer access_token
     GW-->>API: SSE response
 ```
 
@@ -176,23 +176,23 @@ How the evolution engine detects patterns, generates infrastructure, and deploys
 
 ```mermaid
 flowchart TD
-    DETECT[Pattern Detector\nDetects ≥3 repeated tool patterns\nor feedback signals]
-    HARNESS[Safety Harness\n① Rate limit check\n② Cedar policy eval\n③ Cost impact check\n④ S3 snapshot]
-    HUMAN{Human approval\nrequired?}
-    HITL[HITL Gateway\nWaits for approval]
-    AUTOSKILL[AutoSkillGenerator\nGenerates SKILL.md v2\n+ implementation code]
-    IACMOD[IaC Modifier\nGenerates CDK TypeScript\nfrom requirements]
-    COMMIT[CodeCommit push\nvia pushToCodeCommit()]
-    PIPELINE[CodePipeline\ntriggered automatically]
-    BUILD[CodeBuild\nnpx cdk deploy]
-    ECR[ECR push\n Docker image]
-    ECS[ECS Fargate\nrolling update]
-    REGISTER[GatewayRegistration\nnew MCP endpoint registered]
-    MONITOR[Post-health check\ndrop >10% → auto-rollback]
+    DETECT["Pattern Detector<br/>Detects ≥3 repeated tool patterns<br/>or feedback signals"]
+    HARNESS["Safety Harness<br/>① Rate limit check<br/>② Cedar policy eval<br/>③ Cost impact check<br/>④ S3 snapshot"]
+    HUMAN{"Human approval<br/>required?"}
+    HITL["HITL Gateway<br/>Waits for approval"]
+    AUTOSKILL["AutoSkillGenerator<br/>Generates SKILL.md v2<br/>+ implementation code"]
+    IACMOD["IaC Modifier<br/>Generates CDK TypeScript<br/>from requirements"]
+    COMMIT["CodeCommit push<br/>via pushToCodeCommit()"]
+    PIPELINE["CodePipeline<br/>triggered automatically"]
+    BUILD["CodeBuild<br/>npx cdk deploy"]
+    ECR["ECR push<br/>Docker image"]
+    ECS["ECS Fargate<br/>rolling update"]
+    REGISTER["GatewayRegistration<br/>new MCP endpoint registered"]
+    MONITOR["Post-health check<br/>drop &gt;10% → auto-rollback"]
 
     DETECT --> HARNESS
     HARNESS --> HUMAN
-    HUMAN -- "> $50/mo or\ndelete/modify-IAM" --> HITL
+    HUMAN -- "&gt; $50/mo or<br/>delete/modify-IAM" --> HITL
     HITL --> IACMOD
     HUMAN -- "Safe change" --> AUTOSKILL
     HUMAN -- "Infra change" --> IACMOD
@@ -205,7 +205,7 @@ flowchart TD
     ECS --> REGISTER
     REGISTER --> MONITOR
     MONITOR -- "Healthy" --> DETECT
-    MONITOR -- "Degraded" --> ROLLBACK[Auto-rollback\nrestore S3 snapshot]
+    MONITOR -- "Degraded" --> ROLLBACK["Auto-rollback<br/>restore S3 snapshot"]
 ```
 
 **Safety limits:** 10 evolutions/day total · 3 infra changes/day · 3 prompt A/B tests/week
@@ -218,16 +218,16 @@ How tenant isolation is enforced from JWT extraction through to memory namespaci
 
 ```mermaid
 flowchart TD
-    JWT[Cognito JWT\nclaims: tenantId · tier · role]
-    GW[chat-gateway\nextractTenantContext]
-    RATE[Rate limiter\ntoken bucket in\nchimera-rate-limits]
-    CEDAR[Cedar policy engine\npermit / forbid decision]
-    AGENT[AgentCore Runtime\nMicroVM per tenant]
-    MEM[AgentCore Memory\nnamespace: tenant-X-user-Y]
-    DDB[DynamoDB\nPK: tenantId#resourceId]
-    GSI[GSI queries\nFilterExpression: tenantId = :tid]
-    KMS[KMS CMK\nper-tenant encryption key]
-    AUDIT[chimera-audit\nCMK encrypted · 90d TTL]
+    JWT["Cognito JWT<br/>claims: tenantId · tier · role"]
+    GW["chat-gateway<br/>extractTenantContext"]
+    RATE["Rate limiter<br/>token bucket in<br/>chimera-rate-limits"]
+    CEDAR["Cedar policy engine<br/>permit / forbid decision"]
+    AGENT["AgentCore Runtime<br/>MicroVM per tenant"]
+    MEM["AgentCore Memory<br/>namespace: tenant-X-user-Y"]
+    DDB["DynamoDB<br/>PK: tenantId#resourceId"]
+    GSI["GSI queries<br/>FilterExpression: tenantId = :tid"]
+    KMS["KMS CMK<br/>per-tenant encryption key"]
+    AUDIT["chimera-audit<br/>CMK encrypted · 90d TTL"]
 
     JWT --> GW
     GW --> RATE
@@ -253,18 +253,18 @@ From skill upload to agent discovery and execution.
 
 ```mermaid
 flowchart LR
-    UPLOAD[S3 upload\nskill bundle\nSKILL.md v2 + code]
-    P1[Stage 1\nStatic analysis\ncode scanning]
-    P2[Stage 2\nDependency audit\nvulnerability check]
-    P3[Stage 3\nCedar policy\ncompliance]
-    P4[Stage 4\nSandbox test\nCode Interpreter]
-    P5[Stage 5\nResource limits\ncost estimation]
-    P6[Stage 6\nCost ceiling\ncheck]
-    P7[Stage 7\nManual review\nfor trust < 2]
-    REGISTRY[chimera-skills\nDynamoDB registry]
-    GW[AgentCore Gateway\nMCP endpoint target]
-    DISCO[Skill discovery\nload for session]
-    EXEC[Agent execution\n@tool or Sandbox\nor Lambda]
+    UPLOAD["S3 upload<br/>skill bundle<br/>SKILL.md v2 + code"]
+    P1["Stage 1<br/>Static analysis<br/>code scanning"]
+    P2["Stage 2<br/>Dependency audit<br/>vulnerability check"]
+    P3["Stage 3<br/>Cedar policy<br/>compliance"]
+    P4["Stage 4<br/>Sandbox test<br/>Code Interpreter"]
+    P5["Stage 5<br/>Resource limits<br/>cost estimation"]
+    P6["Stage 6<br/>Cost ceiling<br/>check"]
+    P7["Stage 7<br/>Manual review<br/>for trust &lt; 2"]
+    REGISTRY["chimera-skills<br/>DynamoDB registry"]
+    GW["AgentCore Gateway<br/>MCP endpoint target"]
+    DISCO["Skill discovery<br/>load for session"]
+    EXEC["Agent execution<br/>@tool or Sandbox<br/>or Lambda"]
 
     UPLOAD --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
     P7 --> REGISTRY
@@ -290,7 +290,7 @@ sequenceDiagram
     participant STS as AWS STS
     participant CC as CodeCommit
     participant CFN as CloudFormation
-    participant CDK as npx cdk\n(Node runtime)
+    participant CDK as "npx cdk (Node runtime)"
     participant PIPE as CodePipeline
     participant BUILD as CodeBuild
     participant ECR as ECR
@@ -299,13 +299,13 @@ sequenceDiagram
     DEV->>CLI: chimera deploy --source local
     CLI->>STS: get-caller-identity (verify creds)
     STS-->>CLI: account ID
-    CLI->>CLI: resolveSourcePath()\n(local / github-release / git-clone)
-    CLI->>CC: ensureCodeCommitRepo()\ncreate if not exists
-    CLI->>CC: pushToCodeCommit()\nbatched CreateCommit API (5 MB batches)
+    CLI->>CLI: resolveSourcePath() — local / github-release / git-clone
+    CLI->>CC: ensureCodeCommitRepo() — create if not exists
+    CLI->>CC: pushToCodeCommit() — batched CreateCommit API (5 MB batches)
     CC-->>CLI: commit SHA
 
     alt Pipeline stack does NOT exist
-        CLI->>CDK: npx cdk deploy Chimera-dev-Pipeline\n--require-approval never
+        CLI->>CDK: npx cdk deploy Chimera-dev-Pipeline --require-approval never
         CDK->>CFN: CreateStack / UpdateStack
         CFN-->>CDK: stack outputs (ECR repo ARNs)
     else Pipeline stack already deployed
@@ -316,9 +316,9 @@ sequenceDiagram
 
     CC->>PIPE: source change triggers pipeline
     PIPE->>BUILD: Source → Build stage
-    BUILD->>BUILD: docker build (2-container pattern:\nbuild container + runtime container)
+    BUILD->>BUILD: docker build — 2-container pattern (build + runtime)
     BUILD->>ECR: docker push chat-gateway image
-    ECR->>ECS: ECS rolling update\n(new task definition)
+    ECR->>ECS: ECS rolling update (new task definition)
     ECS-->>DEV: deployment complete
 ```
 
@@ -332,27 +332,27 @@ State machine for a single agent session from creation to expiry.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Created : POST /chat/stream\n(new sessionId)
+    [*] --> Created : POST /chat/stream (new sessionId)
 
-    Created --> Active : AgentCore Runtime\nsession hydrated\n(STM loaded)
+    Created --> Active : AgentCore Runtime — session hydrated (STM loaded)
 
-    Active --> Streaming : Strands ReAct loop\nbegins
+    Active --> Streaming : Strands ReAct loop begins
 
-    Streaming --> Active : tool call completes\n(awaiting next iteration)
+    Streaming --> Active : tool call completes (awaiting next iteration)
 
-    Streaming --> Idle : [DONE] event\nfinal response sent
+    Streaming --> Idle : DONE event — final response sent
 
-    Active --> Idle : max_iterations(20)\nreached
+    Active --> Idle : max_iterations(20) reached
 
-    Idle --> Active : follow-up message\n(same sessionId)
+    Idle --> Active : follow-up message (same sessionId)
 
-    Idle --> Expired : TTL elapsed\n(Basic=30min · Advanced=2h · Premium=24h)
+    Idle --> Expired : TTL elapsed — Basic=30min · Advanced=2h · Premium=24h
 
-    Streaming --> Error : unhandled exception\nor Cedar deny
+    Streaming --> Error : unhandled exception or Cedar deny
 
-    Error --> Idle : error response\nstreamed to client
+    Error --> Idle : error response streamed to client
 
-    Expired --> [*] : DynamoDB TTL\ncleans session record
+    Expired --> [*] : DynamoDB TTL cleans session record
 
     note right of Streaming
         SSE events:
