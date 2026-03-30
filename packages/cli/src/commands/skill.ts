@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import ora from 'ora';
 import { table } from 'table';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
-import { apiClient } from '../lib/api-client.js';
+import { apiClient, guardAuth } from '../lib/api-client.js';
 import { color } from '../lib/color.js';
 
 interface Skill {
@@ -43,6 +43,7 @@ export function registerSkillCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         const url = options.category
           ? `/skills?category=${encodeURIComponent(options.category)}`
           : '/skills';
@@ -71,7 +72,8 @@ export function registerSkillCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to list skills'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -97,6 +99,7 @@ export function registerSkillCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         const installed = await apiClient.post<Skill>('/skills', {
           name: skillName,
           version: options.version,
@@ -115,7 +118,8 @@ export function registerSkillCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to install skill'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -128,6 +132,7 @@ export function registerSkillCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         // Enable via PATCH /skills/:name or similar — endpoint TBD per API spec
         await apiClient.post(`/skills/${encodeURIComponent(skillName)}/enable`, {});
 
@@ -142,7 +147,8 @@ export function registerSkillCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to enable skill'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -155,6 +161,7 @@ export function registerSkillCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         await apiClient.post(`/skills/${encodeURIComponent(skillName)}/disable`, {});
 
         if (options.json) {
@@ -168,7 +175,8 @@ export function registerSkillCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to disable skill'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 
@@ -182,6 +190,7 @@ export function registerSkillCommands(program: Command): void {
       if (options.json) spinner.stop();
 
       try {
+        guardAuth();
         await apiClient.delete(`/skills/${encodeURIComponent(skillName)}`);
 
         if (options.json) {
@@ -195,7 +204,8 @@ export function registerSkillCommands(program: Command): void {
           process.exit(1);
         }
         spinner.fail(color.red('Failed to uninstall skill'));
-        throw error;
+        console.error(color.red(error.message || 'An unexpected error occurred'));
+        process.exit(1);
       }
     });
 }
