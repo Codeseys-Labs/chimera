@@ -385,6 +385,13 @@ export function registerDeployCommands(program: Command): void {
     .option('--skip-setup-prompt', 'Auto-generate admin password without prompting')
     .option('--monitor', 'Watch CloudFormation stack events in real-time (10s polling)')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera deploy
+  $ chimera deploy --region us-west-2 --env prod
+  $ chimera deploy --source local
+  $ chimera deploy --source git --remote https://github.com/org/chimera
+  $ chimera deploy --monitor --json`)
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
       if (options.json) spinner.stop();

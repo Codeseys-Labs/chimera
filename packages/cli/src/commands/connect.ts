@@ -178,12 +178,18 @@ export function registerConnectCommand(program: Command): void {
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera endpoints
+  $ chimera endpoints --region us-west-2 --env prod
+  $ chimera endpoints --json`)
     .action((options) => runEndpoints(options));
 
-  // Deprecated alias: chimera connect
+  // Deprecated alias: chimera connect (hidden from help)
   program
     .command('connect')
     .description('(deprecated) Use "chimera endpoints" instead')
+    .hideHelp()
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--json', 'Output result as JSON')

@@ -28,6 +28,13 @@ export function registerMonitorCommand(program: Command): void {
     .option('--interval <seconds>', 'Polling interval in seconds (default: 10)', '10')
     .option('--history', 'Show all historical events, not just new ones')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera monitor
+  $ chimera monitor --env prod
+  $ chimera monitor --stack Chimera-dev-Api
+  $ chimera monitor --interval 5 --history
+  $ chimera monitor --json`)
     .action(async (options) => {
       const spinner = ora('Checking for active stacks').start();
       if (options.json) spinner.stop();
@@ -40,7 +47,16 @@ export function registerMonitorCommand(program: Command): void {
 
       try {
         const wsConfig = loadWorkspaceConfig();
-        const region = options.region ?? wsConfig?.aws?.region ?? 'us-east-1';
+        const region = options.region ?? wsConfig?.aws?.region;
+        if (!region) {
+          const msg = 'No AWS region configured. Run "chimera init" to set up your workspace.';
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: msg, code: 'NO_REGION' }));
+            process.exit(1);
+          }
+          spinner.fail(color.red(msg));
+          process.exit(1);
+        }
         const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
         if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
 

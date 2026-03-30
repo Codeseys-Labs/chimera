@@ -139,6 +139,11 @@ export function registerInitCommand(program: Command): void {
     .option('--admin-email <email>', 'Admin user email (skip prompt)')
     .option('--admin-password <password>', 'Admin user password (skip prompt, use - to auto-generate)')
     .option('--json', 'Output result as JSON')
+    .addHelpText('after', `
+Examples:
+  $ chimera init
+  $ chimera init --region us-east-1 --env dev --admin-email admin@example.com
+  $ chimera init --profile my-profile --admin-password - --json`)
     .action(async (options) => {
       try {
         const existing = findWorkspaceConfig(process.cwd());
