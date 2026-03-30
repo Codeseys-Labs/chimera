@@ -45,14 +45,15 @@ function getVersion(): string {
   }
 }
 
-// Command groups for grouped help output
-const COMMAND_GROUPS: Array<{ label: string; names: string[] }> = [
-  { label: 'Setup', names: ['init', 'deploy', 'endpoints', 'setup'] },
-  { label: 'Operations', names: ['status', 'sync', 'upgrade', 'destroy', 'monitor'] },
-  { label: 'Auth', names: ['login'] },
-  { label: 'Data', names: ['tenant', 'session', 'skill', 'chat'] },
-  { label: 'Diagnostic', names: ['doctor', 'completion'] },
-];
+// Groups used by configureHelp to render chimera --help in logical sections.
+const COMMAND_GROUPS: Record<string, string[]> = {
+  'Setup':       ['init', 'deploy', 'endpoints', 'setup'],
+  'Operations':  ['status', 'sync', 'upgrade', 'destroy', 'cleanup', 'redeploy', 'monitor'],
+  'Auth':        ['login'],
+  'Agent':       ['chat', 'session'],
+  'Admin':       ['tenant', 'skill'],
+  'Diagnostic':  ['doctor', 'completion'],
+};
 
 const program = new Command();
 
@@ -62,6 +63,67 @@ program
   .version(getVersion())
   .option('--verbose', 'Enable verbose/debug output')
   .option('--debug', 'Alias for --verbose');
+
+// Group help output into logical sections.
+program.configureHelp({
+  formatHelp: (cmd, helper) => {
+    const cmds = helper.visibleCommands(cmd);
+    const opts = helper.visibleOptions(cmd);
+
+    // Compute column width so all terms align to the same indent.
+    // All term strings are ASCII-only, so .length gives the correct visual width.
+    const termWidth = Math.max(
+      ...cmds.map(c => helper.subcommandTerm(c).length),
+      ...opts.map(o => helper.optionTerm(o).length),
+      0,
+    ) + 4;
+
+    const fmt = (term: string, desc: string): string =>
+      `  ${term.padEnd(termWidth)}${desc}`;
+
+    const lines: string[] = [];
+
+    lines.push(`Usage: ${helper.commandUsage(cmd)}\n`);
+
+    const description = helper.commandDescription(cmd);
+    if (description) lines.push(`${description}\n`);
+
+    if (opts.length > 0) {
+      lines.push('Options:');
+      opts.forEach(o => lines.push(fmt(helper.optionTerm(o), helper.optionDescription(o))));
+      lines.push('');
+    }
+
+    // Render each group, skipping groups whose commands are not registered.
+    const cmdMap = new Map(cmds.map(c => [c.name(), c]));
+    const grouped = new Set<string>();
+
+    for (const [groupName, names] of Object.entries(COMMAND_GROUPS)) {
+      const groupCmds = names.map(n => cmdMap.get(n)).filter((c): c is Command => !!c);
+      if (groupCmds.length === 0) continue;
+      groupCmds.forEach(c => grouped.add(c.name()));
+      lines.push(`${groupName}:`);
+      groupCmds.forEach(c =>
+        lines.push(fmt(helper.subcommandTerm(c), helper.commandDescription(c))),
+      );
+      lines.push('');
+    }
+
+    // Any commands not in COMMAND_GROUPS fall through to an "Other" section.
+    const ungrouped = cmds.filter(c => !grouped.has(c.name()));
+    if (ungrouped.length > 0) {
+      lines.push('Other:');
+      ungrouped.forEach(c =>
+        lines.push(fmt(helper.subcommandTerm(c), helper.commandDescription(c))),
+      );
+      lines.push('');
+    }
+
+    lines.push('Run "chimera [command] --help" for more information about a command.\n');
+
+    return lines.join('\n');
+  },
+});
 
 // Propagate verbose/debug to CHIMERA_DEBUG before each command runs.
 // api-client.ts and other modules gate debug stderr on process.env.CHIMERA_DEBUG.
@@ -79,6 +141,10 @@ registerSkillCommands(program);
 registerDeployCommands(program);
 registerDestroyCommands(program);
 registerConnectCommand(program);
+// Hide deprecated 'connect' alias from help output; 'endpoints' is the canonical command.
+// Commander v11 uses ._hidden (checked by Help.visibleCommands); there is no public API.
+const connectCmd = program.commands.find(c => c.name() === 'connect');
+if (connectCmd) (connectCmd as unknown as { _hidden: boolean })._hidden = true;
 registerStatusCommand(program);
 registerSyncCommand(program);
 registerUpgradeCommand(program);
@@ -89,92 +155,6 @@ registerChatCommand(program);
 registerDoctorCommand(program);
 registerMonitorCommand(program);
 registerCompletionCommand(program);
-
-// Custom grouped help formatter (Commander v11 compatible)
-program.configureHelp({
-  formatHelp(cmd, helper) {
-    const width = helper.helpWidth ?? process.stdout.columns ?? 80;
-
-    // Build a map of visible commands by name
-    const cmdMap = new Map<string, Command>(
-      helper.visibleCommands(cmd).map((c) => [c.name(), c]),
-    );
-
-    // Compute column width: longest visible subcommand term + padding
-    let maxTerm = 0;
-    for (const c of cmdMap.values()) {
-      const t = helper.subcommandTerm(c);
-      if (t.length > maxTerm) maxTerm = t.length;
-    }
-    // Also account for option terms
-    for (const o of helper.visibleOptions(cmd)) {
-      const t = helper.optionTerm(o);
-      if (t.length > maxTerm) maxTerm = t.length;
-    }
-    const col = Math.min(maxTerm + 2, Math.floor(width / 3));
-    const indent = '  ';
-    const gap = '  ';
-
-    const line = (term: string, desc: string): string => {
-      const padded = term.padEnd(col);
-      // Wrap description if it would exceed terminal width
-      const available = width - indent.length - col - gap.length;
-      if (available > 0 && desc.length > available) {
-        return `${indent}${padded}${gap}${desc.slice(0, available - 3)}...`;
-      }
-      return `${indent}${padded}${gap}${desc}`;
-    };
-
-    const parts: string[] = [];
-
-    // Usage
-    parts.push(`Usage: ${helper.commandUsage(cmd)}\n`);
-
-    // Description
-    const desc = helper.commandDescription(cmd);
-    if (desc) parts.push(`${desc}\n`);
-
-    // Options
-    const opts = helper.visibleOptions(cmd);
-    if (opts.length) {
-      parts.push('Options:');
-      for (const o of opts) {
-        parts.push(line(helper.optionTerm(o), helper.optionDescription(o)));
-      }
-      parts.push('');
-    }
-
-    // Grouped commands
-    const placed = new Set<string>();
-    for (const group of COMMAND_GROUPS) {
-      const cmds = group.names
-        .map((n) => cmdMap.get(n))
-        .filter((c): c is Command => !!c);
-      if (!cmds.length) continue;
-
-      parts.push(`${group.label}:`);
-      for (const c of cmds) {
-        parts.push(line(helper.subcommandTerm(c), helper.subcommandDescription(c)));
-        placed.add(c.name());
-      }
-      parts.push('');
-    }
-
-    // Safety net: any ungrouped visible commands
-    const ungrouped = [...cmdMap.values()].filter((c) => !placed.has(c.name()));
-    if (ungrouped.length) {
-      parts.push('Other:');
-      for (const c of ungrouped) {
-        parts.push(line(helper.subcommandTerm(c), helper.subcommandDescription(c)));
-      }
-      parts.push('');
-    }
-
-    parts.push('Run "chimera [command] --help" for more information about a command.\n');
-
-    return parts.join('\n');
-  },
-});
 
 // exitOverride() converts Commander's process.exit() into thrown CommanderError.
 // Exit code semantics: 0 = success (help/version), 2 = usage error, 1 = runtime.
