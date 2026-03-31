@@ -5,8 +5,6 @@
  * page, and awaits a POST /auth/callback from the browser with Cognito tokens.
  */
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { loadCredentials, saveCredentials } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 
@@ -16,8 +14,10 @@ import { color } from '../lib/color.js';
  * Resolves when credentials are saved; rejects on server error.
  */
 export async function startBrowserLogin(clientId: string, region: string): Promise<void> {
-  // Read and inject config into the HTML template
-  const htmlTemplate = readFileSync(join(import.meta.dir, 'browser-login.html'), 'utf8');
+  // Read and inject config into the HTML template.
+  // new URL(..., import.meta.url) is the Bun-native pattern for embedding assets
+  // in compiled binaries — readFileSync(import.meta.dir, ...) fails in compiled binaries.
+  const htmlTemplate = await Bun.file(new URL('./browser-login.html', import.meta.url)).text();
   const loginHtml = htmlTemplate
     .replace('{{CLIENT_ID}}', clientId)
     .replace('{{REGION}}', region);

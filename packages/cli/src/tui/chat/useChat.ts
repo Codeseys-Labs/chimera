@@ -131,7 +131,9 @@ export function useChat(initialSessionId?: string) {
       dispatch({ type: 'SEND', message: userMessage });
 
       try {
-        const body: Record<string, string> = { message: text.trim() };
+        const body: { messages: Array<{ role: string; content: string }>; sessionId?: string } = {
+          messages: [{ role: 'user', content: text.trim() }],
+        };
         if (state.sessionId) body.sessionId = state.sessionId;
 
         const response = await apiClient.postStream('/chat/stream', body);
