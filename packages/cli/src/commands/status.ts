@@ -163,7 +163,7 @@ Examples:
 
         if (!options.json) spinner.text = 'Checking pipeline status...';
         const pipelineClient = new CodePipelineClient({ region });
-        const pipelineName = `Chimera-${env.replace(/[^a-zA-Z0-9-]/g, '')}-Pipeline`;
+        const pipelineName = `chimera-deploy-${env.replace(/[^a-zA-Z0-9-]/g, '')}`;
         const pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
 
         if (options.json) {
