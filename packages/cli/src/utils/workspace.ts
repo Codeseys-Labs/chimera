@@ -30,6 +30,7 @@ export interface WorkspaceConfig {
     cognito_user_pool_id?: string;
     cognito_client_id?: string;
     cognito_domain?: string;
+    frontend_url?: string;
   };
   tenants?: {
     default_tier?: string;

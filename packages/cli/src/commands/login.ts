@@ -261,26 +261,38 @@ Examples:
       }
 
       if (useBrowser) {
-        try {
-          // Dynamic import keeps browser-server out of terminal-only test paths
-          const { startBrowserLogin } = await import('../auth/browser-server.js');
-          await startBrowserLogin(clientId, region);
-          if (options.json) {
-            const creds = loadCredentials();
-            console.log(JSON.stringify({ status: 'ok', data: { loggedIn: true, expires_at: creds?.auth?.expires_at } }));
-          } else {
-            console.log(color.green('\n✓ Logged in successfully'));
+        const frontendUrl = config.endpoints?.frontend_url;
+        if (!frontendUrl) {
+          // No deployed frontend — fall back to terminal login with warning
+          if (!options.json) {
+            console.error(color.yellow('⚠ No frontend URL configured. Using terminal login.'));
+            console.error(color.gray('  Run "chimera endpoints" after deploying to enable browser login'));
           }
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (options.json) {
-            console.log(JSON.stringify({ status: 'error', error: msg, code: 'LOGIN_FAILED' }));
-          } else {
-            console.error(color.red(`\n✗ Login failed: ${msg}`));
+          // Fall through to terminal login below (do NOT return)
+        } else {
+          try {
+            // Dynamic import keeps browser-server out of terminal-only test paths
+            const { startBrowserLogin } = await import('../auth/browser-server.js');
+            await startBrowserLogin(frontendUrl);
+            if (options.json) {
+              const creds = loadCredentials();
+              console.log(JSON.stringify({ status: 'ok', data: { loggedIn: true, expires_at: creds?.auth?.expires_at } }));
+            } else {
+              console.log(color.green('\n✓ Logged in successfully'));
+            }
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (options.json) {
+              console.log(JSON.stringify({ status: 'error', error: msg, code: 'LOGIN_FAILED' }));
+            } else {
+              console.error(color.red(`\n✗ Login failed: ${msg}`));
+            }
+            process.exit(1);
           }
-          process.exit(1);
+          return;
         }
-        return;
+        // Reset useBrowser so we fall through to terminal login
+        useBrowser = false;
       }
 
       const { email, password } = await inquirer.prompt<{ email: string; password: string }>([
