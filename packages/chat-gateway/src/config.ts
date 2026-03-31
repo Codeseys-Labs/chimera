@@ -8,7 +8,7 @@
  */
 
 export interface BedrockConfig {
-  /** Model ID to use (e.g., 'anthropic.claude-3-sonnet-20240229-v1:0') */
+  /** Model ID to use (e.g., 'us.anthropic.claude-3-5-sonnet-20241022-v2:0') */
   modelId: string;
 
   /** AWS region for Bedrock */
@@ -46,7 +46,7 @@ export interface ChatGatewayConfig {
 export function loadConfig(): ChatGatewayConfig {
   return {
     bedrock: {
-      modelId: process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0',
+      modelId: process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
       region: process.env.AWS_REGION || process.env.BEDROCK_REGION || 'us-east-1',
       maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '4096', 10),
       temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '1.0'),
