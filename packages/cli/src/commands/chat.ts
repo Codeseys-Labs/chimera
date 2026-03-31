@@ -65,7 +65,9 @@ async function sendSingleMessage(
   sessionId: string | undefined,
   json: boolean,
 ): Promise<void> {
-  const body = sessionId ? { message, sessionId } : { message };
+  const body = sessionId
+    ? { messages: [{ role: 'user', content: message }], sessionId }
+    : { messages: [{ role: 'user', content: message }] };
   const response = await apiClient.postStream('/chat/stream', body);
 
   let fullContent = '';
@@ -112,7 +114,9 @@ async function processMessages(
     if (userMessage.trim()) {
       process.stdout.write(color.bold('Chimera: '));
       try {
-        const body = sessionId ? { message: userMessage, sessionId } : { message: userMessage };
+        const body = sessionId
+          ? { messages: [{ role: 'user', content: userMessage }], sessionId }
+          : { messages: [{ role: 'user', content: userMessage }] };
         const response = await apiClient.postStream('/chat/stream', body);
 
         for await (const chunk of streamChatResponse(response)) {
