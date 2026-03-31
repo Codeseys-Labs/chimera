@@ -44,8 +44,16 @@ async function* streamChatResponse(response: Response): AsyncGenerator<ChatChunk
             return;
           }
           try {
-            const parsed = JSON.parse(data) as ChatChunk;
-            yield parsed;
+            const parsed = JSON.parse(data) as Record<string, unknown>;
+            // Map Vercel DSP format to internal ChatChunk format
+            if (parsed.type === 'text-delta' && typeof parsed.delta === 'string') {
+              yield { type: 'token', content: parsed.delta };
+            } else if (parsed.type === 'finish') {
+              yield { type: 'done' };
+            } else if (parsed.type === 'abort') {
+              yield { type: 'error', error: 'Stream aborted' };
+            }
+            // Ignore lifecycle events: start, text-start, text-end, step-start, etc.
           } catch {
             // Ignore malformed SSE frames
           }
