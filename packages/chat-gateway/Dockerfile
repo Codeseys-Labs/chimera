@@ -4,6 +4,7 @@
 # are bundled at CodeBuild time (where the full monorepo exists) via:
 #   bun build packages/chat-gateway/src/server.ts --outdir packages/chat-gateway/dist --target bun
 # The Docker image simply copies and runs the pre-built bundle — no workspace resolution needed.
+# Static assets (previously served at /static/*) are now handled by FrontendStack (S3+CloudFront).
 #
 # Base: public.ecr.aws/debian/debian:bookworm-slim — ECR Public mirror of Docker Hub
 # debian:bookworm-slim. No rate limits in AWS CodeBuild.
@@ -27,9 +28,6 @@ WORKDIR /app
 
 # Copy pre-built bundle (all workspace deps inlined by CodeBuild)
 COPY packages/chat-gateway/dist/server.js ./
-
-# Copy static files for web chat UI (served at /static/*)
-COPY packages/chat-gateway/public ./public
 
 # Create non-root user
 RUN groupadd -g 1001 chimera && \
