@@ -353,11 +353,13 @@ async function monitorStackEvents(
  * Deploy only the Pipeline CDK stack via npx (not bunx).
  * npx spawns a separate Node.js process — CDK module resolution works correctly.
  * safeEnv is sanitized to [a-zA-Z0-9-] — safe for Bun.$ template interpolation.
+ * quiet=true suppresses CDK CloudFormation event noise; pass false only when --monitor is set.
  */
-async function deployCdkStacks(repoRoot: string, environment: string): Promise<void> {
+async function deployCdkStacks(repoRoot: string, environment: string, quiet = true): Promise<void> {
   const safeEnv = environment.replace(/[^a-zA-Z0-9-]/g, '');
-  await Bun.$`npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`
+  const proc = Bun.$`npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`
     .cwd(`${repoRoot}/infra`);
+  await (quiet ? proc.quiet() : proc);
 }
 
 /**
@@ -494,7 +496,7 @@ Examples:
           }
         } else {
           if (!options.json) spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
-          await deployCdkStacks(sourcePath, env);
+          await deployCdkStacks(sourcePath, env, !options.monitor);
           if (!options.json) spinner.succeed(color.green('Pipeline stack deployed - future pushes will auto-deploy'));
         }
 
