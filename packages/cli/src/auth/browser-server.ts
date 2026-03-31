@@ -5,6 +5,7 @@
  * page, and awaits a POST /auth/callback from the browser with Cognito tokens.
  */
 
+import browserLoginHtml from './browser-login.html' with { type: 'text' };
 import { loadCredentials, saveCredentials } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 
@@ -14,10 +15,11 @@ import { color } from '../lib/color.js';
  * Resolves when credentials are saved; rejects on server error.
  */
 export async function startBrowserLogin(clientId: string, region: string): Promise<void> {
-  // Read and inject config into the HTML template.
-  // new URL(..., import.meta.url) is the Bun-native pattern for embedding assets
-  // in compiled binaries — readFileSync(import.meta.dir, ...) fails in compiled binaries.
-  const htmlTemplate = await Bun.file(new URL('./browser-login.html', import.meta.url)).text();
+  // Static import with { type: 'text' } tells Bun's bundler to embed the HTML
+  // as a string constant at compile time — no filesystem access needed at runtime.
+  // Cast to string: TypeScript infers HTMLBundle from the .html extension, but
+  // the `with { type: 'text' }` attribute makes Bun emit it as a plain string.
+  const htmlTemplate = browserLoginHtml as unknown as string;
   const loginHtml = htmlTemplate
     .replace('{{CLIENT_ID}}', clientId)
     .replace('{{REGION}}', region);
