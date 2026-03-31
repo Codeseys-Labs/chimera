@@ -9,7 +9,7 @@
  * stack (backward-compatible).
  *
  * Usage:
- *   chimera monitor                      # watch Chimera-{env}-Pipeline execution
+ *   chimera monitor                      # watch chimera-deploy-{env} pipeline
  *   chimera monitor --env prod           # watch prod pipeline
  *   chimera monitor --pipeline MyPipe    # watch a named pipeline
  *   chimera monitor --interval 5         # poll every 5 seconds
@@ -141,7 +141,7 @@ export function registerMonitorCommand(program: Command): void {
     .description('Watch CodePipeline execution stages in real-time (use --stack for CloudFormation)')
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
-    .option('--pipeline <name>', 'Pipeline name to monitor (default: Chimera-{env}-Pipeline)')
+    .option('--pipeline <name>', 'Pipeline name to monitor (default: chimera-deploy-{env})')
     .option('--stack <stack>', 'Monitor a specific CloudFormation stack instead of the pipeline')
     .option('--interval <seconds>', 'Polling interval in seconds (default: 10)', '10')
     .option('--history', 'Show all historical events (--stack mode only)')
@@ -150,7 +150,7 @@ export function registerMonitorCommand(program: Command): void {
 Examples:
   $ chimera monitor
   $ chimera monitor --env prod
-  $ chimera monitor --pipeline Chimera-prod-Pipeline
+  $ chimera monitor --pipeline chimera-deploy-prod
   $ chimera monitor --interval 5
   $ chimera monitor --stack Chimera-dev-Api    # CloudFormation fallback
   $ chimera monitor --json`)
@@ -201,7 +201,7 @@ Examples:
 
         // Default: CodePipeline monitoring
         const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
-        const pipelineName = (options.pipeline as string | undefined) ?? `Chimera-${safeEnv}-Pipeline`;
+        const pipelineName = (options.pipeline as string | undefined) ?? `chimera-deploy-${safeEnv}`;
 
         if (!options.json) spinner.succeed(color.green(`Monitoring pipeline: ${pipelineName}`));
 
