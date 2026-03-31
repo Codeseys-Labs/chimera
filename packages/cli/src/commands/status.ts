@@ -12,7 +12,7 @@ import {
 } from '@aws-sdk/client-cloudformation';
 import {
   CodePipelineClient,
-  GetPipelineStateCommand,
+  ListPipelineExecutionsCommand,
 } from '@aws-sdk/client-codepipeline';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
@@ -73,26 +73,21 @@ async function getChimeraStacks(
 }
 
 /**
- * Get pipeline execution status
+ * Get latest pipeline execution status (overall execution, not per-stage).
  */
 async function getPipelineStatus(
   client: CodePipelineClient,
   pipelineName: string,
 ): Promise<string> {
   try {
-    const command = new GetPipelineStateCommand({ name: pipelineName });
-    const response = await client.send(command);
-
-    if (!response.stageStates || response.stageStates.length === 0) {
-      return 'No executions';
-    }
-
-    const latestExecution = response.stageStates[0].latestExecution;
-    return latestExecution?.status || 'Unknown';
+    const response = await client.send(
+      new ListPipelineExecutionsCommand({ pipelineName, maxResults: 1 }),
+    );
+    const latest = response.pipelineExecutionSummaries?.[0];
+    if (!latest) return 'No executions';
+    return latest.status ?? 'Unknown';
   } catch (error: any) {
-    if (error.name === 'PipelineNotFoundException') {
-      return 'Not found';
-    }
+    if (error.name === 'PipelineNotFoundException') return 'Not found';
     return 'Error';
   }
 }
@@ -166,13 +161,10 @@ Examples:
           return;
         }
 
-        let pipelineStatus: string | undefined;
-        if (options.pipeline) {
-          if (!options.json) spinner.text = 'Checking pipeline status...';
-          const pipelineClient = new CodePipelineClient({ region });
-          const pipelineName = `Chimera-${env}-Pipeline`;
-          pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
-        }
+        if (!options.json) spinner.text = 'Checking pipeline status...';
+        const pipelineClient = new CodePipelineClient({ region });
+        const pipelineName = `Chimera-${env.replace(/[^a-zA-Z0-9-]/g, '')}-Pipeline`;
+        const pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
 
         if (options.json) {
           console.log(JSON.stringify({
@@ -203,12 +195,8 @@ Examples:
 
         console.log('\n' + table(tableData));
 
-        if (options.pipeline && pipelineStatus !== undefined) {
-          spinner.succeed(color.green('Pipeline status retrieved'));
-          const pipelineName = `Chimera-${env}-Pipeline`;
-          console.log(color.bold('\nPipeline Status:'));
-          console.log(`  ${pipelineName}: ${formatStatus(pipelineStatus)}`);
-        }
+        console.log(color.bold('\nPipeline Status:'));
+        console.log(`  ${pipelineName}: ${formatStatus(pipelineStatus)}`);
 
         const allComplete = stacks.every((s) => s.status.includes('COMPLETE'));
         const anyFailed = stacks.some((s) => s.status.includes('FAILED'));
