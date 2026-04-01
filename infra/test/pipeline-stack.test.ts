@@ -194,6 +194,31 @@ describe('PipelineStack', () => {
           }),
         });
       });
+
+      it('ValidateCanary task should use ResultPath not OutputPath to preserve imageUri', () => {
+        // Bug: outputPath: '$.Payload' replaces entire state, losing imageUri.
+        // rollout tasks use 'imageUri.$': '$.imageUri', causing States.Runtime error.
+        // Fix: resultPath: '$.validation' merges result into state, preserving imageUri.
+        //
+        // DefinitionString is a CloudFormation Fn::Join intrinsic — stringify it and
+        // search for the ASL fragment. JSON.stringify escapes inner `"` to `\"`,
+        // so search strings use `\\"` (backslash + quote in the resulting JavaScript string).
+        const machines = template.findResources('AWS::StepFunctions::StateMachine');
+        const machine = Object.values(machines)[0] as any;
+        const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+        // ValidateCanary must store result under $.validation (only that task uses this path)
+        expect(defnStr).toContain('\\"ResultPath\\":\\"$.validation\\"');
+      });
+
+      it('CheckCanaryHealth choice should reference $.validation.Payload.status', () => {
+        // Bug: after validateCanaryTask uses resultPath, the validation result is
+        // nested at $.validation.Payload.status — not $.status.
+        // CheckCanaryHealth checking $.status would silently always take the otherwise branch.
+        const machines = template.findResources('AWS::StepFunctions::StateMachine');
+        const machine = Object.values(machines)[0] as any;
+        const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+        expect(defnStr).toContain('$.validation.Payload.status');
+      });
     });
 
     describe('CodePipeline', () => {
@@ -301,6 +326,22 @@ describe('PipelineStack', () => {
           fn.Properties.Code?.ZipFile?.includes('elasticloadbalancingv2')
         );
         expect(inlineFns).toHaveLength(0);
+      });
+
+      it('canary validation Lambda should default eval_score to 100 when no CloudWatch data', () => {
+        // Bug: eval_score defaulted to 0 when no EvaluationCompositeScore datapoints.
+        // On first deployment there are no metrics => score=0 fails >=80 threshold => always FAIL+rollback.
+        // Fix: default to 100.0 so no-data is treated as passing (same logic as error_rate=0 when no invocations).
+        const fns = template.findResources('AWS::Lambda::Function');
+        const validationFn = Object.values(fns).find((fn: any) =>
+          fn.Properties.FunctionName === 'chimera-canary-validation-dev'
+        ) as any;
+        expect(validationFn).toBeDefined();
+        const code: string = validationFn.Properties.Code?.ZipFile ?? '';
+        // Must default to 100.0 (not 0) when no datapoints
+        // eval_score specifically must default to 100.0 (not 0) — other metrics (error_rate,
+        // guardrail_rate) correctly default to 0 when there are no invocations.
+        expect(code).toContain('else 100.0');
       });
     });
 
