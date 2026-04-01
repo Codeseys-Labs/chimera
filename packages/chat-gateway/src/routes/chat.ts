@@ -4,7 +4,9 @@
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { createAgent, createDefaultSystemPrompt, StreamEvent, createBedrockModel } from '@chimera/core';
+import { createAgent, createDefaultSystemPrompt, StreamEvent, createBedrockModel, ToolRegistry, ToolLoader, AWSClientFactory } from '@chimera/core';
+import type { StrandsTool } from '@chimera/core';
+import type { TenantTier } from '@chimera/shared';
 import {
   StrandsToDSPBridge,
   VERCEL_DSP_HEADERS,
@@ -22,6 +24,115 @@ import { streamManager } from '../stream-manager';
 
 const router = new Hono();
 const config = getConfig();
+
+// ---------------------------------------------------------------------------
+// GatewayToolDiscovery — lazy singleton ToolLoader keyed on tenant tier
+//
+// Mirrors GatewayToolDiscovery in packages/agents/gateway_config.py.
+// The ToolRegistry is initialized once per process; per-request tool loading
+// uses the ToolLoader cache (keyed by tenantId + tier).
+// ---------------------------------------------------------------------------
+
+let _toolLoaderPromise: Promise<ToolLoader | null> | null = null;
+
+async function _initToolLoader(): Promise<ToolLoader | null> {
+  const region = config.bedrock.region;
+  const accountId = process.env.AWS_ACCOUNT_ID;
+  const rolePattern = process.env.CHIMERA_TENANT_ROLE_PATTERN || 'chimera-tenant-{tenantId}-agent-role';
+
+  if (!accountId) {
+    console.warn('[GatewayToolDiscovery] AWS_ACCOUNT_ID not set — tools disabled');
+    return null;
+  }
+
+  try {
+    // Dynamic imports of AWS SDK clients (available via monorepo root devDependencies).
+    // Using dynamic imports so a missing package produces a runtime warning rather than
+    // a module-load failure that would crash the entire server.
+    const [
+      { CostExplorerClient },
+      { ResourceGroupsTaggingAPIClient },
+      { ConfigServiceClient },
+    ] = await Promise.all([
+      import('@aws-sdk/client-cost-explorer'),
+      import('@aws-sdk/client-resource-groups-tagging-api'),
+      import('@aws-sdk/client-config-service'),
+    ]);
+
+    const clientFactory = new AWSClientFactory({
+      defaultRegion: region,
+      accountId,
+      roleNamePattern: rolePattern,
+    });
+
+    const registry = new ToolRegistry();
+    await registry.initialize({
+      clientFactory,
+      discoveryConfig: {
+        configScanner: {
+          aggregatorName: process.env.CHIMERA_CONFIG_AGGREGATOR_NAME || 'chimera-global-aggregator',
+          aggregatorRegion: region,
+          accountId,
+        },
+        costAnalyzer: {
+          // Cost Explorer is global (only available in us-east-1)
+          costExplorerClient: new CostExplorerClient({ region: 'us-east-1' }),
+        },
+        tagOrganizer: {
+          resourceGroupsTaggingClient: new ResourceGroupsTaggingAPIClient({ region }),
+          configClient: new ConfigServiceClient({ region }),
+          tagPolicy: {
+            name: 'chimera-default',
+            requiredTags: ['TenantId', 'Environment'],
+            rules: {},
+          },
+          accountId,
+        },
+        resourceExplorer: {
+          primaryRegion: region,
+          accountId,
+        },
+        stackInventory: {
+          regions: [region],
+          accountId,
+        },
+        resourceIndex: {
+          enableAutoUpdate: false,
+        },
+      },
+    });
+
+    console.info('[GatewayToolDiscovery] ToolRegistry initialized');
+    return new ToolLoader(registry);
+  } catch (error) {
+    console.warn(
+      '[GatewayToolDiscovery] Initialization failed — tools disabled:',
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
+}
+
+/** Return the process-level ToolLoader, initializing once on first call. */
+function getToolLoader(): Promise<ToolLoader | null> {
+  if (!_toolLoaderPromise) {
+    _toolLoaderPromise = _initToolLoader();
+  }
+  return _toolLoaderPromise;
+}
+
+/** Load tier-appropriate tools for a tenant. Returns [] on any failure. */
+async function getToolsForTenant(tenantId: string, tier: TenantTier): Promise<StrandsTool[]> {
+  const loader = await getToolLoader();
+  if (!loader) return [];
+  try {
+    const result = await loader.loadToolsForTenant({ tenantId, subscriptionTier: tier });
+    return result.tools;
+  } catch (error) {
+    console.warn('[GatewayToolDiscovery] Tool load failed for tenant', tenantId, error);
+    return [];
+  }
+}
 
 /** Keepalive ping interval (15 s) — prevents proxy/ALB idle-connection timeouts */
 const KEEPALIVE_INTERVAL_MS = 15_000;
@@ -288,12 +399,17 @@ router.post('/stream', async (c: Context) => {
     // Generate a stable message ID used for the SSE stream and reconnection
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Create agent instance with Bedrock model if enabled
+    // Load tier-appropriate tools for this tenant
+    const loadedTools = await getToolsForTenant(tenantContext.tenantId, tenantContext.tier);
+
+    // Create agent instance with Bedrock model and tenant-tier tools
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId,
       sessionId: (body as ChatRequest).sessionId,
+      tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
+      loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
       model: config.bedrock.enabled ? createBedrockModel({
         modelId: config.bedrock.modelId,
         region: config.bedrock.region,
@@ -477,12 +593,17 @@ router.post('/message', async (c: Context) => {
       return c.json(error, 400);
     }
 
-    // Create agent instance with Bedrock model if enabled
+    // Load tier-appropriate tools for this tenant
+    const loadedTools = await getToolsForTenant(tenantContext.tenantId, tenantContext.tier);
+
+    // Create agent instance with Bedrock model and tenant-tier tools
     const agent = createAgent({
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId,
       sessionId: (body as ChatRequest).sessionId,
+      tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
+      loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
       model: config.bedrock.enabled ? createBedrockModel({
         modelId: config.bedrock.modelId,
         region: config.bedrock.region,
