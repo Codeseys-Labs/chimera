@@ -6,10 +6,10 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
-    "test:integration": "bun test tests/integration",
-    "test:e2e": "bun test tests/e2e",
-    "test:load": "bun test tests/load",
-    "test:helpers": "bun test tests/helpers",
+    "test:integration": "bun test integration",
+    "test:e2e": "bun test e2e",
+    "test:load": "bun test load",
+    "test:helpers": "bun test helpers",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts"
   },
