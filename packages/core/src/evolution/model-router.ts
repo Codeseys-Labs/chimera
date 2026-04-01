@@ -27,9 +27,14 @@ import type {
   ModelSelection,
 } from './types';
 
-// Module-level singleton DynamoDB client
-const ddbClient = new DynamoDBClient({});
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+// Lazy singleton to avoid TDZ errors from circular imports
+let _ddbDocClient: DynamoDBDocumentClient | undefined;
+function getDefaultDdbClient(): DynamoDBDocumentClient {
+  if (!_ddbDocClient) {
+    _ddbDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  }
+  return _ddbDocClient;
+}
 
 /**
  * Default model costs (fallback if not in tenant config)
@@ -45,22 +50,31 @@ const DEFAULT_MODEL_COSTS: Record<string, number> = {
  * Bayesian model router with Thompson Sampling
  */
 export class ModelRouter {
-  private ddb: DynamoDBDocumentClient;
+  private _ddb: DynamoDBDocumentClient | undefined;
+  private _ddbOverride: DynamoDBDocumentClient | undefined;
   private tableName: string;
   private costSensitivity: number;
   private arms: Map<TaskCategory, Map<ModelId, ModelArm>>;
   private tenantModelConfig: TenantModelConfig;
   private modelCosts: Map<ModelId, number>;
 
+  private get ddb(): DynamoDBDocumentClient {
+    if (!this._ddb) {
+      this._ddb = this._ddbOverride ?? getDefaultDdbClient();
+    }
+    return this._ddb;
+  }
+
   constructor(params: {
     tableName: string;
     tenantModelConfig: TenantModelConfig;
     costSensitivity?: number;
+    ddbClient?: DynamoDBDocumentClient;
   }) {
     this.tableName = params.tableName;
     this.tenantModelConfig = params.tenantModelConfig;
     this.costSensitivity = params.costSensitivity ?? 0.3;
-    this.ddb = ddbDocClient;
+    this._ddbOverride = params.ddbClient;
     this.arms = new Map();
 
     // Build model costs map from tenant config or fallback
