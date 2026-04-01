@@ -24,22 +24,6 @@ import type {
   ISOTimestamp,
 } from './types';
 
-// Lazy singletons — defer initialization to avoid TDZ errors from circular imports
-let _ddbDocClient: DynamoDBDocumentClient | undefined;
-let _s3Client: S3Client | undefined;
-function getDefaultDdbClient(): DynamoDBDocumentClient {
-  if (!_ddbDocClient) {
-    _ddbDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-  }
-  return _ddbDocClient;
-}
-function getDefaultS3Client(): S3Client {
-  if (!_s3Client) {
-    _s3Client = new S3Client({});
-  }
-  return _s3Client;
-}
-
 /**
  * Prompt optimizer with A/B testing
  */
@@ -51,12 +35,16 @@ export class PromptOptimizer {
   private artifactsBucket: string;
 
   private get ddb(): DynamoDBDocumentClient {
-    if (!this._ddb) this._ddb = getDefaultDdbClient();
+    if (!this._ddb) {
+      this._ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    }
     return this._ddb;
   }
 
   private get s3(): S3Client {
-    if (!this._s3) this._s3 = getDefaultS3Client();
+    if (!this._s3) {
+      this._s3 = new S3Client({});
+    }
     return this._s3;
   }
 

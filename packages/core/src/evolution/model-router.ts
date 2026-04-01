@@ -27,15 +27,6 @@ import type {
   ModelSelection,
 } from './types';
 
-// Lazy singleton to avoid TDZ errors from circular imports
-let _ddbDocClient: DynamoDBDocumentClient | undefined;
-function getDefaultDdbClient(): DynamoDBDocumentClient {
-  if (!_ddbDocClient) {
-    _ddbDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-  }
-  return _ddbDocClient;
-}
-
 /**
  * Default model costs (fallback if not in tenant config)
  */
@@ -51,16 +42,17 @@ const DEFAULT_MODEL_COSTS: Record<string, number> = {
  */
 export class ModelRouter {
   private _ddb: DynamoDBDocumentClient | undefined;
-  private _ddbOverride: DynamoDBDocumentClient | undefined;
   private tableName: string;
   private costSensitivity: number;
   private arms: Map<TaskCategory, Map<ModelId, ModelArm>>;
   private tenantModelConfig: TenantModelConfig;
   private modelCosts: Map<ModelId, number>;
 
+  // Lazy DDB client — only created on first use so static-routing tests
+  // never instantiate the AWS SDK client (avoids mock-bleed from other test files).
   private get ddb(): DynamoDBDocumentClient {
     if (!this._ddb) {
-      this._ddb = this._ddbOverride ?? getDefaultDdbClient();
+      this._ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
     }
     return this._ddb;
   }
@@ -74,7 +66,7 @@ export class ModelRouter {
     this.tableName = params.tableName;
     this.tenantModelConfig = params.tenantModelConfig;
     this.costSensitivity = params.costSensitivity ?? 0.3;
-    this._ddbOverride = params.ddbClient;
+    this._ddb = params.ddbClient;
     this.arms = new Map();
 
     // Build model costs map from tenant config or fallback

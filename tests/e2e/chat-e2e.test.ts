@@ -17,12 +17,9 @@ const STAGING_CONFIG = {
   maxBudgetUsd: 2.0, // Hard cap per test run
 };
 
-describe('Chimera E2E Tests', () => {
-  if (!process.env.RUN_E2E) {
-    test.skip('skipped: RUN_E2E not set', () => {});
-    return;
-  }
+const isE2E = process.env.RUN_E2E === '1';
 
+describe.if(isE2E)('Chimera E2E Tests', () => {
   let client: TestClient;
 
   beforeAll(() => {

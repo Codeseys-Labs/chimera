@@ -1,6 +1,37 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'bun:test'
 import { render, screen } from '@testing-library/react'
 import { ChatMessage } from '../components/chat-message'
+
+// Set up jsdom environment for bun test runner.
+// vitest uses vite.config.ts (environment: 'jsdom') automatically;
+// bun test needs explicit DOM setup via jsdom.
+beforeAll(async () => {
+  if (typeof document === 'undefined') {
+    const { JSDOM } = await import('jsdom')
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
+      url: 'http://localhost',
+      pretendToBeVisual: true,
+    })
+    const { window } = dom
+    const g = globalThis as Record<string, unknown>
+    g.window = window
+    g.document = window.document
+    g.HTMLElement = window.HTMLElement
+    g.SVGElement = window.SVGElement
+    g.Element = window.Element
+    g.Node = window.Node
+    g.Text = window.Text
+    g.Comment = window.Comment
+    g.DocumentFragment = window.DocumentFragment
+    g.Event = window.Event
+    g.CustomEvent = window.CustomEvent
+    g.MouseEvent = window.MouseEvent
+    g.KeyboardEvent = window.KeyboardEvent
+    g.MutationObserver = window.MutationObserver
+    g.getComputedStyle = (el: Element) => window.getComputedStyle(el)
+    g.IS_REACT_ACT_ENVIRONMENT = true
+  }
+})
 
 describe('ChatMessage', () => {
   it('renders user message on the right side', () => {
@@ -10,7 +41,7 @@ describe('ChatMessage', () => {
     // User messages have flex-row-reverse
     const wrapper = container.querySelector('.flex-row-reverse')
     expect(wrapper).toBeTruthy()
-    expect(screen.getByText('Hello there!')).toBeTruthy()
+    expect(container.textContent).toContain('Hello there!')
   })
 
   it('renders assistant message with markdown', () => {
