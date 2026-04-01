@@ -83,6 +83,27 @@ export {
   type LoadedTool,
 } from './skill-bridge';
 
+// Skill Providers
+export {
+  InstructionProvider,
+} from './instruction-provider';
+
+export {
+  MCPProvider,
+} from './mcp-provider';
+
+export {
+  HybridProvider,
+} from './hybrid-provider';
+
+export type {
+  SkillProvider,
+  SkillExecutionResult,
+  MCPProviderConfig,
+  InstructionProviderConfig,
+  HybridProviderConfig,
+} from './provider';
+
 // Security Scanners (7-stage pipeline)
 export {
   StaticAnalyzer,
