@@ -31,7 +31,7 @@ describe('PipelineStack', () => {
         branch: 'main',
       });
       template = Template.fromStack(stack);
-    });
+    }, 120_000); // 120s — CDK synthesis is expensive (Lambda inline functions + Step Functions)
 
     describe('ECR Repositories', () => {
       it('should create exactly 2 ECR repositories', () => {
@@ -234,6 +234,19 @@ describe('PipelineStack', () => {
         expect(rolloutStage).toBeDefined();
         expect(rolloutStage.Actions[0].ActionTypeId.Provider).toBe('StepFunctions');
       });
+
+      it('should have Test stage with SourceOutput as primary input (not BuildOutput)', () => {
+        // Root cause of chimera-ae82: buildOutput has no package.json/bun.lockb,
+        // so bun install fails in the Test stage. Primary input must be sourceOutput.
+        const pipelines = template.findResources('AWS::CodePipeline::Pipeline');
+        const pipeline = Object.values(pipelines)[0] as any;
+        const testStage = pipeline.Properties.Stages.find((s: any) => s.Name === 'Test');
+        expect(testStage).toBeDefined();
+        const testAction = testStage.Actions[0];
+        // Primary input artifact name must be SourceOutput, not BuildOutput
+        const inputArtifactName = testAction.InputArtifacts?.[0]?.Name;
+        expect(inputArtifactName).toBe('SourceOutput');
+      });
     });
 
     describe('CloudWatch Alarms', () => {
@@ -332,7 +345,7 @@ describe('PipelineStack', () => {
         branch: 'main',
       });
       template = Template.fromStack(stack);
-    });
+    }, 120_000);
 
     it('should retain ECR repositories in prod', () => {
       const repos = template.findResources('AWS::ECR::Repository', {
@@ -377,7 +390,7 @@ describe('PipelineStack', () => {
         ecsCanaryServiceName: 'chimera-canary-dev',
       });
       template = Template.fromStack(stack);
-    });
+    }, 120_000);
 
     it('should pass ALB listener ARN to deploy canary function environment', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
