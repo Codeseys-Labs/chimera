@@ -360,7 +360,7 @@ describe('SkillLoader', () => {
       );
     });
 
-    it('should throw not implemented for MCP provider', async () => {
+    it('should return MCPProvider for mcp_server skills', async () => {
       const skill: SkillDefinition = {
         id: 'test',
         name: 'Test',
@@ -379,12 +379,11 @@ describe('SkillLoader', () => {
         metadata: {},
       };
 
-      await expect(loader.loadSkillProvider(skill)).rejects.toThrow(
-        'MCP provider creation not yet implemented'
-      );
+      const provider = await loader.loadSkillProvider(skill);
+      expect(provider.type).toBe('mcp');
     });
 
-    it('should throw not implemented for instruction provider', async () => {
+    it('should return InstructionProvider for instruction skills', async () => {
       const skill: SkillDefinition = {
         id: 'test',
         name: 'Test',
@@ -394,9 +393,8 @@ describe('SkillLoader', () => {
         metadata: {},
       };
 
-      await expect(loader.loadSkillProvider(skill)).rejects.toThrow(
-        'Instruction provider creation not yet implemented'
-      );
+      const provider = await loader.loadSkillProvider(skill);
+      expect(provider.type).toBe('instruction');
     });
   });
 
