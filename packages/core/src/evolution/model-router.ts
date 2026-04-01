@@ -27,9 +27,6 @@ import type {
   ModelSelection,
 } from './types';
 
-// Module-level singleton DynamoDB client
-const ddbClient = new DynamoDBClient({});
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
 
 /**
  * Default model costs (fallback if not in tenant config)
@@ -45,12 +42,21 @@ const DEFAULT_MODEL_COSTS: Record<string, number> = {
  * Bayesian model router with Thompson Sampling
  */
 export class ModelRouter {
-  private ddb: DynamoDBDocumentClient;
+  private _ddb: DynamoDBDocumentClient | undefined;
   private tableName: string;
   private costSensitivity: number;
   private arms: Map<TaskCategory, Map<ModelId, ModelArm>>;
   private tenantModelConfig: TenantModelConfig;
   private modelCosts: Map<ModelId, number>;
+
+  // Lazy DDB client — only created on first use so static-routing tests
+  // never instantiate the AWS SDK client (avoids mock-bleed from other test files).
+  private get ddb(): DynamoDBDocumentClient {
+    if (!this._ddb) {
+      this._ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    }
+    return this._ddb;
+  }
 
   constructor(params: {
     tableName: string;
@@ -60,7 +66,6 @@ export class ModelRouter {
     this.tableName = params.tableName;
     this.tenantModelConfig = params.tenantModelConfig;
     this.costSensitivity = params.costSensitivity ?? 0.3;
-    this.ddb = ddbDocClient;
     this.arms = new Map();
 
     // Build model costs map from tenant config or fallback
