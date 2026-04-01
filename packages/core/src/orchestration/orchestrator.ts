@@ -12,11 +12,144 @@
  * - Rule-based event routing
  */
 
+import {
+  SQSClient,
+  CreateQueueCommand,
+  GetQueueAttributesCommand,
+  SendMessageCommand,
+  DeleteQueueCommand,
+  QueueAttributeName,
+} from '@aws-sdk/client-sqs';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  EventBridgeClient,
+  PutEventsCommand,
+} from '@aws-sdk/client-eventbridge';
+
 import type {
   ISOTimestamp,
-  PartitionKey,
-  SortKey
 } from './types';
+
+// ---------------------------------------------------------------------------
+// Narrow client interfaces — plain objects can implement these for testing
+// ---------------------------------------------------------------------------
+
+/**
+ * SQS operations used by the orchestrator
+ */
+export interface OrchestratorSQSClient {
+  createQueue(input: {
+    QueueName: string;
+    Attributes?: Record<string, string>;
+    Tags?: Record<string, string>;
+  }): Promise<{ QueueUrl?: string }>;
+
+  getQueueAttributes(input: {
+    QueueUrl: string;
+    AttributeNames: string[];
+  }): Promise<{ Attributes?: Record<string, string> }>;
+
+  sendMessage(input: {
+    QueueUrl: string;
+    MessageBody: string;
+    MessageAttributes?: Record<string, { DataType: string; StringValue?: string }>;
+  }): Promise<{ MessageId?: string }>;
+
+  deleteQueue(input: { QueueUrl: string }): Promise<unknown>;
+}
+
+/**
+ * DynamoDB operations used by the orchestrator
+ */
+export interface OrchestratorDDBClient {
+  put(input: { TableName: string; Item: Record<string, unknown> }): Promise<unknown>;
+  update(input: {
+    TableName: string;
+    Key: Record<string, unknown>;
+    UpdateExpression: string;
+    ExpressionAttributeNames?: Record<string, string>;
+    ExpressionAttributeValues?: Record<string, unknown>;
+  }): Promise<unknown>;
+}
+
+/**
+ * EventBridge operations used by the orchestrator
+ */
+export interface OrchestratorEventBridgeClient {
+  putEvents(input: {
+    Entries: Array<{
+      Source: string;
+      DetailType: string;
+      Detail: string;
+      EventBusName: string;
+    }>;
+  }): Promise<{ FailedEntryCount?: number }>;
+}
+
+// ---------------------------------------------------------------------------
+// Module-level singleton client factories (per region, reuse connections)
+// ---------------------------------------------------------------------------
+
+const sqsClientCache = new Map<string, SQSClient>();
+const ddbClientCache = new Map<string, DynamoDBDocumentClient>();
+const ebClientCache = new Map<string, EventBridgeClient>();
+
+function buildSQSClient(region: string): OrchestratorSQSClient {
+  if (!sqsClientCache.has(region)) {
+    sqsClientCache.set(region, new SQSClient({ region }));
+  }
+  const raw = sqsClientCache.get(region)!;
+  return {
+    createQueue: (input) =>
+      raw.send(new CreateQueueCommand({
+        QueueName: input.QueueName,
+        Attributes: input.Attributes,
+        tags: input.Tags,
+      })),
+    getQueueAttributes: (input) =>
+      raw.send(new GetQueueAttributesCommand({
+        QueueUrl: input.QueueUrl,
+        AttributeNames: input.AttributeNames as QueueAttributeName[],
+      })),
+    sendMessage: (input) =>
+      raw.send(new SendMessageCommand({
+        QueueUrl: input.QueueUrl,
+        MessageBody: input.MessageBody,
+        MessageAttributes: input.MessageAttributes as any,
+      })),
+    deleteQueue: (input) =>
+      raw.send(new DeleteQueueCommand({ QueueUrl: input.QueueUrl })),
+  };
+}
+
+function buildDDBClient(region: string): OrchestratorDDBClient {
+  if (!ddbClientCache.has(region)) {
+    ddbClientCache.set(
+      region,
+      DynamoDBDocumentClient.from(new DynamoDBClient({ region }))
+    );
+  }
+  const raw = ddbClientCache.get(region)!;
+  return {
+    put: (input) => raw.send(new PutCommand(input)),
+    update: (input) => raw.send(new UpdateCommand(input)),
+  };
+}
+
+function buildEventBridgeClient(region: string): OrchestratorEventBridgeClient {
+  if (!ebClientCache.has(region)) {
+    ebClientCache.set(region, new EventBridgeClient({ region }));
+  }
+  const raw = ebClientCache.get(region)!;
+  return {
+    putEvents: (input) => raw.send(new PutEventsCommand(input)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
 
 /**
  * Agent lifecycle status
@@ -123,6 +256,12 @@ export interface OrchestratorConfig {
   defaultQueuePrefix: string;
   dlqRetentionDays?: number;
   maxConcurrentAgents?: number;
+  /** Injectable clients for testing — defaults to real AWS SDK singletons */
+  clients?: {
+    sqs?: OrchestratorSQSClient;
+    dynamodb?: OrchestratorDDBClient;
+    eventBridge?: OrchestratorEventBridgeClient;
+  };
 }
 
 /**
@@ -137,10 +276,16 @@ export interface OrchestratorConfig {
 export class AgentOrchestrator {
   private config: OrchestratorConfig;
   private activeAgents: Map<string, AgentRuntimeMetadata>;
+  private sqs: OrchestratorSQSClient;
+  private ddb: OrchestratorDDBClient;
+  private eb: OrchestratorEventBridgeClient;
 
   constructor(config: OrchestratorConfig) {
     this.config = config;
     this.activeAgents = new Map();
+    this.sqs = config.clients?.sqs ?? buildSQSClient(config.region);
+    this.ddb = config.clients?.dynamodb ?? buildDDBClient(config.region);
+    this.eb = config.clients?.eventBridge ?? buildEventBridgeClient(config.region);
   }
 
   /**
@@ -163,10 +308,10 @@ export class AgentOrchestrator {
       throw new Error('Max concurrent agents reached');
     }
 
-    // TODO: Create AgentCore Runtime
+    // Create AgentCore Runtime (stub — AgentCore SDK integration pending)
     const runtimeArn = await this.createAgentRuntime(config);
 
-    // TODO: Create dedicated SQS queue
+    // Create dedicated SQS queue with DLQ
     const queueUrl = await this.createAgentQueue(config);
 
     // Create agent metadata
@@ -188,7 +333,15 @@ export class AgentOrchestrator {
     // Store in memory registry
     this.activeAgents.set(agentKey, metadata);
 
-    // TODO: Persist to DynamoDB
+    // Persist agent state to DynamoDB
+    await this.ddb.put({
+      TableName: this.config.agentTableName,
+      Item: {
+        PK: `AGENT#${config.tenantId}`,
+        SK: `AGENT#${config.agentId}`,
+        ...metadata,
+      },
+    });
 
     // Publish spawn event to EventBridge
     await this.publishEvent({
@@ -229,8 +382,16 @@ export class AgentOrchestrator {
       throw new Error(`Agent unavailable: ${delegation.targetAgentId}`);
     }
 
-    // TODO: Send message to target agent's SQS queue
-    // await this.sendToQueue(targetAgent.queueUrl, delegation);
+    // Send delegation as JSON message to target agent's SQS queue
+    await this.sqs.sendMessage({
+      QueueUrl: targetAgent.queueUrl,
+      MessageBody: JSON.stringify(delegation),
+      MessageAttributes: {
+        taskId:     { DataType: 'String', StringValue: delegation.taskId },
+        priority:   { DataType: 'String', StringValue: delegation.priority ?? 'normal' },
+        sourceAgent:{ DataType: 'String', StringValue: delegation.sourceAgentId },
+      },
+    });
 
     // Publish task delegation event
     await this.publishEvent({
@@ -263,8 +424,10 @@ export class AgentOrchestrator {
     // Update status
     agent.status = 'terminating';
 
-    // TODO: Terminate AgentCore Runtime
-    // TODO: Delete SQS queue (or drain and archive)
+    // AgentCore Runtime termination stub (AgentCore SDK integration pending)
+
+    // Delete the agent's SQS queue
+    await this.sqs.deleteQueue({ QueueUrl: agent.queueUrl });
 
     // Remove from active registry
     this.activeAgents.delete(agentKey);
@@ -302,10 +465,18 @@ export class AgentOrchestrator {
       throw new Error(`Agent not found: ${agentId}`);
     }
 
-    agent.lastHeartbeat = new Date().toISOString();
+    const now = new Date().toISOString();
+    agent.lastHeartbeat = now;
     agent.status = status;
 
-    // TODO: Update DynamoDB
+    // Persist heartbeat and status update to DynamoDB
+    await this.ddb.update({
+      TableName: this.config.agentTableName,
+      Key: { PK: `AGENT#${tenantId}`, SK: `AGENT#${agentId}` },
+      UpdateExpression: 'SET lastHeartbeat = :hb, #s = :status',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':hb': now, ':status': status },
+    });
   }
 
   /**
@@ -355,74 +526,92 @@ export class AgentOrchestrator {
    * @param event - Agent event
    */
   private async publishEvent(event: AgentEvent): Promise<void> {
-    // TODO: Publish to EventBridge
-    // await this.eventBridgeClient.putEvents({
-    //   Entries: [{
-    //     Source: 'chimera.agent',
-    //     DetailType: event.eventType,
-    //     Detail: JSON.stringify(event),
-    //     EventBusName: this.config.eventBusName
-    //   }]
-    // });
-
-    console.log('[Orchestrator] Event:', event);
+    await this.eb.putEvents({
+      Entries: [{
+        Source: 'chimera.agent',
+        DetailType: event.eventType,
+        Detail: JSON.stringify(event),
+        EventBusName: this.config.eventBusName,
+      }],
+    });
   }
 
   /**
    * Create AgentCore Runtime for agent
-   * (Placeholder - will integrate with AgentCore SDK)
+   * (Stub — will integrate with AgentCore SDK once available)
    */
   private async createAgentRuntime(
     config: SpawnAgentConfig
   ): Promise<string> {
-    // TODO: Use AgentCore Runtime SDK
-    // const runtime = await bedrockAgentCore.createRuntime({
-    //   name: `${config.tenantId}-${config.agentId}`,
-    //   modelId: config.modelId || 'anthropic.claude-sonnet-4-v1',
-    //   memory: {
-    //     namespace: `tenant-${config.tenantId}-user-*`,
-    //     strategy: config.memoryStrategy || 'SUMMARY'
-    //   }
-    // });
-    // return runtime.runtimeArn;
+    // AgentCore Runtime SDK integration is pending.
+    // When available, replace with:
+    //   const runtime = await bedrockAgentCore.createRuntime({
+    //     name: `${config.tenantId}-${config.agentId}`,
+    //     modelId: config.modelId || 'anthropic.claude-sonnet-4-v1',
+    //     memory: {
+    //       namespace: `tenant-${config.tenantId}-user-*`,
+    //       strategy: config.memoryStrategy || 'SUMMARY'
+    //     }
+    //   });
+    //   return runtime.runtimeArn;
 
     return `arn:aws:bedrock-agentcore:${this.config.region}:123456789012:runtime/${config.agentId}`;
   }
 
   /**
-   * Create dedicated SQS queue for agent
-   * (Placeholder - will use SQS SDK)
+   * Create dedicated SQS queue with DLQ for agent task delegation
+   *
+   * Queue naming: {prefix}-{tenantId}-{agentId}
+   * DLQ naming:   {prefix}-{tenantId}-{agentId}-dlq
    */
   private async createAgentQueue(
     config: SpawnAgentConfig
   ): Promise<string> {
-    // TODO: Use SQS SDK
-    // const queueName = `${this.config.defaultQueuePrefix}-${config.tenantId}-${config.agentId}`;
-    // const dlqName = `${queueName}-dlq`;
+    const base    = `${this.config.defaultQueuePrefix}-${config.tenantId}-${config.agentId}`;
+    const dlqName = `${base}-dlq`;
 
-    // // Create DLQ
-    // const dlq = await sqs.createQueue({
-    //   QueueName: dlqName,
-    //   Attributes: {
-    //     MessageRetentionPeriod: String((this.config.dlqRetentionDays || 14) * 86400)
-    //   }
-    // });
+    // 1. Create DLQ
+    const dlqResult = await this.sqs.createQueue({
+      QueueName: dlqName,
+      Attributes: {
+        MessageRetentionPeriod: String((this.config.dlqRetentionDays ?? 14) * 86400),
+      },
+      Tags: { tenantId: config.tenantId, agentId: config.agentId },
+    });
 
-    // // Create main queue with DLQ
-    // const queue = await sqs.createQueue({
-    //   QueueName: queueName,
-    //   Attributes: {
-    //     VisibilityTimeout: String(config.timeoutSeconds || 300),
-    //     RedrivePolicy: JSON.stringify({
-    //       deadLetterTargetArn: dlq.QueueArn,
-    //       maxReceiveCount: 3
-    //     })
-    //   }
-    // });
+    if (!dlqResult.QueueUrl) {
+      throw new Error(`Failed to create DLQ for agent ${config.agentId}`);
+    }
 
-    // return queue.QueueUrl;
+    // 2. Resolve DLQ ARN (required for RedrivePolicy)
+    const dlqAttrs = await this.sqs.getQueueAttributes({
+      QueueUrl: dlqResult.QueueUrl,
+      AttributeNames: ['QueueArn'],
+    });
 
-    return `https://sqs.${this.config.region}.amazonaws.com/123456789012/${config.agentId}`;
+    const dlqArn = dlqAttrs.Attributes?.['QueueArn'];
+    if (!dlqArn) {
+      throw new Error(`Failed to get DLQ ARN for agent ${config.agentId}`);
+    }
+
+    // 3. Create main queue with DLQ redrive policy
+    const queueResult = await this.sqs.createQueue({
+      QueueName: base,
+      Attributes: {
+        VisibilityTimeout: String(config.timeoutSeconds ?? 300),
+        RedrivePolicy: JSON.stringify({
+          deadLetterTargetArn: dlqArn,
+          maxReceiveCount: 3,
+        }),
+      },
+      Tags: { tenantId: config.tenantId, agentId: config.agentId },
+    });
+
+    if (!queueResult.QueueUrl) {
+      throw new Error(`Failed to create queue for agent ${config.agentId}`);
+    }
+
+    return queueResult.QueueUrl;
   }
 }
 
