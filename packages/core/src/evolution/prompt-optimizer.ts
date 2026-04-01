@@ -24,20 +24,41 @@ import type {
   ISOTimestamp,
 } from './types';
 
-// Module-level singleton clients
-const ddbClient = new DynamoDBClient({});
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
-const s3Client = new S3Client({});
+// Lazy singletons — defer initialization to avoid TDZ errors from circular imports
+let _ddbDocClient: DynamoDBDocumentClient | undefined;
+let _s3Client: S3Client | undefined;
+function getDefaultDdbClient(): DynamoDBDocumentClient {
+  if (!_ddbDocClient) {
+    _ddbDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  }
+  return _ddbDocClient;
+}
+function getDefaultS3Client(): S3Client {
+  if (!_s3Client) {
+    _s3Client = new S3Client({});
+  }
+  return _s3Client;
+}
 
 /**
  * Prompt optimizer with A/B testing
  */
 export class PromptOptimizer {
-  private ddb: DynamoDBDocumentClient;
-  private s3: S3Client;
+  private _ddb: DynamoDBDocumentClient | undefined;
+  private _s3: S3Client | undefined;
   private evolutionTable: string;
   private sessionsTable: string;
   private artifactsBucket: string;
+
+  private get ddb(): DynamoDBDocumentClient {
+    if (!this._ddb) this._ddb = getDefaultDdbClient();
+    return this._ddb;
+  }
+
+  private get s3(): S3Client {
+    if (!this._s3) this._s3 = getDefaultS3Client();
+    return this._s3;
+  }
 
   constructor(params: {
     evolutionTable: string;
@@ -47,8 +68,6 @@ export class PromptOptimizer {
     this.evolutionTable = params.evolutionTable;
     this.sessionsTable = params.sessionsTable;
     this.artifactsBucket = params.artifactsBucket;
-    this.ddb = ddbDocClient;
-    this.s3 = s3Client;
   }
 
   /**
