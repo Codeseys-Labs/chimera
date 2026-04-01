@@ -324,7 +324,7 @@ describe('ChimeraAgent.invoke()', () => {
 
       const lastCall = model.getLastCall();
       expect(lastCall?.systemPrompt).toBeDefined();
-      expect(lastCall?.systemPrompt).toContain('assistant');
+      expect(lastCall?.systemPrompt).toContain('Chimera');
     });
 
     it('should pass tools to model when loadedTools provided', async () => {
