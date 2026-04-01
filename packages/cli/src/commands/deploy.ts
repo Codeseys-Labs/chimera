@@ -128,10 +128,11 @@ async function autoCollectEndpoints(
   region: string,
   env: string,
 ): Promise<boolean> {
-  const [apiOutputs, chatOutputs, secOutputs] = await Promise.all([
+  const [apiOutputs, chatOutputs, secOutputs, frontendOutputs] = await Promise.all([
     getStackOutputs(cfnClient, `Chimera-${env}-Api`),
     getStackOutputs(cfnClient, `Chimera-${env}-Chat`),
     getStackOutputs(cfnClient, `Chimera-${env}-Security`),
+    getStackOutputs(cfnClient, `Chimera-${env}-Frontend`),
   ]);
 
   const apiUrl = apiOutputs.ApiUrl ?? apiOutputs.RestApiUrl;
@@ -144,6 +145,7 @@ async function autoCollectEndpoints(
   const webSocketUrl = apiOutputs.WebSocketUrl ?? apiOutputs.WebSocketApiUrl;
   const cognitoClientId = secOutputs.WebClientId ?? secOutputs.UserPoolClientId;
   const cognitoDomain = secOutputs.HostedUIDomain;
+  const frontendUrl = frontendOutputs.FrontendUrl;
 
   const current = loadWorkspaceConfig();
   saveWorkspaceConfig({
@@ -156,6 +158,7 @@ async function autoCollectEndpoints(
       cognito_user_pool_id: cognitoUserPoolId,
       ...(cognitoClientId ? { cognito_client_id: cognitoClientId } : {}),
       ...(cognitoDomain ? { cognito_domain: cognitoDomain } : {}),
+      ...(frontendUrl ? { frontend_url: frontendUrl } : {}),
     },
   });
 

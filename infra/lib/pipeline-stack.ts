@@ -1113,13 +1113,15 @@ def handler(event, context):
           ],
         },
         // Stage 4: Test (integration + E2E against deployed infrastructure)
+        // NOTE: input must be sourceOutput (has package.json/bun.lockb for bun install).
+        // buildOutput only contains CDK synth artifacts — no package manager files.
         {
           stageName: 'Test',
           actions: [
             new codepipeline_actions.CodeBuildAction({
               actionName: 'Integration_E2E_Tests',
               project: testProject,
-              input: buildOutput,
+              input: sourceOutput,
               extraInputs: [dockerOutput],
             }),
           ],

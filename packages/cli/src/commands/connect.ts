@@ -96,6 +96,18 @@ async function runEndpoints(options: {
       if (!options.json) spinner.warn(color.yellow('Chat stack not found — chat_url not set'));
     }
 
+    // Fetch FrontendStack CloudFront URL (optional — skip gracefully if not deployed)
+    if (!options.json) spinner.start('Fetching Frontend URL...');
+    let frontendUrl: string | undefined;
+    try {
+      const frontendStackName = `Chimera-${env}-Frontend`;
+      const frontendOutputs = await getStackOutputs(client, frontendStackName);
+      frontendUrl = frontendOutputs.FrontendUrl;
+      if (!options.json) spinner.succeed(color.green('Frontend URL retrieved'));
+    } catch {
+      if (!options.json) spinner.warn(color.yellow('Frontend stack not found — frontend_url not set'));
+    }
+
     if (!options.json) spinner.start('Fetching Cognito configuration...');
     const securityStackName = `Chimera-${env}-Security`;
     const securityOutputs = await getStackOutputs(client, securityStackName);
@@ -124,6 +136,7 @@ async function runEndpoints(options: {
         cognito_user_pool_id: cognitoUserPoolId,
         cognito_client_id: cognitoClientId,
         ...(cognitoDomain ? { cognito_domain: cognitoDomain } : {}),
+        ...(frontendUrl ? { frontend_url: frontendUrl } : {}),
       },
     });
 
@@ -138,6 +151,7 @@ async function runEndpoints(options: {
           cognito_user_pool_id: cognitoUserPoolId,
           cognito_client_id: cognitoClientId,
           cognito_domain: cognitoDomain,
+          frontend_url: frontendUrl,
         },
       }));
     } else {
@@ -156,6 +170,9 @@ async function runEndpoints(options: {
       }
       if (cognitoDomain) {
         console.log(color.gray(`  Hosted UI:    https://${cognitoDomain}.auth.${region}.amazoncognito.com`));
+      }
+      if (frontendUrl) {
+        console.log(color.gray(`  Frontend:     ${frontendUrl}`));
       }
       console.log(color.gray('\nConfiguration saved to chimera.toml'));
     }
