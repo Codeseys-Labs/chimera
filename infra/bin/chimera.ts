@@ -113,15 +113,20 @@ observabilityStack.addDependency(securityStack);
 // --- Stack 5: API Gateway ---
 // REST API v1 with JWT authorizer, WebSocket API, webhook routes, OpenAI-compatible endpoint.
 // Depends on SecurityStack for Cognito user pool and WAF WebACL.
+// Depends on DataStack for DynamoDB tables used by Lambda management API handlers.
 const apiStack = new ApiStack(app, `${prefix}-Api`, {
   env: envConfig,
   description: 'Chimera API Gateway: REST API, WebSocket, webhooks, OpenAI-compatible endpoint',
   envName,
   userPool: securityStack.userPool,
   webAcl: securityStack.webAcl,
+  tenantsTable: dataStack.tenantsTable,
+  sessionsTable: dataStack.sessionsTable,
+  skillsTable: dataStack.skillsTable,
 });
 applyApiStackSuppressions(apiStack);
 apiStack.addDependency(securityStack);
+apiStack.addDependency(dataStack);
 
 // --- Stack 6: CI/CD Pipeline ---
 // CodePipeline with multi-stage canary deployment: CodeCommit source -> Build/Test -> Canary -> Progressive Rollout.
