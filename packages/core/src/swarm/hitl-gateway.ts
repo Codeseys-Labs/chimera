@@ -10,7 +10,33 @@
  * Section: "Human-in-the-Loop Decision Points"
  */
 
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+
 import type { ISOTimestamp } from '../orchestration/types';
+
+/**
+ * Narrow DynamoDB interface for HITL persistence.
+ * Plain objects can implement this in tests without hitting AWS.
+ */
+export interface HITLDDBClient {
+  get(input: { TableName: string; Key: Record<string, unknown> }): Promise<{ Item?: Record<string, unknown> }>;
+  put(input: { TableName: string; Item: Record<string, unknown> }): Promise<unknown>;
+}
+
+// Lazily-constructed module-level singleton for production use
+let _defaultDDBClient: HITLDDBClient | undefined;
+
+function getDefaultDDBClient(): HITLDDBClient {
+  if (!_defaultDDBClient) {
+    const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    _defaultDDBClient = {
+      get: (input) => doc.send(new GetCommand(input)),
+      put: (input) => doc.send(new PutCommand(input)),
+    };
+  }
+  return _defaultDDBClient;
+}
 
 /**
  * Task urgency classification for escalation routing
@@ -103,6 +129,25 @@ export interface HITLPolicyConfig {
   requireApprovalForIrreversible: boolean;
   requireApprovalForCompliance: boolean;
   autoApproveEnvironments: Environment[];
+  /** DynamoDB table for persisting approval requests (chimera-sessions or chimera-tenants) */
+  sessionsTableName?: string;
+  /** Injectable DynamoDB client — provide in tests to avoid hitting AWS */
+  ddb?: HITLDDBClient;
+}
+
+/**
+ * DynamoDB record for an approval request.
+ * SK pattern: APPROVAL#{requestId}
+ */
+export interface ApprovalRecord {
+  requestId: string;
+  tenantId: string;
+  /** Description of the action requiring approval */
+  action: string;
+  status: 'pending' | 'approved' | 'denied';
+  requestedAt: ISOTimestamp;
+  resolvedAt?: ISOTimestamp;
+  resolvedBy?: string;
 }
 
 /**
@@ -125,10 +170,12 @@ export interface HITLPolicyConfig {
 export class HITLGateway {
   private config: HITLPolicyConfig;
   private pendingEscalations: Map<string, EscalationRequest>;
+  private ddb: HITLDDBClient;
 
   constructor(config: HITLPolicyConfig) {
     this.config = config;
     this.pendingEscalations = new Map();
+    this.ddb = config.ddb ?? getDefaultDDBClient();
   }
 
   /**
@@ -211,10 +258,10 @@ export class HITLGateway {
    * @param resolutionAttempts - Previous autonomous resolution attempts
    * @returns Escalation request ID
    */
-  createEscalation(
+  async createEscalation(
     context: TaskContext,
     resolutionAttempts: ResolutionAttempt[]
-  ): EscalationRequest {
+  ): Promise<EscalationRequest> {
     const decision = this.shouldAskHuman(context);
     const urgency = decision.urgency || 'medium';
 
@@ -233,6 +280,15 @@ export class HITLGateway {
     };
 
     this.pendingEscalations.set(request.id, request);
+
+    // Persist to DynamoDB so the approval survives gateway restarts
+    await this.saveApprovalRequest({
+      requestId: request.id,
+      tenantId: context.tenantId,
+      action: request.title,
+      requestedAt: request.createdAt,
+    });
+
     return request;
   }
 
@@ -267,13 +323,110 @@ export class HITLGateway {
   }
 
   /**
-   * Check if human has responded to escalation
-   * (Stub - in production, queries DynamoDB or SQS)
+   * Persist an approval request to DynamoDB.
+   *
+   * PK: TENANT#{tenantId}, SK: APPROVAL#{requestId}
+   * Status starts as 'pending'.
+   */
+  async saveApprovalRequest(params: {
+    requestId: string;
+    tenantId: string;
+    action: string;
+    requestedAt: ISOTimestamp;
+  }): Promise<void> {
+    if (!this.config.sessionsTableName) return;
+
+    await this.ddb.put({
+      TableName: this.config.sessionsTableName,
+      Item: {
+        PK: `TENANT#${params.tenantId}`,
+        SK: `APPROVAL#${params.requestId}`,
+        requestId: params.requestId,
+        tenantId: params.tenantId,
+        action: params.action,
+        status: 'pending' as const,
+        requestedAt: params.requestedAt,
+      },
+    });
+  }
+
+  /**
+   * Query DynamoDB for the current status of an approval request.
+   *
+   * @returns The approval record, or null if not found
+   */
+  async getApprovalStatus(params: {
+    requestId: string;
+    tenantId: string;
+  }): Promise<ApprovalRecord | null> {
+    if (!this.config.sessionsTableName) return null;
+
+    const result = await this.ddb.get({
+      TableName: this.config.sessionsTableName,
+      Key: {
+        PK: `TENANT#${params.tenantId}`,
+        SK: `APPROVAL#${params.requestId}`,
+      },
+    });
+
+    if (!result.Item) return null;
+
+    return result.Item as unknown as ApprovalRecord;
+  }
+
+  /**
+   * Record a human's approval or denial decision to DynamoDB.
+   *
+   * Called by the API endpoint when a human responds to an escalation.
+   */
+  async resolveApproval(params: {
+    requestId: string;
+    tenantId: string;
+    approved: boolean;
+    resolvedBy: string;
+    resolvedAt?: ISOTimestamp;
+  }): Promise<void> {
+    if (!this.config.sessionsTableName) return;
+
+    const resolvedAt = params.resolvedAt ?? (new Date().toISOString() as ISOTimestamp);
+    const status: ApprovalRecord['status'] = params.approved ? 'approved' : 'denied';
+
+    await this.ddb.put({
+      TableName: this.config.sessionsTableName,
+      Item: {
+        PK: `TENANT#${params.tenantId}`,
+        SK: `APPROVAL#${params.requestId}`,
+        requestId: params.requestId,
+        tenantId: params.tenantId,
+        status,
+        resolvedAt,
+        resolvedBy: params.resolvedBy,
+      },
+    });
+  }
+
+  /**
+   * Check if human has responded to escalation by querying DynamoDB.
+   * Returns null while status is 'pending' or if DDB is not configured.
    */
   private async checkForResponse(requestId: string): Promise<HumanResponse | null> {
-    // TODO: Implement DynamoDB query for human responses
-    // For now, return null (no response yet)
-    return null;
+    const escalation = this.pendingEscalations.get(requestId);
+    if (!escalation) return null;
+
+    const record = await this.getApprovalStatus({
+      requestId,
+      tenantId: escalation.taskContext.tenantId,
+    });
+
+    if (!record || record.status === 'pending') return null;
+
+    return {
+      requestId,
+      approved: record.status === 'approved',
+      actionDescription: record.action,
+      guidance: record.resolvedBy,
+      respondedAt: record.resolvedAt ?? (new Date().toISOString() as ISOTimestamp),
+    };
   }
 
   /**
