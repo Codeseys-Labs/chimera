@@ -96,7 +96,7 @@ async function runEndpoints(options: {
       if (!options.json) spinner.warn(color.yellow('Chat stack not found — chat_url not set'));
     }
 
-    // Fetch Frontend URL (optional — skip gracefully if stack not yet deployed)
+    // Fetch FrontendStack CloudFront URL (optional — skip gracefully if not deployed)
     if (!options.json) spinner.start('Fetching Frontend URL...');
     let frontendUrl: string | undefined;
     try {
@@ -137,6 +137,7 @@ async function runEndpoints(options: {
         cognito_user_pool_id: cognitoUserPoolId,
         cognito_client_id: cognitoClientId,
         ...(cognitoDomain ? { cognito_domain: cognitoDomain } : {}),
+        ...(frontendUrl ? { frontend_url: frontendUrl } : {}),
       },
     });
 
@@ -152,6 +153,7 @@ async function runEndpoints(options: {
           cognito_user_pool_id: cognitoUserPoolId,
           cognito_client_id: cognitoClientId,
           cognito_domain: cognitoDomain,
+          frontend_url: frontendUrl,
         },
       }));
     } else {
@@ -173,6 +175,9 @@ async function runEndpoints(options: {
       }
       if (cognitoDomain) {
         console.log(color.gray(`  Hosted UI:    https://${cognitoDomain}.auth.${region}.amazoncognito.com`));
+      }
+      if (frontendUrl) {
+        console.log(color.gray(`  Frontend:     ${frontendUrl}`));
       }
       console.log(color.gray('\nConfiguration saved to chimera.toml'));
     }
