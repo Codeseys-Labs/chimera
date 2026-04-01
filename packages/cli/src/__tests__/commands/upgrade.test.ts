@@ -72,8 +72,10 @@ describe('findProjectRoot', () => {
 
 describe('git', () => {
   beforeEach(async () => {
-    // Initialize a real git repo in tmpDir for git command tests
+    // Initialize a real git repo in tmpDir for git command tests.
+    // Disable system-level hooks (e.g. Code Defender) so test commits aren't intercepted.
     await Bun.$`git init ${tmpDir}`.quiet();
+    await Bun.$`git -C ${tmpDir} config core.hooksPath /dev/null`.quiet();
     await Bun.$`git -C ${tmpDir} config user.email "test@test.com"`.quiet();
     await Bun.$`git -C ${tmpDir} config user.name "Test"`.quiet();
   });
@@ -97,7 +99,9 @@ describe('git', () => {
 
 describe('hasUncommittedChanges', () => {
   beforeEach(async () => {
+    // Disable system-level hooks (e.g. Code Defender) so test commits aren't intercepted.
     await Bun.$`git init ${tmpDir}`.quiet();
+    await Bun.$`git -C ${tmpDir} config core.hooksPath /dev/null`.quiet();
     await Bun.$`git -C ${tmpDir} config user.email "test@test.com"`.quiet();
     await Bun.$`git -C ${tmpDir} config user.name "Test"`.quiet();
     // Create initial commit so HEAD exists
