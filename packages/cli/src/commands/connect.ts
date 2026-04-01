@@ -96,6 +96,18 @@ async function runEndpoints(options: {
       if (!options.json) spinner.warn(color.yellow('Chat stack not found — chat_url not set'));
     }
 
+    // Fetch Frontend URL (optional — skip gracefully if stack not yet deployed)
+    if (!options.json) spinner.start('Fetching Frontend URL...');
+    let frontendUrl: string | undefined;
+    try {
+      const frontendStackName = `Chimera-${env}-Frontend`;
+      const frontendOutputs = await getStackOutputs(client, frontendStackName);
+      frontendUrl = frontendOutputs.FrontendUrl || frontendOutputs.FrontendDistributionDomainName;
+      if (!options.json) spinner.succeed(color.green('Frontend URL retrieved'));
+    } catch {
+      if (!options.json) spinner.warn(color.yellow('Frontend stack not found — frontend_url not set'));
+    }
+
     if (!options.json) spinner.start('Fetching Cognito configuration...');
     const securityStackName = `Chimera-${env}-Security`;
     const securityOutputs = await getStackOutputs(client, securityStackName);
@@ -120,6 +132,7 @@ async function runEndpoints(options: {
       endpoints: {
         api_url: apiUrl,
         ...(chatUrl ? { chat_url: chatUrl } : {}),
+        ...(frontendUrl ? { frontend_url: frontendUrl } : {}),
         websocket_url: webSocketUrl,
         cognito_user_pool_id: cognitoUserPoolId,
         cognito_client_id: cognitoClientId,
@@ -134,6 +147,7 @@ async function runEndpoints(options: {
           region,
           api_url: apiUrl,
           chat_url: chatUrl,
+          frontend_url: frontendUrl,
           websocket_url: webSocketUrl,
           cognito_user_pool_id: cognitoUserPoolId,
           cognito_client_id: cognitoClientId,
@@ -146,6 +160,9 @@ async function runEndpoints(options: {
       console.log(color.gray(`  API Gateway:  ${apiUrl}`));
       if (chatUrl) {
         console.log(color.gray(`  Chat (ALB):   ${chatUrl}`));
+      }
+      if (frontendUrl) {
+        console.log(color.gray(`  Frontend:     ${frontendUrl}`));
       }
       if (webSocketUrl) {
         console.log(color.gray(`  WebSocket:    ${webSocketUrl}`));

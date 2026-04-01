@@ -11,10 +11,12 @@ phases:
 
   pre_build:
     commands:
+      - . "$HOME/.bun/env"
       - bun install --frozen-lockfile
 
   build:
     commands:
+      - . "$HOME/.bun/env"
       - bun run lint || true
       - bun run typecheck || true
       - bun test --coverage || true
