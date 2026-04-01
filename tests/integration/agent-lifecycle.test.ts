@@ -17,8 +17,8 @@ const TEST_CONFIG = {
 };
 
 describe('Agent Lifecycle Integration Tests', () => {
-  if (!process.env.CHIMERA_TEST_API_URL) {
-    test.skip('skipped: CHIMERA_TEST_API_URL not set', () => {});
+  if (!process.env.RUN_E2E) {
+    test.skip('skipped: RUN_E2E not set', () => {});
     return;
   }
 
