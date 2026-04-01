@@ -22,6 +22,26 @@ export const AWS_CONFIG_PATH = path.join(os.homedir(), '.aws', 'config');
 
 export const SUGGESTED_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1'];
 
+/** Map AWS region to Bedrock cross-region inference profile prefix (us/eu/ap) */
+export function getRegionInferencePrefix(region: string): string {
+  if (region.startsWith('eu-')) return 'eu';
+  if (region.startsWith('ap-')) return 'ap';
+  return 'us';
+}
+
+/** Return the default Bedrock model ID for a given AWS region */
+export function getDefaultModelId(region: string): string {
+  const prefix = getRegionInferencePrefix(region);
+  return `${prefix}.anthropic.claude-sonnet-4-6-v1:0`;
+}
+
+/** Max context token choices (label → value) */
+export const MAX_CONTEXT_CHOICES: { name: string; value: number }[] = [
+  { name: '200K (default)', value: 200000 },
+  { name: '500K', value: 500000 },
+  { name: '1M (extended context beta)', value: 1000000 },
+];
+
 const PROFILE_SECTION_RE = /^\[([^\]]+)\]/;
 
 /**
@@ -138,12 +158,17 @@ export function registerInitCommand(program: Command): void {
     .option('--repo <repo>', 'CodeCommit repository name (skip prompt)')
     .option('--admin-email <email>', 'Admin user email (skip prompt)')
     .option('--admin-password <password>', 'Admin user password (skip prompt, use - to auto-generate)')
+    .option('--model <model-id>', 'Bedrock inference profile model ID (skip prompt)')
+    .option('--prompt-caching', 'Enable Anthropic prompt caching beta (skip prompt)')
+    .option('--no-prompt-caching', 'Disable Anthropic prompt caching beta (skip prompt)')
+    .option('--max-context-tokens <tokens>', 'Max context tokens: 200000, 500000, or 1000000 (skip prompt)', parseInt)
     .option('--json', 'Output result as JSON')
     .addHelpText('after', `
 Examples:
   $ chimera init
   $ chimera init --region us-east-1 --env dev --admin-email admin@example.com
-  $ chimera init --profile my-profile --admin-password - --json`)
+  $ chimera init --profile my-profile --admin-password - --json
+  $ chimera init --model us.anthropic.claude-opus-4-6-v1:0 --prompt-caching --max-context-tokens 1000000`)
     .action(async (options) => {
       try {
         const existing = findWorkspaceConfig(process.cwd());
@@ -290,6 +315,79 @@ Examples:
           environment = env as string;
         }
 
+        // ── Model Selection ──────────────────────────────────────────────────
+        let modelId: string = options.model ?? '';
+
+        if (!modelId) {
+          const prefix = getRegionInferencePrefix(region);
+          const CUSTOM = '[ Custom model ID ]';
+          const modelChoices = [
+            { name: `Claude Sonnet 4.6 (recommended) — ${prefix}.anthropic.claude-sonnet-4-6-v1:0`, value: `${prefix}.anthropic.claude-sonnet-4-6-v1:0` },
+            { name: `Claude Opus 4.6 — ${prefix}.anthropic.claude-opus-4-6-v1:0`, value: `${prefix}.anthropic.claude-opus-4-6-v1:0` },
+            { name: `Claude Haiku 4.5 — ${prefix}.anthropic.claude-haiku-4-5-20251001-v1:0`, value: `${prefix}.anthropic.claude-haiku-4-5-20251001-v1:0` },
+            new inquirer.Separator(),
+            CUSTOM,
+          ];
+
+          const { modelChoice } = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'modelChoice',
+              message: 'Bedrock model:',
+              choices: modelChoices,
+              default: `${prefix}.anthropic.claude-sonnet-4-6-v1:0`,
+            },
+          ]);
+
+          if (modelChoice === CUSTOM) {
+            const { customModel } = await inquirer.prompt([
+              {
+                type: 'input',
+                name: 'customModel',
+                message: 'Model ID (e.g. us.anthropic.claude-sonnet-4-6-v1:0):',
+                validate: (input: string) =>
+                  input.trim().length > 0 || 'Model ID is required',
+              },
+            ]);
+            modelId = (customModel as string).trim();
+          } else {
+            modelId = modelChoice as string;
+          }
+        }
+
+        // ── Prompt Caching ───────────────────────────────────────────────────
+        let promptCaching: boolean;
+
+        if (options.promptCaching !== undefined) {
+          promptCaching = options.promptCaching as boolean;
+        } else {
+          const { enableCaching } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'enableCaching',
+              message: 'Enable prompt caching? (reduces cost for repeated context)',
+              default: false,
+            },
+          ]);
+          promptCaching = enableCaching as boolean;
+        }
+
+        // ── Max Context Tokens ───────────────────────────────────────────────
+        let maxContextTokens: number = options.maxContextTokens ?? 0;
+
+        if (!maxContextTokens) {
+          const { contextChoice } = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'contextChoice',
+              message: 'Max context tokens:',
+              choices: MAX_CONTEXT_CHOICES.map((c) => ({ name: c.name, value: c.value })),
+              default: 200000,
+            },
+          ]);
+          maxContextTokens = contextChoice as number;
+        }
+
         // ── Repository ────────────────────────────────────────────────────────
         let repository: string = options.repo ?? '';
 
@@ -373,6 +471,12 @@ Examples:
           aws: { profile, region },
           workspace: { environment, repository },
           auth: { admin_email: adminEmail },
+          model: {
+            model_id: modelId,
+            prompt_caching: promptCaching,
+            max_tokens: maxContextTokens,
+            temperature: 0.7,
+          },
         };
 
         saveWorkspaceConfig(config, process.cwd());
@@ -392,6 +496,12 @@ Examples:
               admin_email: adminEmail,
               password_generated: passwordWasGenerated,
               ...(passwordWasGenerated ? { admin_password: adminPassword } : {}),
+              model: {
+                model_id: modelId,
+                prompt_caching: promptCaching,
+                max_tokens: maxContextTokens,
+                temperature: 0.7,
+              },
             },
           }));
         } else {
@@ -407,6 +517,9 @@ Examples:
           } else {
             console.log(color.gray('  Admin password saved to ~/.chimera/credentials'));
           }
+          console.log(`  Model:       ${color.cyan(modelId)}`);
+          console.log(`  Prompt cache: ${color.cyan(String(promptCaching))}`);
+          console.log(`  Max tokens:  ${color.cyan(String(maxContextTokens))}`);
           console.log(color.yellow('\nRemember to add chimera.toml to your .gitignore'));
           console.log(color.gray('\nNext steps:'));
           console.log(color.gray('  1. chimera deploy    -- deploy infrastructure'));
