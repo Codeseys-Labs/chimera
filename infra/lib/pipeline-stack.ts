@@ -448,7 +448,7 @@ import boto3
 import os
 from datetime import datetime
 
-elbv2 = boto3.client('elasticloadbalancingv2')
+elbv2 = boto3.client('elbv2')
 ecs_client = boto3.client('ecs')
 s3 = boto3.client('s3')
 
@@ -721,7 +721,7 @@ import boto3
 import os
 from datetime import datetime
 
-elbv2 = boto3.client('elasticloadbalancingv2')
+elbv2 = boto3.client('elbv2')
 s3 = boto3.client('s3')
 
 def handler(event, context):
@@ -803,7 +803,7 @@ import boto3
 import os
 from datetime import datetime
 
-elbv2 = boto3.client('elasticloadbalancingv2')
+elbv2 = boto3.client('elbv2')
 ecs_client = boto3.client('ecs')
 s3 = boto3.client('s3')
 

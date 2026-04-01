@@ -291,6 +291,19 @@ describe('PipelineStack', () => {
       });
     });
 
+    describe('Lambda canary functions', () => {
+      it('canary Lambda functions should use elbv2 not elasticloadbalancingv2 boto3 client name', () => {
+        // Lambda Python 3.12 botocore in Lambda runtime uses 'elbv2' as service name.
+        // 'elasticloadbalancingv2' raises UnknownServiceError: unknown service elbv2.
+        // This caused Rollout stage Step Functions failure immediately on execution start.
+        const fns = template.findResources('AWS::Lambda::Function');
+        const inlineFns = Object.values(fns).filter((fn: any) =>
+          fn.Properties.Code?.ZipFile?.includes('elasticloadbalancingv2')
+        );
+        expect(inlineFns).toHaveLength(0);
+      });
+    });
+
     describe('CloudWatch Alarms', () => {
       it('should create error rate alarm for auto-rollback', () => {
         template.hasResourceProperties('AWS::CloudWatch::Alarm', {
