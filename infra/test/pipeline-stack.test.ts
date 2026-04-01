@@ -249,6 +249,48 @@ describe('PipelineStack', () => {
       });
     });
 
+    describe('CodeBuild Bun PATH sourcing', () => {
+      // CodeBuild runs each phase in a separate shell — export PATH in install
+      // does NOT carry over. Each phase that calls bun must re-export PATH.
+      // Use `export PATH="$HOME/.bun/bin:$PATH"` (not source .bun/env — the env
+      // file may not exist on all CodeBuild images). Convention: mx-b8e992.
+      const getBunPathCmd = (cmds: string[]): boolean =>
+        cmds.some((cmd: string) => cmd.includes('.bun/bin') && cmd.includes('PATH'));
+
+      it('deploy project pre_build should set bun PATH before bun install', () => {
+        const projects = template.findResources('AWS::CodeBuild::Project', {
+          Properties: { Name: 'chimera-deploy-dev' },
+        });
+        const project = Object.values(projects)[0] as any;
+        const preBuildCmds: string[] = project.Properties.Source.BuildSpec
+          ? JSON.parse(project.Properties.Source.BuildSpec).phases?.pre_build?.commands ?? []
+          : [];
+        expect(getBunPathCmd(preBuildCmds)).toBe(true);
+      });
+
+      it('test project pre_build should set bun PATH before bun install', () => {
+        const projects = template.findResources('AWS::CodeBuild::Project', {
+          Properties: { Name: 'chimera-test-dev' },
+        });
+        const project = Object.values(projects)[0] as any;
+        const preBuildCmds: string[] = project.Properties.Source.BuildSpec
+          ? JSON.parse(project.Properties.Source.BuildSpec).phases?.pre_build?.commands ?? []
+          : [];
+        expect(getBunPathCmd(preBuildCmds)).toBe(true);
+      });
+
+      it('test project build phase should set bun PATH before running tests', () => {
+        const projects = template.findResources('AWS::CodeBuild::Project', {
+          Properties: { Name: 'chimera-test-dev' },
+        });
+        const project = Object.values(projects)[0] as any;
+        const buildCmds: string[] = project.Properties.Source.BuildSpec
+          ? JSON.parse(project.Properties.Source.BuildSpec).phases?.build?.commands ?? []
+          : [];
+        expect(getBunPathCmd(buildCmds)).toBe(true);
+      });
+    });
+
     describe('CloudWatch Alarms', () => {
       it('should create error rate alarm for auto-rollback', () => {
         template.hasResourceProperties('AWS::CloudWatch::Alarm', {
