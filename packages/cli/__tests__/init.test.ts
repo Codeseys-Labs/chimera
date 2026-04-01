@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { listAwsProfiles, writeAwsProfile, generatePassword, isValidEmail } from '../src/commands/init';
+import { listAwsProfiles, writeAwsProfile, generatePassword, isValidEmail, getRegionInferencePrefix, getDefaultModelId, MAX_CONTEXT_CHOICES } from '../src/commands/init';
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'chimera-init-test-'));
@@ -205,6 +205,63 @@ describe('generatePassword', () => {
   it('generates unique passwords on each call', () => {
     const passwords = new Set(Array.from({ length: 10 }, () => generatePassword()));
     expect(passwords.size).toBeGreaterThan(1);
+  });
+});
+
+describe('getRegionInferencePrefix', () => {
+  it('returns us for us-east-1', () => {
+    expect(getRegionInferencePrefix('us-east-1')).toBe('us');
+  });
+
+  it('returns us for us-west-2', () => {
+    expect(getRegionInferencePrefix('us-west-2')).toBe('us');
+  });
+
+  it('returns eu for eu-west-1', () => {
+    expect(getRegionInferencePrefix('eu-west-1')).toBe('eu');
+  });
+
+  it('returns eu for eu-central-1', () => {
+    expect(getRegionInferencePrefix('eu-central-1')).toBe('eu');
+  });
+
+  it('returns ap for ap-southeast-1', () => {
+    expect(getRegionInferencePrefix('ap-southeast-1')).toBe('ap');
+  });
+
+  it('returns ap for ap-northeast-1', () => {
+    expect(getRegionInferencePrefix('ap-northeast-1')).toBe('ap');
+  });
+
+  it('defaults to us for unknown regions', () => {
+    expect(getRegionInferencePrefix('sa-east-1')).toBe('us');
+    expect(getRegionInferencePrefix('me-south-1')).toBe('us');
+  });
+});
+
+describe('getDefaultModelId', () => {
+  it('returns us inference profile for us regions', () => {
+    expect(getDefaultModelId('us-east-1')).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
+    expect(getDefaultModelId('us-west-2')).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
+  });
+
+  it('returns eu inference profile for eu regions', () => {
+    expect(getDefaultModelId('eu-west-1')).toBe('eu.anthropic.claude-sonnet-4-6-v1:0');
+  });
+
+  it('returns ap inference profile for ap regions', () => {
+    expect(getDefaultModelId('ap-southeast-1')).toBe('ap.anthropic.claude-sonnet-4-6-v1:0');
+  });
+});
+
+describe('MAX_CONTEXT_CHOICES', () => {
+  it('has three entries: 200K, 500K, 1M', () => {
+    expect(MAX_CONTEXT_CHOICES).toHaveLength(3);
+    expect(MAX_CONTEXT_CHOICES.map((c) => c.value)).toEqual([200000, 500000, 1000000]);
+  });
+
+  it('defaults first choice to 200K', () => {
+    expect(MAX_CONTEXT_CHOICES[0].value).toBe(200000);
   });
 });
 
