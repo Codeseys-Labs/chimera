@@ -41,6 +41,16 @@ export interface WorkspaceConfig {
     callback_url?: string;
     admin_email?: string;
   };
+  model?: {
+    /** Bedrock inference profile ID (e.g. 'us.anthropic.claude-sonnet-4-6-v1:0') */
+    model_id?: string;
+    /** Enable Anthropic prompt caching beta via anthropic-beta header */
+    prompt_caching?: boolean;
+    /** Max tokens for model responses */
+    max_tokens?: number;
+    /** Sampling temperature (0.0–1.0) */
+    temperature?: number;
+  };
   /** Docker Hub credentials — DEPRECATED in chimera.toml; move to ~/.chimera/credentials */
   docker?: {
     username?: string;

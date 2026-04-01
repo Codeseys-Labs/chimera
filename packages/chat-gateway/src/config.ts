@@ -8,7 +8,7 @@
  */
 
 export interface BedrockConfig {
-  /** Model ID to use (e.g., 'us.anthropic.claude-3-5-sonnet-20241022-v2:0') */
+  /** Model ID to use (e.g., 'us.anthropic.claude-sonnet-4-6-v1:0') */
   modelId: string;
 
   /** AWS region for Bedrock */
@@ -19,6 +19,9 @@ export interface BedrockConfig {
 
   /** Temperature for sampling (0.0 - 1.0) */
   temperature: number;
+
+  /** Enable Anthropic prompt caching via anthropic-beta header */
+  promptCaching: boolean;
 
   /** Whether to use real Bedrock or fallback to placeholder */
   enabled: boolean;
@@ -46,10 +49,11 @@ export interface ChatGatewayConfig {
 export function loadConfig(): ChatGatewayConfig {
   return {
     bedrock: {
-      modelId: process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
+      modelId: process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-sonnet-4-6-v1:0',
       region: process.env.AWS_REGION || process.env.BEDROCK_REGION || 'us-east-1',
-      maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '4096', 10),
+      maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '200000', 10),
       temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '1.0'),
+      promptCaching: process.env.BEDROCK_PROMPT_CACHING === 'true',
       enabled: process.env.BEDROCK_ENABLED !== 'false', // Default to enabled
     },
     server: {
