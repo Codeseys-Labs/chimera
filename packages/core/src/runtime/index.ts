@@ -13,5 +13,7 @@ export {
   type RuntimeConfig,
   type RuntimeSession,
   type MemoryOperation,
-  type MemoryResult
+  type MemoryResult,
+  type AgentInvocationResult,
+  type SessionHistoryEntry,
 } from './agentcore-runtime';

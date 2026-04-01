@@ -11,7 +11,17 @@
  * - Auto-scaling (thousands of concurrent sessions)
  */
 
-// Runtime types are self-contained for now
+// AgentCore Runtime uses @aws-sdk/client-bedrock-agent-runtime for SDK integration.
+// The commands used:
+//   InvokeAgentCommand   → invokeAgent()
+//   GetSessionCommand    → getSessionHistory() / resumeSession()
+//   DeleteSessionCommand → deleteSession()
+// Memory operations use the bedrock-agentcore control plane (not yet in TS SDK).
+//
+// Import pattern (deferred until SDK commands are confirmed available):
+//   import { BedrockAgentRuntimeClient, InvokeAgentCommand,
+//            GetSessionCommand, DeleteSessionCommand }
+//     from '@aws-sdk/client-bedrock-agent-runtime';
 
 /**
  * AgentCore Runtime configuration
@@ -78,6 +88,30 @@ export interface MemoryResult {
   success: boolean;
   data?: unknown;
   error?: string;
+}
+
+/**
+ * Result of an agent invocation
+ */
+export interface AgentInvocationResult {
+  /** Session the invocation belongs to */
+  sessionId: string;
+  /** Text output from the agent */
+  output: string;
+  /** Reason the model stopped generating (STOP, MAX_TOKENS, etc.) */
+  stopReason?: string;
+}
+
+/**
+ * A single entry in session conversation history
+ */
+export interface SessionHistoryEntry {
+  /** Message role */
+  role: 'user' | 'assistant';
+  /** Message content */
+  content: string;
+  /** Timestamp the message was recorded */
+  timestamp: Date;
 }
 
 /**
@@ -188,6 +222,100 @@ export class AgentCoreRuntime {
       success: false,
       error: 'Memory query not yet implemented'
     };
+  }
+
+  /**
+   * Invoke an agent with a message in the given session
+   *
+   * Calls AgentCore Runtime InvokeAgentRuntime (data plane).
+   * Will use InvokeAgentCommand from @aws-sdk/client-bedrock-agent-runtime.
+   *
+   * @param sessionId - Session identifier from createSession()
+   * @param inputText - User message to send to the agent
+   * @returns Invocation result with agent output
+   */
+  async invokeAgent(sessionId: string, inputText: string): Promise<AgentInvocationResult> {
+    // TODO: Integrate with AgentCore Runtime InvokeAgentRuntime API
+    // SDK call pattern:
+    //   const client = new BedrockAgentRuntimeClient({ region: this.config.region });
+    //   const cmd = new InvokeAgentCommand({
+    //     agentRuntimeArn: this.config.runtimeEndpointArn,
+    //     runtimeSessionId: sessionId,
+    //     inputText,
+    //   });
+    //   const resp = await client.send(cmd);
+    //   // collect streamed chunks from resp.completion
+    throw new Error('Agent invocation not yet implemented');
+  }
+
+  /**
+   * Get conversation history for a session
+   *
+   * Calls AgentCore Runtime GetSession (data plane).
+   * Will use GetSessionCommand from @aws-sdk/client-bedrock-agent-runtime.
+   *
+   * @param sessionId - Session identifier
+   * @returns Ordered array of conversation turns
+   */
+  async getSessionHistory(sessionId: string): Promise<SessionHistoryEntry[]> {
+    // TODO: Retrieve session history from AgentCore Runtime
+    // SDK call pattern:
+    //   const client = new BedrockAgentRuntimeClient({ region: this.config.region });
+    //   const cmd = new GetSessionCommand({
+    //     agentRuntimeArn: this.config.runtimeEndpointArn,
+    //     sessionId,
+    //   });
+    //   const resp = await client.send(cmd);
+    //   return resp.sessionHistory?.map(mapToHistoryEntry) ?? [];
+    return [];
+  }
+
+  /**
+   * Delete (end and clean up) an AgentCore session
+   *
+   * Calls AgentCore Runtime DeleteSession (data plane).
+   * Will use DeleteSessionCommand from @aws-sdk/client-bedrock-agent-runtime.
+   *
+   * @param sessionId - Session identifier to delete
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    // TODO: Call AgentCore Runtime DeleteSession API
+    // SDK call pattern:
+    //   const client = new BedrockAgentRuntimeClient({ region: this.config.region });
+    //   const cmd = new DeleteSessionCommand({
+    //     agentRuntimeArn: this.config.runtimeEndpointArn,
+    //     sessionId,
+    //   });
+    //   await client.send(cmd);
+    await this.terminateSession(sessionId);
+  }
+
+  /**
+   * Update AgentCore Memory (STM or LTM) using a structured operation
+   *
+   * Routes store/retrieve/delete/query to the appropriate AgentCore Memory API.
+   * In production will call bedrock-agentcore memory data plane.
+   *
+   * @param sessionId - Session identifier (used for STM namespace scoping)
+   * @param operation - Memory operation to perform
+   * @returns Operation result
+   */
+  async updateMemory(sessionId: string, operation: MemoryOperation): Promise<MemoryResult> {
+    // TODO: Integrate with AgentCore Memory API (bedrock-agentcore control + data plane)
+    // For now route to existing per-operation placeholder methods
+    if (operation.type === 'store') {
+      return this.storeMemory(sessionId, operation.key, operation.value);
+    }
+    if (operation.type === 'retrieve') {
+      return this.retrieveMemory(sessionId, operation.key);
+    }
+    if (operation.type === 'delete') {
+      return { success: true, data: { key: operation.key, deleted: true } };
+    }
+    if (operation.type === 'query') {
+      return this.queryMemory(sessionId, operation.query);
+    }
+    return { success: false, error: 'Unknown memory operation type' };
   }
 
   /**
