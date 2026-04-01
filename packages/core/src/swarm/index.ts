@@ -130,6 +130,8 @@ export {
   type ResolutionAttempt as HITLResolutionAttempt,
   type HumanResponse,
   type HITLPolicyConfig,
+  type HITLDDBClient,
+  type ApprovalRecord,
 } from './hitl-gateway';
 
 // ============================================================
