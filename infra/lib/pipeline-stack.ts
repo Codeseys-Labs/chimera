@@ -305,7 +305,10 @@ export class PipelineStack extends cdk.Stack {
             ],
           },
           pre_build: {
-            commands: ['bun install --frozen-lockfile'],
+            commands: [
+              'export PATH="$HOME/.bun/bin:$PATH"',
+              'bun install --frozen-lockfile',
+            ],
           },
           build: {
             commands: [
@@ -370,12 +373,14 @@ export class PipelineStack extends cdk.Stack {
           },
           pre_build: {
             commands: [
+              'export PATH="$HOME/.bun/bin:$PATH"',
               'bun install',
               'IMAGE_URI=$(cat $CODEBUILD_SRC_DIR_DockerOutput/image-uri.txt)',
             ],
           },
           build: {
             commands: [
+              'export PATH="$HOME/.bun/bin:$PATH"',
               'bun test:integration',
               'bun test:e2e',
             ],
