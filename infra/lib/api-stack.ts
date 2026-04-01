@@ -302,24 +302,24 @@ export class ApiStack extends cdk.Stack {
 
     // GET /api/v1/tenants/{tenantId}/tools - List registered MCP tools
     // POST /api/v1/tenants/{tenantId}/tools - Register MCP tool
-    this.addPlaceholderMethod(toolsResource, 'GET', this.authorizer, requestValidator);
-    this.addPlaceholderMethod(toolsResource, 'POST', this.authorizer, requestValidator);
+    this.addApiMethod(toolsResource, 'GET', this.authorizer, requestValidator);
+    this.addApiMethod(toolsResource, 'POST', this.authorizer, requestValidator);
 
     // DELETE /api/v1/tenants/{tenantId}/tools/{toolId} - Unregister tool
     const toolResource = toolsResource.addResource('{toolId}');
-    this.addPlaceholderMethod(toolResource, 'DELETE', this.authorizer, requestValidator);
+    this.addApiMethod(toolResource, 'DELETE', this.authorizer, requestValidator);
 
     // --- /api/v1/tenants/{tenantId}/identities ---
     const identitiesResource = this.tenantResource.addResource('identities');
 
     // GET /api/v1/tenants/{tenantId}/identities - List linked identities
     // POST /api/v1/tenants/{tenantId}/identities - Link identity
-    this.addPlaceholderMethod(identitiesResource, 'GET', this.authorizer, requestValidator);
-    this.addPlaceholderMethod(identitiesResource, 'POST', this.authorizer, requestValidator);
+    this.addApiMethod(identitiesResource, 'GET', this.authorizer, requestValidator);
+    this.addApiMethod(identitiesResource, 'POST', this.authorizer, requestValidator);
 
     // DELETE /api/v1/tenants/{tenantId}/identities/{identityId} - Unlink identity
     const identityResource = identitiesResource.addResource('{identityId}');
-    this.addPlaceholderMethod(identityResource, 'DELETE', this.authorizer, requestValidator);
+    this.addApiMethod(identityResource, 'DELETE', this.authorizer, requestValidator);
 
     // ======================================================================
     // Webhook Routes (Unauthenticated)
