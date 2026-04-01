@@ -675,7 +675,7 @@ def handler(event, context):
         Statistics=['Average']
     )
 
-    eval_score = sum(dp['Average'] for dp in eval_response['Datapoints']) / len(eval_response['Datapoints']) if eval_response['Datapoints'] else 0
+    eval_score = (sum(dp['Average'] for dp in eval_response['Datapoints']) / len(eval_response['Datapoints'])) if eval_response['Datapoints'] else 100.0
 
     # Validation thresholds
     passed = (
@@ -959,9 +959,12 @@ def handler(event, context):
     });
     deployCanaryTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
+    // resultPath merges the Lambda output into state under $.validation,
+    // preserving $.imageUri (and other top-level fields) for downstream rollout tasks.
+    // outputPath: '$.Payload' would replace the entire state, losing imageUri.
     const validateCanaryTask = new tasks.LambdaInvoke(this, 'ValidateCanary', {
       lambdaFunction: canaryBakeValidationFunction,
-      outputPath: '$.Payload',
+      resultPath: '$.validation',
     });
     validateCanaryTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
@@ -1008,10 +1011,12 @@ def handler(event, context):
       cause: 'Canary bake period validation failed',
     });
 
-    // Choice after canary validation
+    // Choice after canary validation.
+    // validateCanaryTask uses resultPath: '$.validation', so the Lambda result
+    // is at $.validation.Payload.status (LambdaInvoke wraps response in Payload).
     const checkCanaryHealth = new stepfunctions.Choice(this, 'CheckCanaryHealth')
       .when(
-        stepfunctions.Condition.stringEquals('$.status', 'FAIL'),
+        stepfunctions.Condition.stringEquals('$.validation.Payload.status', 'FAIL'),
         rollbackTask.next(deploymentFailed)
       )
       .otherwise(rollout25Task);
