@@ -10,7 +10,7 @@ import {
   createRuntime,
   MEMORY_STRATEGY_TIERS,
 } from '../agentcore-runtime';
-import type { RuntimeConfig } from '../agentcore-runtime';
+import type { RuntimeConfig, MemoryOperation } from '../agentcore-runtime';
 
 describe('AgentCoreRuntime', () => {
   let runtime: AgentCoreRuntime;
@@ -108,6 +108,74 @@ describe('AgentCoreRuntime', () => {
   describe('queryMemory', () => {
     it('should return not implemented error', async () => {
       const result = await runtime.queryMemory('session-123', 'test query');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Memory query not yet implemented');
+    });
+  });
+
+  describe('invokeAgent', () => {
+    it('should throw not implemented error', async () => {
+      await expect(runtime.invokeAgent('session-123', 'Hello')).rejects.toThrow(
+        'Agent invocation not yet implemented'
+      );
+    });
+
+    it('should throw for any session ID', async () => {
+      await expect(runtime.invokeAgent('any-session', 'any-input')).rejects.toThrow(
+        'Agent invocation not yet implemented'
+      );
+    });
+  });
+
+  describe('getSessionHistory', () => {
+    it('should return empty array (placeholder implementation)', async () => {
+      const history = await runtime.getSessionHistory('session-123');
+
+      expect(Array.isArray(history)).toBe(true);
+      expect(history).toHaveLength(0);
+    });
+  });
+
+  describe('deleteSession', () => {
+    it('should not throw (delegates to terminateSession)', async () => {
+      await runtime.deleteSession('session-123');
+      expect(true).toBe(true);
+    });
+
+    it('should complete without error for any session ID', async () => {
+      await expect(runtime.deleteSession('any-session')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('updateMemory', () => {
+    it('should route store operations to storeMemory', async () => {
+      const op: MemoryOperation = { type: 'store', key: 'myKey', value: 'myValue' };
+      const result = await runtime.updateMemory('session-123', op);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ key: 'myKey', stored: true });
+    });
+
+    it('should route retrieve operations to retrieveMemory', async () => {
+      const op: MemoryOperation = { type: 'retrieve', key: 'myKey' };
+      const result = await runtime.updateMemory('session-123', op);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Memory retrieval not yet implemented');
+    });
+
+    it('should handle delete operations', async () => {
+      const op: MemoryOperation = { type: 'delete', key: 'myKey' };
+      const result = await runtime.updateMemory('session-123', op);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ key: 'myKey', deleted: true });
+    });
+
+    it('should route query operations to queryMemory', async () => {
+      const op: MemoryOperation = { type: 'query', query: 'find something' };
+      const result = await runtime.updateMemory('session-123', op);
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Memory query not yet implemented');
