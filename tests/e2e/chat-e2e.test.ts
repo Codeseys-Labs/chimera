@@ -18,6 +18,11 @@ const STAGING_CONFIG = {
 };
 
 describe('Chimera E2E Tests', () => {
+  if (!process.env.RUN_E2E) {
+    test.skip('skipped: RUN_E2E not set', () => {});
+    return;
+  }
+
   let client: TestClient;
 
   beforeAll(() => {
