@@ -49,7 +49,7 @@ export interface ChatGatewayConfig {
 export function loadConfig(): ChatGatewayConfig {
   return {
     bedrock: {
-      modelId: process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-sonnet-4-6-v1:0',
+      modelId: process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-sonnet-4-6',
       region: process.env.AWS_REGION || process.env.BEDROCK_REGION || 'us-east-1',
       maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '200000', 10),
       temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '1.0'),
