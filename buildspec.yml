@@ -21,6 +21,7 @@ phases:
       - bun run typecheck || true
       - bun test --coverage || true
       - cd infra && npx cdk synth --all && cd ..
+      - cd packages/web && bun run build && cd ../..
 
 artifacts:
   files:
