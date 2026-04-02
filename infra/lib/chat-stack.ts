@@ -189,7 +189,7 @@ export class ChatStack extends cdk.Stack {
         TENANTS_TABLE_NAME: props.tenantsTable.tableName,
         SESSIONS_TABLE_NAME: props.sessionsTable.tableName,
         SKILLS_TABLE_NAME: props.skillsTable.tableName,
-        BEDROCK_MODEL_ID: props.bedrockModelId || 'us.anthropic.claude-sonnet-4-6-v1:0',
+        BEDROCK_MODEL_ID: props.bedrockModelId || 'us.anthropic.claude-sonnet-4-6',
         PORT: '8080',
         LOG_LEVEL: isProd ? 'info' : 'debug',
         COGNITO_USER_POOL_ID: props.cognitoUserPoolId ?? '',
