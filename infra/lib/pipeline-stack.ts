@@ -70,6 +70,7 @@ export class PipelineStack extends cdk.Stack {
     super(scope, id, props);
 
     const isProd = props.envName === 'prod';
+    const isStaging = props.envName === 'staging';
 
     // ======================================================================
     // ECR Repository for Agent Runtime Images
@@ -939,17 +940,18 @@ def handler(event, context):
     // Step Functions for Canary Orchestration
     // ======================================================================
 
-    // Wait states for bake and rollout intervals
+    // Environment-aware bake duration:
+    //   prod:    30 min — enough time to observe real user traffic for error/latency signals
+    //   staging: 10 min — meaningful canary window without blocking staging deploys
+    //   dev:      2 min — just enough to catch hard failures; no real traffic to observe
+    const bakeDuration = isProd
+      ? cdk.Duration.minutes(30)
+      : isStaging
+      ? cdk.Duration.minutes(10)
+      : cdk.Duration.minutes(2);
+
     const waitCanaryBake = new stepfunctions.Wait(this, 'WaitCanaryBake', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(30)),
-    });
-
-    const wait25Percent = new stepfunctions.Wait(this, 'Wait25Percent', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
-    });
-
-    const wait50Percent = new stepfunctions.Wait(this, 'Wait50Percent', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
+      time: stepfunctions.WaitTime.duration(bakeDuration),
     });
 
     // Lambda tasks — all include retry for transient Lambda cold-start failures
@@ -968,36 +970,6 @@ def handler(event, context):
     });
     validateCanaryTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
-    const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
-      lambdaFunction: progressiveRolloutFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'targetPercentage': 25,
-        'imageUri.$': '$.imageUri',
-      }),
-      outputPath: '$.Payload',
-    });
-    rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
-
-    const rollout50Task = new tasks.LambdaInvoke(this, 'Rollout50Percent', {
-      lambdaFunction: progressiveRolloutFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'targetPercentage': 50,
-        'imageUri.$': '$.imageUri',
-      }),
-      outputPath: '$.Payload',
-    });
-    rollout50Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
-
-    const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
-      lambdaFunction: progressiveRolloutFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'targetPercentage': 100,
-        'imageUri.$': '$.imageUri',
-      }),
-      outputPath: '$.Payload',
-    });
-    rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
-
     const rollbackTask = new tasks.LambdaInvoke(this, 'RollbackDeployment', {
       lambdaFunction: rollbackFunction,
       outputPath: '$.Payload',
@@ -1011,6 +983,88 @@ def handler(event, context):
       cause: 'Canary bake period validation failed',
     });
 
+    // Build environment-specific rollout chain (after canary validation passes):
+    //   dev:     100% immediately — no gradual ramp, no wait (dev has no real traffic to protect)
+    //   staging: 25% → wait(5min) → 100%
+    //   prod:    25% → wait(15min) → 50% → wait(15min) → 100%
+    let rolloutChain: stepfunctions.IChainable;
+
+    if (isProd) {
+      const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 25, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+
+      const wait25Percent = new stepfunctions.Wait(this, 'Wait25Percent', {
+        time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
+      });
+
+      const rollout50Task = new tasks.LambdaInvoke(this, 'Rollout50Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 50, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout50Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout50Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+
+      const wait50Percent = new stepfunctions.Wait(this, 'Wait50Percent', {
+        time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
+      });
+
+      const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+      rollout100Task.next(deploymentSuccess);
+
+      rollout25Task.next(wait25Percent).next(rollout50Task);
+      rollout50Task.next(wait50Percent).next(rollout100Task);
+      rolloutChain = rollout25Task;
+
+    } else if (isStaging) {
+      const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 25, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+
+      const wait25Percent = new stepfunctions.Wait(this, 'Wait25Percent', {
+        time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(5)),
+      });
+
+      const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+      rollout100Task.next(deploymentSuccess);
+
+      rollout25Task.next(wait25Percent).next(rollout100Task);
+      rolloutChain = rollout25Task;
+
+    } else {
+      // Dev: deploy 100% immediately after bake — no gradual ramp
+      const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+      rollout100Task.next(deploymentSuccess);
+      rolloutChain = rollout100Task;
+    }
+
     // Choice after canary validation.
     // validateCanaryTask uses resultPath: '$.validation', so the Lambda result
     // is at $.validation.Payload.status (LambdaInvoke wraps response in Payload).
@@ -1019,15 +1073,11 @@ def handler(event, context):
         stepfunctions.Condition.stringEquals('$.validation.Payload.status', 'FAIL'),
         rollbackTask.next(deploymentFailed)
       )
-      .otherwise(rollout25Task);
+      .otherwise(rolloutChain);
 
     // Catch handlers: on unhandled Lambda errors, trigger rollback then fail.
-    // rollbackTask already has .next(deploymentFailed) set via checkCanaryHealth above.
     deployCanaryTask.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
     validateCanaryTask.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
-    rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
-    rollout50Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
-    rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
     rollbackTask.addCatch(deploymentFailed, { errors: ['States.ALL'], resultPath: '$.error' });
 
     // Build orchestration flow
@@ -1035,10 +1085,6 @@ def handler(event, context):
       .next(waitCanaryBake)
       .next(validateCanaryTask)
       .next(checkCanaryHealth);
-
-    rollout25Task.next(wait25Percent).next(rollout50Task);
-    rollout50Task.next(wait50Percent).next(rollout100Task);
-    rollout100Task.next(deploymentSuccess);
 
     const orchestrationLogGroup = new logs.LogGroup(this, 'OrchestrationLogGroup', {
       logGroupName: `/aws/states/chimera-canary-orchestration-${props.envName}`,
