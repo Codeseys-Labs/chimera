@@ -70,6 +70,7 @@ export class PipelineStack extends cdk.Stack {
     super(scope, id, props);
 
     const isProd = props.envName === 'prod';
+    const isStaging = props.envName === 'staging';
 
     // ======================================================================
     // ECR Repository for Agent Runtime Images
@@ -341,6 +342,105 @@ export class PipelineStack extends cdk.Stack {
         resources: [
           `arn:aws:iam::${this.account}:role/cdk-*`,
         ],
+      })
+    );
+
+    // ======================================================================
+    // CodeBuild Project for Frontend Deploy Stage
+    // Uploads packages/web/dist/ to the S3 frontend bucket after CDK deploy.
+    // Queries CloudFormation for the bucket name and CloudFront distribution ID
+    // (these are stack outputs from FrontendStack). Runs invalidation to clear
+    // CloudFront edge caches so the new build is served immediately.
+    // ======================================================================
+
+    const frontendDeployLogGroup = new logs.LogGroup(this, 'FrontendDeployLogGroup', {
+      logGroupName: `/aws/codebuild/chimera-frontend-deploy-${props.envName}`,
+      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
+    const frontendDeployProject = new codebuild.PipelineProject(this, 'FrontendDeployProject', {
+      projectName: `chimera-frontend-deploy-${props.envName}`,
+      description: 'Upload React SPA dist/ to S3 and invalidate CloudFront cache',
+      buildSpec: codebuild.BuildSpec.fromObject({
+        version: '0.2',
+        phases: {
+          build: {
+            commands: [
+              // Resolve bucket name and CloudFront distribution ID from FrontendStack outputs
+              `STACK_NAME="Chimera-${props.envName}-Frontend"`,
+              'BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\'FrontendBucketName\'].OutputValue" --output text)',
+              'DIST_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\'FrontendDistributionId\'].OutputValue" --output text)',
+              'echo "Deploying to bucket: $BUCKET_NAME  distribution: $DIST_ID"',
+              // HTML files: no-cache so browsers always fetch the latest index.html
+              'aws s3 sync packages/web/dist/ "s3://$BUCKET_NAME/" --delete --exclude "assets/*" --cache-control "no-cache, no-store, must-revalidate" --sse aws:kms',
+              // Hashed assets: 1-year immutable cache (Vite content-hashes filenames)
+              'aws s3 sync packages/web/dist/assets/ "s3://$BUCKET_NAME/assets/" --delete --cache-control "public, max-age=31536000, immutable" --sse aws:kms',
+              // Invalidate CloudFront so edge caches serve the new index.html immediately
+              'aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"',
+            ],
+          },
+        },
+      }),
+      environment: {
+        buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
+        computeType: codebuild.ComputeType.SMALL,
+        environmentVariables: {
+          ENV_NAME: { value: props.envName },
+        },
+      },
+      logging: {
+        cloudWatch: {
+          logGroup: frontendDeployLogGroup,
+        },
+      },
+      timeout: cdk.Duration.minutes(15),
+    });
+
+    // CloudFormation read — needed to resolve FrontendStack outputs at runtime
+    frontendDeployProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudformation:DescribeStacks'],
+        resources: [
+          `arn:aws:cloudformation:${this.region}:${this.account}:stack/Chimera-${props.envName}-Frontend/*`,
+        ],
+      })
+    );
+
+    // S3 sync permissions scoped to the frontend bucket name pattern
+    frontendDeployProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          's3:PutObject',
+          's3:GetObject',
+          's3:DeleteObject',
+          's3:ListBucket',
+          's3:GetBucketLocation',
+        ],
+        resources: [
+          `arn:aws:s3:::chimera-frontend-${props.envName}-${this.account}`,
+          `arn:aws:s3:::chimera-frontend-${props.envName}-${this.account}/*`,
+        ],
+      })
+    );
+
+    // KMS permissions for SSE-KMS encrypted frontend bucket.
+    // The key is created inside FrontendStack's ChimeraBucket — its ARN is not
+    // available at PipelineStack synthesis time. We scope to all keys in the
+    // account; actual access is further restricted by the key's resource policy
+    // (only FrontendStack's bucket uses this key).
+    frontendDeployProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:GenerateDataKey', 'kms:Decrypt'],
+        resources: [`arn:aws:kms:${this.region}:${this.account}:key/*`],
+      })
+    );
+
+    // CloudFront invalidation — distribution ID resolved at runtime from CF output
+    frontendDeployProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudfront:CreateInvalidation'],
+        resources: [`arn:aws:cloudfront::${this.account}:distribution/*`],
       })
     );
 
@@ -939,17 +1039,18 @@ def handler(event, context):
     // Step Functions for Canary Orchestration
     // ======================================================================
 
-    // Wait states for bake and rollout intervals
+    // Environment-aware bake duration:
+    //   prod:    30 min — enough time to observe real user traffic for error/latency signals
+    //   staging: 10 min — meaningful canary window without blocking staging deploys
+    //   dev:      2 min — just enough to catch hard failures; no real traffic to observe
+    const bakeDuration = isProd
+      ? cdk.Duration.minutes(30)
+      : isStaging
+      ? cdk.Duration.minutes(10)
+      : cdk.Duration.minutes(2);
+
     const waitCanaryBake = new stepfunctions.Wait(this, 'WaitCanaryBake', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(30)),
-    });
-
-    const wait25Percent = new stepfunctions.Wait(this, 'Wait25Percent', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
-    });
-
-    const wait50Percent = new stepfunctions.Wait(this, 'Wait50Percent', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
+      time: stepfunctions.WaitTime.duration(bakeDuration),
     });
 
     // Lambda tasks — all include retry for transient Lambda cold-start failures
@@ -968,36 +1069,6 @@ def handler(event, context):
     });
     validateCanaryTask.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
 
-    const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
-      lambdaFunction: progressiveRolloutFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'targetPercentage': 25,
-        'imageUri.$': '$.imageUri',
-      }),
-      outputPath: '$.Payload',
-    });
-    rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
-
-    const rollout50Task = new tasks.LambdaInvoke(this, 'Rollout50Percent', {
-      lambdaFunction: progressiveRolloutFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'targetPercentage': 50,
-        'imageUri.$': '$.imageUri',
-      }),
-      outputPath: '$.Payload',
-    });
-    rollout50Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
-
-    const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
-      lambdaFunction: progressiveRolloutFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'targetPercentage': 100,
-        'imageUri.$': '$.imageUri',
-      }),
-      outputPath: '$.Payload',
-    });
-    rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
-
     const rollbackTask = new tasks.LambdaInvoke(this, 'RollbackDeployment', {
       lambdaFunction: rollbackFunction,
       outputPath: '$.Payload',
@@ -1011,6 +1082,88 @@ def handler(event, context):
       cause: 'Canary bake period validation failed',
     });
 
+    // Build environment-specific rollout chain (after canary validation passes):
+    //   dev:     100% immediately — no gradual ramp, no wait (dev has no real traffic to protect)
+    //   staging: 25% → wait(5min) → 100%
+    //   prod:    25% → wait(15min) → 50% → wait(15min) → 100%
+    let rolloutChain: stepfunctions.IChainable;
+
+    if (isProd) {
+      const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 25, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+
+      const wait25Percent = new stepfunctions.Wait(this, 'Wait25Percent', {
+        time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
+      });
+
+      const rollout50Task = new tasks.LambdaInvoke(this, 'Rollout50Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 50, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout50Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout50Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+
+      const wait50Percent = new stepfunctions.Wait(this, 'Wait50Percent', {
+        time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(15)),
+      });
+
+      const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+      rollout100Task.next(deploymentSuccess);
+
+      rollout25Task.next(wait25Percent).next(rollout50Task);
+      rollout50Task.next(wait50Percent).next(rollout100Task);
+      rolloutChain = rollout25Task;
+
+    } else if (isStaging) {
+      const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 25, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+
+      const wait25Percent = new stepfunctions.Wait(this, 'Wait25Percent', {
+        time: stepfunctions.WaitTime.duration(cdk.Duration.minutes(5)),
+      });
+
+      const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+      rollout100Task.next(deploymentSuccess);
+
+      rollout25Task.next(wait25Percent).next(rollout100Task);
+      rolloutChain = rollout25Task;
+
+    } else {
+      // Dev: deploy 100% immediately after bake — no gradual ramp
+      const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
+        lambdaFunction: progressiveRolloutFunction,
+        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        outputPath: '$.Payload',
+      });
+      rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
+      rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
+      rollout100Task.next(deploymentSuccess);
+      rolloutChain = rollout100Task;
+    }
+
     // Choice after canary validation.
     // validateCanaryTask uses resultPath: '$.validation', so the Lambda result
     // is at $.validation.Payload.status (LambdaInvoke wraps response in Payload).
@@ -1019,15 +1172,11 @@ def handler(event, context):
         stepfunctions.Condition.stringEquals('$.validation.Payload.status', 'FAIL'),
         rollbackTask.next(deploymentFailed)
       )
-      .otherwise(rollout25Task);
+      .otherwise(rolloutChain);
 
     // Catch handlers: on unhandled Lambda errors, trigger rollback then fail.
-    // rollbackTask already has .next(deploymentFailed) set via checkCanaryHealth above.
     deployCanaryTask.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
     validateCanaryTask.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
-    rollout25Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
-    rollout50Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
-    rollout100Task.addCatch(rollbackTask, { errors: ['States.ALL'], resultPath: '$.error' });
     rollbackTask.addCatch(deploymentFailed, { errors: ['States.ALL'], resultPath: '$.error' });
 
     // Build orchestration flow
@@ -1035,10 +1184,6 @@ def handler(event, context):
       .next(waitCanaryBake)
       .next(validateCanaryTask)
       .next(checkCanaryHealth);
-
-    rollout25Task.next(wait25Percent).next(rollout50Task);
-    rollout50Task.next(wait50Percent).next(rollout100Task);
-    rollout100Task.next(deploymentSuccess);
 
     const orchestrationLogGroup = new logs.LogGroup(this, 'OrchestrationLogGroup', {
       logGroupName: `/aws/states/chimera-canary-orchestration-${props.envName}`,
@@ -1111,7 +1256,10 @@ def handler(event, context):
             }),
           ],
         },
-        // Stage 3: Deploy CDK stacks (infrastructure update)
+        // Stage 3: Deploy CDK stacks then upload React SPA to S3.
+        // runOrder 1: Cdk_Deploy — creates/updates the FrontendStack (S3 bucket + CloudFront).
+        // runOrder 2: Frontend_Deploy — syncs packages/web/dist/ to S3 and invalidates CF.
+        // Sequential order is required: the bucket must exist before the sync can run.
         {
           stageName: 'Deploy',
           actions: [
@@ -1119,6 +1267,14 @@ def handler(event, context):
               actionName: 'Cdk_Deploy',
               project: deployProject,
               input: sourceOutput,
+              runOrder: 1,
+            }),
+            new codepipeline_actions.CodeBuildAction({
+              actionName: 'Frontend_Deploy',
+              project: frontendDeployProject,
+              // buildOutput contains packages/web/dist/ (built in buildspec.yml)
+              input: buildOutput,
+              runOrder: 2,
             }),
           ],
         },
