@@ -136,6 +136,28 @@ export class FrontendStack extends cdk.Stack {
     });
 
     // ======================================================================
+    // CloudFront OAC → S3 bucket policy
+    // Grant s3:GetObject to the CloudFront service principal for this specific
+    // distribution. S3BucketOrigin.withOriginAccessControl() should auto-grant
+    // this, but the auto-grant does not fire reliably when the bucket is wrapped
+    // in a custom L3 construct (ChimeraBucket). Explicit grant is the safe path.
+    //
+    // No circular dependency: BucketPolicy depends on Distribution (for ARN)
+    // and Bucket; Distribution depends on Bucket (origin domain), not BucketPolicy.
+    // ======================================================================
+    this.bucket.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowCloudFrontOACRead',
+      actions: ['s3:GetObject'],
+      resources: [this.bucket.arnForObjects('*')],
+      principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
+      conditions: {
+        StringEquals: {
+          'AWS:SourceArn': this.distribution.distributionArn,
+        },
+      },
+    }));
+
+    // ======================================================================
     // CloudFront OAC → KMS grant
     // CloudFront requires kms:Decrypt on the bucket's CMK to serve SSE-KMS
     // encrypted objects. OAI (the older mechanism) cannot access KMS-encrypted
