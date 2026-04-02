@@ -1,8 +1,8 @@
 # AWS Chimera - Implementation Roadmap
 
-> **Status:** Platform 85% complete. Phases 0-6 delivered. Production deployment in progress.
+> **Status:** Platform 90% complete. Phases 0-6 delivered. First CDK deploy ready — pending execution.
 >
-> **Last Updated:** 2026-03-26 (verified via codebase audit)
+> **Last Updated:** 2026-04-02 (verified via codebase audit)
 
 ---
 
@@ -12,37 +12,41 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 **Core Differentiator:** The agent has AWS account access, not computer access. This is an AWS-native rebuild of OpenClaw/NemoClaw patterns, purpose-built for cloud infrastructure operations.
 
-**Architecture:** Bun monorepo, 14 CDK stacks, 6 packages, 30 ADRs, AgentCore Runtime (MicroVM isolation).
+**Architecture:** Bun monorepo, 15 CDK stacks, 7 packages, 30 ADRs, AgentCore Runtime (MicroVM isolation).
 
 **Architecture diagrams:** See [System Architecture](architecture/system-architecture.md) (9 mermaid diagrams: CDK stacks, request flow, auth, self-evolution, multi-tenant data, skill lifecycle, deploy pipeline, session state) and [CLI Lifecycle](architecture/cli-lifecycle.md) (command registry, operator workflow, deploy internals).
 
 ---
 
-## Current State (2026-03-26)
+## Current State (2026-04-02)
 
 ### What's Built (Verified)
 
 | Area | Status | Details |
 |------|--------|---------|
 | **Research** | ✅ **100% Complete** | 123 docs, 118,000+ lines, 30 ADRs |
-| **CDK Infrastructure** | ✅ **14 stacks, production-quality** | 8,700+ LOC across Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration, Email, Frontend, GatewayRegistration |
-| **Agent Runtime** | ✅ **BUILT (Python)** | `packages/agents/chimera_agent.py` (252 LOC) — Strands SDK + AgentCore Runtime integration • ReAct loop with streaming • AgentCore Memory (STM + LTM) • Multi-tenant context injection • Total Python LOC: ~9,200 |
-| **AWS Tools** | ✅ **40 tools implemented** | 19 TypeScript tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock) + 21 Python tools (19 shared AWS service tools + hello_world + background_task_tools) |
-| **Core Modules** | ✅ **22 modules, ~75,700 LOC** | agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected, activity |
+| **CDK Infrastructure** | ✅ **15 stacks, production-quality** | 8,700+ LOC across Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration, Email, Frontend, GatewayRegistration, Discovery |
+| **Agent Runtime** | ✅ **BUILT (Python)** | `packages/agents/chimera_agent.py` (252 LOC) — Strands SDK + AgentCore Runtime integration • ReAct loop with streaming • AgentCore Memory (STM + LTM) • Multi-tenant context injection • Gateway-based tool discovery • Total Python LOC: ~9,200 |
+| **AWS Tools** | ✅ **40 tools + discovery** | 19 TypeScript tools (EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock) + 21 Python tools + 5 Cloud Map discovery tools |
+| **Core Modules** | ✅ **22 modules, ~75,700 LOC** | agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected, activity |
 | **@chimera/shared** | ✅ **Complete** | Canonical type definitions |
 | **@chimera/sse-bridge** | ✅ **Ship-ready** | Strands-to-Vercel DSP bridge with 26 tests |
-| **@chimera/chat-gateway** | 🚧 **Framework ready** | Hono server, middleware, routes, adapter stubs (Slack, Discord, Teams, Telegram) |
-| **@chimera/cli** | ✅ **Built** | Commands: deploy, tenant, session, skill, connect, status |
-| **Test Coverage** | 🚧 **High coverage, some failures** | 2163 pass / 31 fail (6 errors, 9 skip) = 2209 tests across ~120 files |
+| **@chimera/chat-gateway** | ✅ **Wired** | Hono server, Chimera agent identity + system prompt, tier-based tool selection, adapter stubs (Slack, Discord, Teams, Telegram) |
+| **@chimera/web** | ✅ **Built** | React + Vite + shadcn/ui frontend, Amplify v6 auth, CLI callback login |
+| **@chimera/cli** | ✅ **16 commands** | chat, completion, connect, deploy, destroy, doctor, init, login, monitor, session, setup, skill, status, sync, tenant, upgrade |
+| **Test Coverage** | 🟡 **High coverage, E2E failures expected** | 2206 pass / 38 fail (25 skip, 6 errors) = 2269 tests across 120 files. Failures are E2E tests needing live AWS infra. |
 
 ### What Remains
 
 | Area | Gap | Priority |
 |------|-----|----------|
-| **Production Deployment** | Chat gateway needs ECS Fargate deployment • Load testing required | High |
-| **Test Stabilization** | Fix 31 failing tests + 6 errors (mostly missing dependencies like smol-toml, @aws-sdk/client-transcribe) | High |
-| **Disaster Recovery** | DR runbooks, cross-region replication, backup validation | Medium |
-| **Chat Platform Integration** | Complete Slack/Discord/Teams OAuth + event handlers | Medium |
+| **First CDK Deploy** | No stack has been deployed. All 15 stacks synthesise cleanly — ready to deploy. | **Blocking** |
+| **OAC + Bedrock Model Deploy** | Code fixes committed (c3c6585), need `cdk deploy FrontendStack ChatStack` to take effect | **Blocking** |
+| **E2E Verification** | chimera-0092: verify chat works end-to-end with system prompt + tools | High |
+| **E2E Test Scripts** | chimera-2087: CLI E2E integration test scripts (needs live environment) | Medium |
+| **Strands Shim Removal** | chimera-b7af: remove strands-agents.ts once package publishes to npm | Medium |
+| **Disaster Recovery** | DR runbooks, cross-region replication, backup validation | Low |
+| **Chat Platform Integration** | Complete Slack/Discord/Teams OAuth + event handlers | Low |
 
 ---
 
@@ -54,29 +58,32 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 **Delivered:**
 - [x] Monorepo setup (Bun workspaces, TypeScript project references)
-- [x] CDK infrastructure — all 14 stacks implemented (8,700+ LOC):
+- [x] CDK infrastructure — all 15 stacks implemented (8,700+ LOC):
   - [x] NetworkStack (VPC, subnets, NAT gateway, security groups) — 167 LOC
   - [x] DataStack (DynamoDB 6 tables, S3, EFS) — 320 LOC
   - [x] SecurityStack (Cognito, IAM roles, Cedar policies, KMS) — 210 LOC
   - [x] ObservabilityStack (CloudWatch, X-Ray, alarms) — 406 LOC
   - [x] APIStack (HTTP API + WebSocket + authorizer) — 441 LOC
-  - [x] ChatStack (ECS Fargate, SSE bridge) — 345 LOC
+  - [x] ChatStack (ECS Fargate, ALB, CloudFront, auto-scaling) — 345 LOC
   - [x] TenantOnboardingStack (per-tenant isolation) — 694 LOC
   - [x] PipelineStack (CI/CD, CodePipeline, CodeBuild) — 639 LOC
   - [x] SkillPipelineStack (skill security pipeline) — 352 LOC
   - [x] EvolutionStack (self-modification infrastructure) — 577 LOC
   - [x] OrchestrationStack (Step Functions, multi-agent) — 280 LOC
   - [x] EmailStack (SES email delivery)
-  - [x] FrontendStack (CloudFront + S3 OAC frontend distribution)
+  - [x] FrontendStack (CloudFront + S3 OAC + React app deployment)
   - [x] GatewayRegistrationStack (AgentCore gateway registration)
+  - [x] DiscoveryStack (Cloud Map HTTP namespace for agent self-awareness)
+- [x] L3 CDK construct library (ChimeraTable, ChimeraBucket, ChimeraLambda, ChimeraQueue)
+- [x] CDK Aspects library (CDK Nag compliance, TaggingAspect)
 - [x] Canonical DynamoDB schema (6-table design with GSI patterns)
 - [x] 30 Architecture Decision Records
 - [x] Shared types package (@chimera/shared)
-- [x] Test infrastructure (2209 tests across ~120 files)
+- [x] React + Vite + shadcn/ui frontend (`packages/web`)
+- [x] Test infrastructure (2269 tests across 120 files)
 
 **Remaining Work:**
-- [ ] `cdk synth` verification (not blocking — stacks exist, need integration test)
-- [ ] `cdk deploy` to staging environment
+- [ ] `cdk deploy` to staging environment (all stacks synthesise cleanly — deploy blocked on first execution)
 - [ ] L3 construct: `TenantAgent` (nice-to-have, not blocking)
 
 ---
@@ -124,17 +131,20 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 ---
 
-### Phase 2: Chat Gateway and Multi-Platform 🚧 **FRAMEWORK READY**
+### Phase 2: Chat Gateway and Multi-Platform ✅ **CODE COMPLETE, DEPLOY PENDING**
 
-**Status:** Core infrastructure complete, production deployment pending
+**Status:** Fully wired in code. Needs first CDK deployment.
 
 **What's Built:**
 - [x] @chimera/sse-bridge — ship-ready (Strands to Vercel Data Stream Protocol, 26 tests)
-- [x] @chimera/chat-gateway — Hono server, middleware, routes, request pipeline
+- [x] @chimera/chat-gateway — Hono server, Chimera identity + system prompt, tier-based tools, request pipeline
 - [x] Adapter stubs for Slack, Discord, Teams, Telegram with 41+ tests
-- [x] ChatStack CDK (ECS Fargate deployment definition) — 345 LOC
-- [x] APIStack CDK (HTTP API + WebSocket + authorizer) — 441 LOC
+- [x] ChatStack CDK (ECS Fargate, ALB, CloudFront, auto-scaling) — 345 LOC
+- [x] APIStack CDK (HTTP API + WebSocket + authorizer, real Lambda integrations) — 441 LOC
 - [x] Cross-tenant isolation tests
+- [x] Bedrock model ID corrected (`us.anthropic.claude-sonnet-4-6-20251101-v1:0`)
+- [x] DSP SSE parser maps Strands event types correctly
+- [x] `@chimera/web` frontend with Amplify v6 auth + CLI callback
 
 **What Remains:**
 - [ ] Complete Slack adapter (OAuth flow + full Events API handler)
@@ -360,18 +370,19 @@ Phase 2               Phase 3           Phase 7
 
 ---
 
-## Codebase Metrics (2026-03-26 Audit)
+## Codebase Metrics (2026-04-02 Audit)
 
 | Metric | Value |
 |--------|-------|
-| **Packages** | 6 (core, agents, shared, sse-bridge, chat-gateway, cli) |
-| **CDK Stacks** | 14 stacks (8,700+ LOC) |
+| **Packages** | 7 (core, agents, shared, sse-bridge, chat-gateway, cli, web) |
+| **CDK Stacks** | 15 stacks (8,700+ LOC) |
 | **TypeScript LOC** | ~75,700 lines (packages/core/src/) |
 | **Python Agent Runtime** | 252 lines (chimera_agent.py) + ~9,200 total Python LOC |
-| **AWS Tool Implementations** | 40 tools (19 TypeScript + 21 Python) |
-| **Core Modules** | 22 (agent, auth, aws-tools, billing, discovery, events, evolution, infra-builder, media, memory, mocks, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected, activity) |
-| **Test Files** | ~120 files with 2209 tests (2163 pass, 31 fail, 6 errors, 9 skip) |
-| **Test Assertions** | 2,134 expect() calls |
+| **AWS Tool Implementations** | 40 tools (19 TypeScript + 21 Python) + 5 Cloud Map discovery tools |
+| **Core Modules** | 22 (agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected, activity) |
+| **CLI Commands** | 16 (chat, completion, connect, deploy, destroy, doctor, init, login, monitor, session, setup, skill, status, sync, tenant, upgrade) |
+| **Test Files** | 120 files with 2269 tests (2206 pass, 38 fail, 6 errors, 25 skip) |
+| **Test Assertions** | 4,084 expect() calls |
 | **Research Documentation** | 123 docs, 118,000+ lines |
 | **Architecture Decision Records** | 30 ADRs |
 | **Discovery Modules** | 6 (Config, Resource Explorer, Cost, Stacks, Tags, Index) |
@@ -384,55 +395,42 @@ Phase 2               Phase 3           Phase 7
 
 ## What's Next
 
-### Platform Status: 85% Complete
+### Platform Status: 90% Complete
 
-**Core capabilities are built and tested.** The remaining 15% is production deployment, integration testing, and operational readiness.
+**Core capabilities are built, tested, and code-complete.** The remaining 10% is first deployment execution and post-deploy validation.
 
-### Immediate Priorities (Blocking Production Launch)
+### Immediate Priorities (P0 — Blocking Production)
 
-1. **Fix Failing Tests**
-   - 82 failing tests + 20 errors (mostly missing dependencies: js-yaml, @aws-sdk/client-transcribe)
-   - Add missing npm packages to package.json files
-   - Stabilize test suite to 100% passing
+1. **Execute First CDK Deploy**
+   - `npx cdk deploy --all --context environment=dev`
+   - All 15 stacks synthesise cleanly — this is the first actual AWS deployment
+   - See `docs/runbooks/resumption-guide.md` for exact deploy sequence
 
-2. **Deploy to Staging**
-   - `cdk deploy --all --context environment=staging`
-   - Verify all 14 stacks provision successfully
-   - Run integration tests against live AWS resources
+2. **Resolve Known Post-Deploy Issues**
+   - Frontend 403: `cdk deploy FrontendStack` + CloudFront invalidation (fix in c3c6585)
+   - Chat socket close: `cdk deploy ChatStack` rolls out new Bedrock model ID (fix in c3c6585)
 
-3. **Complete Chat Platform Adapters**
-   - Finish Slack OAuth flow + Events API handler
-   - Complete Discord/Teams/Telegram OAuth flows
-   - Deploy chat-gateway to ECS Fargate
+3. **End-to-End Chat Validation (chimera-0092)**
+   - `chimera chat "list my S3 buckets"` — verify agent responds with real AWS data
+   - Confirm system prompt injection, Bedrock streaming, tool invocation
 
-4. **Load Testing**
-   - 1000+ concurrent WebSocket connections
-   - Validate auto-scaling behavior
-   - Confirm rate limiting works under load
+### Secondary Priorities (P1 — Post First Deploy)
 
-### Secondary Priorities (Post-Launch)
+4. **E2E Test Scripts (chimera-2087)**
+   - Create CLI integration tests that run against live environment
+   - Gate behind `RUN_E2E=1`
 
-5. **Disaster Recovery**
-   - Configure DynamoDB PITR backups
-   - Set up cross-region replication
-   - Document runbooks for all CloudWatch alarms
+5. **Remove Strands Shim (chimera-b7af)**
+   - `packages/core/src/aws-tools/strands-agents.ts` temporary shim
+   - Remove once `strands-agents` publishes to npm registry
 
-6. **Monitoring & Dashboards**
-   - Tenant health dashboard
-   - Skill usage analytics
-   - Cost attribution by tenant
+### Deferred (P2 — Future)
 
-7. **Security Hardening**
-   - Activate 7-stage skill security pipeline
-   - Penetration testing
-   - Cross-tenant isolation audit
-
-### Timeline Estimate
-
-- **Week 1:** Fix tests + deploy to staging → Platform functional
-- **Week 2:** Chat adapter completion + load testing → Production-ready
-- **Week 3-4:** DR setup + monitoring dashboards → Operational excellence
-- **Week 5+:** Security hardening + optimization → Enterprise-grade
+6. **LLM-Based Task Decomposer (chimera-76b9)** — current decomposition is heuristic-only
+7. **EventBridge Scheduled Tasks (chimera-2b2a)** — recurring agent cron jobs
+8. **Webhook Delivery (chimera-59ee)** — task lifecycle event webhooks
+9. **Disaster Recovery** — PITR backups, cross-region replication
+10. **Chat Platform OAuth** — Complete Slack/Discord/Teams OAuth flows
 
 ---
 
@@ -456,12 +454,14 @@ Phase 2               Phase 3           Phase 7
 | `chimera-5ec5` | Research: AgentCore + Strands integration guide | research | 2026-03-22 |
 | `chimera-6a22` | Fix foundation: typecheck, lint, tests all green | task | 2026-03-22 |
 
-### In Progress
+### Remaining (Backlog)
 
 | ID | Title | Status |
 |----|-------|--------|
-| `chimera-29e6` | Update ROADMAP.md with accurate status | in_progress |
-| `chimera-29c6` | Design greenfield agent architecture | in_progress |
+| `chimera-0092` | Verify chimera chat works end-to-end with system prompt + tools | open (blocked on deploy) |
+| `chimera-2087` | Create CLI E2E integration test scripts | open (blocked on deploy) |
+| `chimera-b7af` | P1: Remove strands-agents.ts shim when package published | open |
+| `chimera-76b9` | P2: Implement LLM-based task decomposer | open |
 
 ---
 
