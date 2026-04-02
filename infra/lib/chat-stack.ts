@@ -24,6 +24,8 @@ export interface ChatStackProps extends cdk.StackProps {
   certificate?: acm.ICertificate;
   cognitoUserPoolId?: string;
   cognitoUserPoolClientId?: string;
+  /** Bedrock inference profile ID for the chat gateway (default: us.anthropic.claude-sonnet-4-6-v1:0) */
+  bedrockModelId?: string;
 }
 
 /**
@@ -183,9 +185,11 @@ export class ChatStack extends cdk.Stack {
       environment: {
         NODE_ENV: props.envName === 'prod' ? 'production' : 'development',
         AWS_REGION: this.region,
+        AWS_ACCOUNT_ID: this.account,
         TENANTS_TABLE_NAME: props.tenantsTable.tableName,
         SESSIONS_TABLE_NAME: props.sessionsTable.tableName,
         SKILLS_TABLE_NAME: props.skillsTable.tableName,
+        BEDROCK_MODEL_ID: props.bedrockModelId || 'us.anthropic.claude-sonnet-4-6-v1:0',
         PORT: '8080',
         LOG_LEVEL: isProd ? 'info' : 'debug',
         COGNITO_USER_POOL_ID: props.cognitoUserPoolId ?? '',
