@@ -4,10 +4,11 @@
  * Validates the CI/CD pipeline infrastructure:
  * - 2 ECR repositories (agent runtime, chat gateway) with lifecycle policies
  * - S3 artifact bucket with versioning and lifecycle rules
- * - 4 CodeBuild projects (build, docker-build, deploy, test)
+ * - 5 CodeBuild projects (build, docker-build, deploy, frontend-deploy, test)
  * - 4 Lambda functions for canary orchestration (Python 3.12)
  * - Step Functions state machine for canary rollout
  * - CodePipeline with 5 stages (Source→Build→Deploy→Test→Rollout)
+ *   Deploy stage has 2 sequential actions: Cdk_Deploy (runOrder 1) then Frontend_Deploy (runOrder 2)
  * - CloudWatch alarms for auto-rollback triggers
  * - Stack outputs for all resources
  *
@@ -135,6 +136,12 @@ describe('PipelineStack', () => {
           }),
         });
       });
+
+      it('should create frontend deploy project', () => {
+        template.hasResourceProperties('AWS::CodeBuild::Project', {
+          Name: 'chimera-frontend-deploy-dev',
+        });
+      });
     });
 
     describe('Lambda Functions', () => {
@@ -219,6 +226,28 @@ describe('PipelineStack', () => {
         const defnStr = JSON.stringify(machine.Properties.DefinitionString);
         expect(defnStr).toContain('$.validation.Payload.status');
       });
+
+      it('dev: bake wait should be 2 minutes (120 seconds)', () => {
+        // Dev bake must be short — no real traffic to observe, so long bake is pure waste.
+        // prod uses 30 min; dev uses 2 min.
+        const machines = template.findResources('AWS::StepFunctions::StateMachine');
+        const machine = Object.values(machines)[0] as any;
+        const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+        expect(defnStr).toContain('\\"Seconds\\":120');
+        expect(defnStr).not.toContain('\\"Seconds\\":1800'); // not 30 min
+      });
+
+      it('dev: should skip 25%/50% progressive rollout and go directly to 100%', () => {
+        // Dev has no real users — gradual rollout adds latency with no safety benefit.
+        const machines = template.findResources('AWS::StepFunctions::StateMachine');
+        const machine = Object.values(machines)[0] as any;
+        const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+        // No 25% or 50% rollout states in dev
+        expect(defnStr).not.toContain('Rollout25Percent');
+        expect(defnStr).not.toContain('Rollout50Percent');
+        // But 100% rollout is present
+        expect(defnStr).toContain('Rollout100Percent');
+      });
     });
 
     describe('CodePipeline', () => {
@@ -271,6 +300,27 @@ describe('PipelineStack', () => {
         // Primary input artifact name must be SourceOutput, not BuildOutput
         const inputArtifactName = testAction.InputArtifacts?.[0]?.Name;
         expect(inputArtifactName).toBe('SourceOutput');
+      });
+
+      it('should have Deploy stage with Cdk_Deploy (runOrder 1) and Frontend_Deploy (runOrder 2)', () => {
+        // Root cause of chimera-55d7: no action uploaded packages/web/dist/ to S3.
+        // Fix: Frontend_Deploy runs after Cdk_Deploy (sequential via runOrder) so the
+        // S3 bucket exists before aws s3 sync runs.
+        const pipelines = template.findResources('AWS::CodePipeline::Pipeline');
+        const pipeline = Object.values(pipelines)[0] as any;
+        const deployStage = pipeline.Properties.Stages.find((s: any) => s.Name === 'Deploy');
+        expect(deployStage).toBeDefined();
+        expect(deployStage.Actions).toHaveLength(2);
+        const cdkAction = deployStage.Actions.find((a: any) => a.Name === 'Cdk_Deploy');
+        const frontendAction = deployStage.Actions.find((a: any) => a.Name === 'Frontend_Deploy');
+        expect(cdkAction).toBeDefined();
+        expect(frontendAction).toBeDefined();
+        // runOrder ensures CDK deploy completes before frontend sync (bucket must exist)
+        expect(cdkAction.RunOrder).toBe(1);
+        expect(frontendAction.RunOrder).toBe(2);
+        // Frontend_Deploy uses BuildOutput which contains packages/web/dist/
+        const inputArtifactName = frontendAction.InputArtifacts?.[0]?.Name;
+        expect(inputArtifactName).toBe('BuildOutput');
       });
     });
 
@@ -430,6 +480,38 @@ describe('PipelineStack', () => {
     });
   });
 
+  describe('Staging Environment', () => {
+    let template: Template;
+
+    beforeAll(() => {
+      const app = new cdk.App();
+      const stack = new PipelineStack(app, 'TestPipelineStackStaging', {
+        envName: 'staging',
+        repositoryName: 'chimera',
+        branch: 'main',
+      });
+      template = Template.fromStack(stack);
+    }, 120_000);
+
+    it('staging: bake wait should be 10 minutes (600 seconds)', () => {
+      const machines = template.findResources('AWS::StepFunctions::StateMachine');
+      const machine = Object.values(machines)[0] as any;
+      const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+      expect(defnStr).toContain('\\"Seconds\\":600');
+      expect(defnStr).not.toContain('\\"Seconds\\":1800'); // not 30 min
+    });
+
+    it('staging: should have 25% rollout but skip 50% rollout', () => {
+      // Staging uses 5%→25%→100% (no 50% step) — meaningful validation without full prod cadence
+      const machines = template.findResources('AWS::StepFunctions::StateMachine');
+      const machine = Object.values(machines)[0] as any;
+      const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+      expect(defnStr).toContain('Rollout25Percent');
+      expect(defnStr).not.toContain('Rollout50Percent');
+      expect(defnStr).toContain('Rollout100Percent');
+    });
+  });
+
   describe('Prod Environment', () => {
     let template: Template;
 
@@ -467,6 +549,22 @@ describe('PipelineStack', () => {
         LogGroupName: '/aws/codebuild/chimera-build-prod',
         RetentionInDays: 30,
       });
+    });
+
+    it('prod: bake wait should be 30 minutes (1800 seconds)', () => {
+      const machines = template.findResources('AWS::StepFunctions::StateMachine');
+      const machine = Object.values(machines)[0] as any;
+      const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+      expect(defnStr).toContain('\\"Seconds\\":1800');
+    });
+
+    it('prod: should have full 25%→50%→100% progressive rollout', () => {
+      const machines = template.findResources('AWS::StepFunctions::StateMachine');
+      const machine = Object.values(machines)[0] as any;
+      const defnStr = JSON.stringify(machine.Properties.DefinitionString);
+      expect(defnStr).toContain('Rollout25Percent');
+      expect(defnStr).toContain('Rollout50Percent');
+      expect(defnStr).toContain('Rollout100Percent');
     });
   });
 
