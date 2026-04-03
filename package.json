@@ -20,7 +20,7 @@
     "compile:dev": "cd packages/cli && bun build src/cli.ts --compile --outfile ../../chimera",
     "compile:cli": "cd packages/cli && bun run compile",
     "compile:cli:all": "cd packages/cli && bun run compile:all",
-    "test": "bun test ./packages/ ./infra/",
+    "test": "bun test ./packages/shared/ ./packages/core/ ./packages/sse-bridge/ ./packages/chat-gateway/ ./packages/cli/ ./infra/",
     "test:all": "bun run test:shared && bun run test:core && bun run test:sse-bridge && bun run test:chat-gateway && bun run test:cli && bun run test:infra && bun run test:integration",
     "test:integration": "cd tests && bun run test:integration",
     "test:e2e": "cd tests && bun run test:e2e",

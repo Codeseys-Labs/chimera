@@ -1,8 +1,10 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 export interface SecurityStackProps extends cdk.StackProps {
@@ -44,25 +46,27 @@ export class SecurityStack extends cdk.Stack {
 
     // Grant CloudWatch Logs permission to use this key for LogGroup encryption
     // CloudWatch Logs can ONLY access KMS via key policy, not IAM policies
-    this.platformKey.addToResourcePolicy(new iam.PolicyStatement({
-      sid: 'AllowCloudWatchLogs',
-      effect: iam.Effect.ALLOW,
-      principals: [new iam.ServicePrincipal(`logs.${this.region}.amazonaws.com`)],
-      actions: [
-        'kms:Encrypt',
-        'kms:Decrypt',
-        'kms:ReEncrypt*',
-        'kms:GenerateDataKey*',
-        'kms:CreateGrant',
-        'kms:DescribeKey',
-      ],
-      resources: ['*'], // Key policy always uses '*' for resources (refers to this key)
-      conditions: {
-        ArnLike: {
-          'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${this.region}:${this.account}:log-group:*`,
+    this.platformKey.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'AllowCloudWatchLogs',
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.ServicePrincipal(`logs.${this.region}.amazonaws.com`)],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:CreateGrant',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'], // Key policy always uses '*' for resources (refers to this key)
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${this.region}:${this.account}:log-group:*`,
+          },
         },
-      },
-    }));
+      })
+    );
 
     // ======================================================================
     // Cognito User Pool
@@ -97,6 +101,99 @@ export class SecurityStack extends cdk.Stack {
       },
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
+
+    // ======================================================================
+    // Post-Confirmation Lambda Trigger
+    // On first sign-up confirmation, generates a tenant ID, writes it to
+    // the user's custom:tenant_id attribute, and starts the tenant onboarding
+    // Step Functions workflow. Uses the known state machine naming convention
+    // to avoid a circular dependency between SecurityStack and TenantOnboardingStack.
+    // ======================================================================
+    const postConfirmationFn = new lambda.Function(this, 'PostConfirmationTrigger', {
+      functionName: `chimera-post-confirmation-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      code: lambda.Code.fromInline(`
+const { CognitoIdentityProviderClient, AdminUpdateUserAttributesCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const { SFNClient, StartExecutionCommand } = require('@aws-sdk/client-sfn');
+const crypto = require('crypto');
+
+const cognito = new CognitoIdentityProviderClient({});
+const sfn = new SFNClient({});
+
+exports.handler = async (event) => {
+  // Only trigger on PostConfirmation_ConfirmSignUp (not PostConfirmation_ConfirmForgotPassword)
+  if (event.triggerSource !== 'PostConfirmation_ConfirmSignUp') return event;
+
+  const userId = event.request.userAttributes.sub;
+  const email = event.request.userAttributes.email;
+  const userPoolId = event.userPoolId;
+  const tenantId = 'tenant_' + crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+
+  console.log(JSON.stringify({ message: 'New user confirmed', userId, email, tenantId }));
+
+  // 1. Set custom:tenant_id on the Cognito user
+  await cognito.send(new AdminUpdateUserAttributesCommand({
+    UserPoolId: userPoolId,
+    Username: userId,
+    UserAttributes: [{ Name: 'custom:tenant_id', Value: tenantId }],
+  }));
+
+  // 2. Start tenant onboarding Step Functions
+  const onboardingArn = process.env.ONBOARDING_STATE_MACHINE_ARN;
+  if (onboardingArn) {
+    try {
+      await sfn.send(new StartExecutionCommand({
+        stateMachineArn: onboardingArn,
+        name: tenantId + '-' + Date.now(),
+        input: JSON.stringify({
+          tenantId,
+          userId,
+          email,
+          tier: 'basic',
+          adminEmail: email,
+          timestamp: new Date().toISOString(),
+        }),
+      }));
+    } catch (err) {
+      console.error('Onboarding start failed (non-fatal):', err.message);
+      // Don't fail the Cognito flow — tenant record can be created later
+    }
+  }
+
+  return event;
+};
+      `),
+      environment: {
+        // Constructed from the known naming convention to avoid circular cross-stack dependency.
+        // TenantOnboardingStack names its state machine: chimera-tenant-onboarding-{envName}
+        ONBOARDING_STATE_MACHINE_ARN: `arn:aws:states:${this.region}:${this.account}:stateMachine:chimera-tenant-onboarding-${props.envName}`,
+      },
+    });
+
+    // Grant Cognito admin permissions to update user attributes
+    postConfirmationFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cognito-idp:AdminUpdateUserAttributes'],
+        resources: [this.userPool.userPoolArn],
+      })
+    );
+
+    // Grant Step Functions start execution (scoped to the onboarding state machine)
+    postConfirmationFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['states:StartExecution'],
+        resources: [
+          `arn:aws:states:${this.region}:${this.account}:stateMachine:chimera-tenant-onboarding-${props.envName}`,
+        ],
+      })
+    );
+
+    // Wire as Cognito post-confirmation trigger
+    this.userPool.addTrigger(cognito.UserPoolOperation.POST_CONFIRMATION, postConfirmationFn);
 
     // --- User pool groups ---
     // admin: platform operators (full access)
@@ -148,11 +245,7 @@ export class SecurityStack extends cdk.Stack {
       authFlows: { userSrp: true, userPassword: true },
       oAuth: {
         flows: { authorizationCodeGrant: true },
-        scopes: [
-          cognito.OAuthScope.OPENID,
-          cognito.OAuthScope.EMAIL,
-          cognito.OAuthScope.PROFILE,
-        ],
+        scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
         callbackUrls: props.callbackUrls || defaultCallbackUrls,
         logoutUrls: props.logoutUrls || defaultLogoutUrls,
       },
@@ -255,7 +348,8 @@ export class SecurityStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'HostedUIDomain', {
       value: hostedUIDomain.domainName,
       exportName: `${this.stackName}-HostedUIDomain`,
-      description: 'Cognito hosted UI domain (e.g., chimera-dev-123456789.auth.us-east-1.amazoncognito.com)',
+      description:
+        'Cognito hosted UI domain (e.g., chimera-dev-123456789.auth.us-east-1.amazoncognito.com)',
     });
     new cdk.CfnOutput(this, 'CognitoOAuthURL', {
       value: `https://${hostedUIDomain.domainName}.auth.${this.region}.amazoncognito.com`,

@@ -34,6 +34,8 @@ export interface DiscoveryStackProps extends cdk.StackProps {
   };
   /** CodePipeline pipeline name from PipelineStack */
   pipelineName: string;
+  /** CodeCommit repository name from PipelineStack context */
+  repositoryName?: string;
   /** CloudFront distribution domain from FrontendStack */
   cloudFrontDomain: string;
   /** Frontend S3 bucket name from FrontendStack */
@@ -162,6 +164,7 @@ export class DiscoveryStack extends cdk.Stack {
       instanceId: 'chimera-pipeline',
       customAttributes: {
         pipelineName: props.pipelineName,
+        repositoryName: props.repositoryName || 'chimera',
         stackName: 'PipelineStack',
         resourceType: 'codepipeline',
       },

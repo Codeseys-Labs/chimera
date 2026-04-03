@@ -7,7 +7,7 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { optionalAuth } from './middleware/auth';
+import { authenticateJWT, optionalAuth } from './middleware/auth';
 import { extractTenantContext } from './middleware/tenant';
 import { rateLimitMiddleware, recordMetricsMiddleware } from './middleware/rate-limit';
 import authRouter from './routes/auth';
@@ -54,11 +54,11 @@ app.use('/slack/events', async (c, next) => {
   return next();
 });
 
-// Apply tenant middleware and rate limiting to all /chat/* and /slack/* routes
-// optionalAuth runs first: extracts JWT claims into auth context if Bearer token is present.
-// extractTenantContext falls back to auth.tenantId when X-Tenant-Id header is absent,
-// enabling direct CLI access via Bearer JWT without requiring the API Gateway header.
-app.use('/chat/*', optionalAuth);
+// Apply auth + tenant middleware and rate limiting to all /chat/* and /slack/* routes.
+// authenticateJWT: validates Cognito JWT — rejects unauthenticated requests (fail-closed).
+// extractTenantContext: reads tenantId from verified JWT claims (NOT from X-Tenant-Id header
+// in production) — prevents tenant impersonation via header spoofing.
+app.use('/chat/*', authenticateJWT);
 app.use('/chat/*', extractTenantContext);
 app.use('/chat/*', rateLimitMiddleware('api-requests', 1));
 app.use('/slack/*', extractTenantContext);
@@ -125,14 +125,17 @@ if (require.main === module) {
     const { serve } = await import('@hono/node-server');
     const PORT = process.env.PORT || 8080;
 
-    serve({
-      fetch: app.fetch,
-      port: Number(PORT),
-    }, (info) => {
-      console.log(`Chimera chat gateway listening on port ${info.port}`);
-      console.log(`   Health: http://localhost:${info.port}/health`);
-      console.log(`   Chat (streaming): POST http://localhost:${info.port}/chat/stream`);
-      console.log(`   Chat (sync): POST http://localhost:${info.port}/chat/message`);
-    });
+    serve(
+      {
+        fetch: app.fetch,
+        port: Number(PORT),
+      },
+      (info) => {
+        console.log(`Chimera chat gateway listening on port ${info.port}`);
+        console.log(`   Health: http://localhost:${info.port}/health`);
+        console.log(`   Chat (streaming): POST http://localhost:${info.port}/chat/stream`);
+        console.log(`   Chat (sync): POST http://localhost:${info.port}/chat/message`);
+      }
+    );
   })();
 }

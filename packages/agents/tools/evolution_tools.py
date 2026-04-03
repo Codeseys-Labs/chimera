@@ -37,14 +37,35 @@ logger = logging.getLogger(__name__)
 
 # Forbidden CDK patterns that agents may never emit.
 # Checked as literal substrings (case-sensitive) before committing.
+# This list MUST stay in sync with the TypeScript orchestrator's
+# BLOCKED_CDK_PATTERNS in packages/core/src/evolution/self-evolution-orchestrator.ts.
 _FORBIDDEN_CDK_PATTERNS: list[tuple[str, str]] = [
-    ('AdministratorAccess', 'AdministratorAccess policy is forbidden in agent-generated stacks'),
-    ('"*"\n', 'Bare wildcard resource string is forbidden'),
-    ("'*'\n", 'Bare wildcard resource string is forbidden'),
+    # IAM escalation
+    ('AdministratorAccess', 'AdministratorAccess managed policy is forbidden'),
+    ('PowerUserAccess', 'PowerUserAccess managed policy is forbidden'),
+    ('addToPolicy', 'Direct IAM policy mutations are forbidden — use pre-approved constructs'),
+    ('grantAdmin', 'IAM admin grants are forbidden'),
+    ('grant(*)', 'Wildcard IAM grants are forbidden'),
+    # Wildcard resources — multiple quote styles (no trailing \n required)
+    ('"*"', 'Bare wildcard resource string is forbidden'),
+    ("'*'", 'Bare wildcard resource string is forbidden'),
+    ('`*`', 'Bare wildcard resource string (template literal) is forbidden'),
+    # Destructive operations
+    ('RemovalPolicy.DESTROY', 'RemovalPolicy.DESTROY is forbidden in agent-generated stacks'),
+    ('.deleteTable', 'DynamoDB table deletion is forbidden'),
+    ('.deleteBucket', 'S3 bucket deletion is forbidden'),
+    # Network/Security modifications
+    ('ec2.Vpc', 'VPC creation/modification is forbidden in agent-generated stacks'),
+    ('ec2.CfnVPC', 'VPC creation/modification is forbidden in agent-generated stacks'),
+    ('ec2.SecurityGroup', 'Security group creation is forbidden — use shared groups from NetworkStack'),
+    ('addIngressRule', 'Security group rule modifications are forbidden'),
+    ('addEgressRule', 'Security group rule modifications are forbidden'),
+    # Cross-stack resource access
+    ('fromLookup', 'Resource lookups are forbidden — accept resources as stack props'),
 ]
 
 # Maximum allowed CDK stack file size (bytes, UTF-8 encoded).
-_MAX_CDK_SIZE = 100_000
+_MAX_CDK_SIZE = 65_536  # 64 KB — matches TypeScript orchestrator limit
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +216,112 @@ def check_evolution_status(
         f"Submitted:  {submitted_at}\n"
         f"{pipeline_section}\n"
         f"{'━' * 50}"
+    )
+
+
+@tool
+def wait_for_evolution_deployment(
+    evolution_id: str,
+    max_wait_seconds: int = 900,
+    poll_interval_seconds: int = 30,
+    region: str = "us-east-1",
+) -> str:
+    """
+    Wait for an infrastructure evolution deployment to complete.
+
+    Polls the evolution state table until the status transitions from 'deploying'
+    to 'deployed', 'deploy_failed', or 'stopped', or until the timeout expires.
+
+    Use this after calling trigger_infra_evolution to wait for the CI/CD pipeline
+    to finish and know whether your infrastructure change was successful.
+
+    Args:
+        evolution_id: Evolution ID returned by trigger_infra_evolution.
+        max_wait_seconds: Maximum time to wait in seconds (default: 900 = 15 minutes).
+        poll_interval_seconds: Seconds between status checks (default: 30).
+        region: AWS region (default: us-east-1).
+
+    Returns:
+        Final deployment status with details, or timeout message.
+    """
+    import time
+
+    dynamodb = boto3.resource('dynamodb', region_name=region)
+    table = dynamodb.Table(os.environ.get('EVOLUTION_TABLE', 'chimera-evolution-state'))
+
+    start_time = time.time()
+    elapsed = 0
+    last_status = 'unknown'
+
+    while elapsed < max_wait_seconds:
+        try:
+            response = table.get_item(
+                Key={'PK': f'EVOLUTION#{evolution_id}', 'SK': 'REQUEST'}
+            )
+
+            if 'Item' not in response:
+                return (
+                    f"Evolution ID '{evolution_id}' not found in state table. "
+                    "It may not have been recorded yet — wait a moment and retry."
+                )
+
+            item = response['Item']
+            last_status = item.get('status', 'unknown')
+            capability = item.get('capability_name', 'unknown')
+            commit_id = item.get('commit_id', 'N/A')
+            exec_id = item.get('pipeline_execution_id', 'N/A')
+
+            # Terminal states
+            if last_status == 'deployed':
+                return (
+                    f"DEPLOYMENT SUCCEEDED\n"
+                    f"{'=' * 50}\n"
+                    f"Evolution:  {evolution_id}\n"
+                    f"Capability: {capability}\n"
+                    f"Commit:     {commit_id}\n"
+                    f"Pipeline:   {exec_id}\n"
+                    f"Duration:   {int(elapsed)}s\n"
+                    f"{'=' * 50}\n\n"
+                    f"The infrastructure is live. You can now:\n"
+                    f"  1. Verify the new resources with check_evolution_status()\n"
+                    f"  2. Register tools with register_capability() if applicable\n"
+                    f"  3. Test the new capability"
+                )
+
+            if last_status == 'deploy_failed':
+                return (
+                    f"DEPLOYMENT FAILED\n"
+                    f"{'=' * 50}\n"
+                    f"Evolution:  {evolution_id}\n"
+                    f"Capability: {capability}\n"
+                    f"Commit:     {commit_id}\n"
+                    f"Pipeline:   {exec_id}\n"
+                    f"Duration:   {int(elapsed)}s\n"
+                    f"{'=' * 50}\n\n"
+                    f"The pipeline failed. Investigate:\n"
+                    f"  1. Check pipeline logs for build/deploy errors\n"
+                    f"  2. The CDK code may have synthesis errors\n"
+                    f"  3. Consider fixing the code and re-triggering evolution"
+                )
+
+            if last_status == 'stopped':
+                return (
+                    f"DEPLOYMENT STOPPED\n"
+                    f"Evolution: {evolution_id} | Status: {last_status}\n"
+                    f"The pipeline was manually stopped. Re-trigger if needed."
+                )
+
+        except Exception as e:
+            logger.warning(f"Error polling evolution status: {e}")
+
+        # Still deploying — wait and poll again
+        time.sleep(poll_interval_seconds)
+        elapsed = time.time() - start_time
+
+    return (
+        f"TIMEOUT — deployment still in progress after {max_wait_seconds}s\n"
+        f"Evolution: {evolution_id} | Last status: {last_status}\n"
+        f"The pipeline may still be running. Check with check_evolution_status()."
     )
 
 
@@ -485,11 +612,10 @@ def _validate_cdk_code(cdk_code: str) -> dict:
             'reason': f'CDK code is {encoded_size} bytes; limit is {_MAX_CDK_SIZE}',
         }
 
-    if 'extends' not in cdk_code or 'Stack' not in cdk_code:
-        return {
-            'valid': False,
-            'reason': 'Code does not contain a CDK Stack class (missing "extends" and "Stack")',
-        }
+    # Must contain a CDK Stack class definition (not just the words in a comment)
+    import re
+    if not re.search(r'class\s+\w+\s+extends\s+\w*Stack', cdk_code):
+        return {'valid': False, 'reason': 'Code must contain a CDK Stack class definition (class XxxStack extends cdk.Stack)'}
 
     for pattern, reason in _FORBIDDEN_CDK_PATTERNS:
         if pattern in cdk_code:

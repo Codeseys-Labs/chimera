@@ -1,7 +1,12 @@
 import * as cdk from 'aws-cdk-lib';
 import { Aspects } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
-import { TenantIsolationAspect, EncryptionAspect, LogRetentionAspect, TaggingAspect } from '../aspects';
+import {
+  TenantIsolationAspect,
+  EncryptionAspect,
+  LogRetentionAspect,
+  TaggingAspect,
+} from '../aspects';
 import { NetworkStack } from '../lib/network-stack';
 import { DataStack } from '../lib/data-stack';
 import { SecurityStack } from '../lib/security-stack';
@@ -160,7 +165,8 @@ skillPipelineStack.addDependency(dataStack);
 // Depends on NetworkStack for VPC/security groups, DataStack for DynamoDB tables, and PipelineStack for ECR repository.
 const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   env: envConfig,
-  description: 'Chimera chat gateway: ECS Fargate service with ALB, SSE streaming, platform adapters',
+  description:
+    'Chimera chat gateway: ECS Fargate service with ALB, SSE streaming, platform adapters',
   envName,
   vpc: networkStack.vpc,
   albSecurityGroup: networkStack.albSecurityGroup,
@@ -184,7 +190,8 @@ chatStack.addDependency(securityStack);
 // Depends on SecurityStack for KMS encryption.
 const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
   env: envConfig,
-  description: 'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
+  description:
+    'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
   envName,
   platformKey: securityStack.platformKey,
 });
@@ -196,12 +203,15 @@ orchestrationStack.addDependency(securityStack);
 // memory GC, cron self-scheduling. All changes are Cedar-bounded, audited, and reversible.
 const evolutionStack = new EvolutionStack(app, `${prefix}-Evolution`, {
   env: envConfig,
-  description: 'Chimera evolution engine: prompt A/B testing, auto-skills, model routing, memory GC',
+  description:
+    'Chimera evolution engine: prompt A/B testing, auto-skills, model routing, memory GC',
   envName,
   auditTable: dataStack.auditTable,
+  eventBus: orchestrationStack.eventBus,
 });
 applyEvolutionStackSuppressions(evolutionStack);
 evolutionStack.addDependency(dataStack);
+evolutionStack.addDependency(orchestrationStack);
 
 // --- Stack 11: Tenant Onboarding ---
 // Cedar policy infrastructure + Step Functions workflow for tenant provisioning.
@@ -236,7 +246,8 @@ tenantOnboardingStack.addDependency(observabilityStack);
 // to avoid CDK circular dependency (see email-stack.ts for explanation).
 const emailStack = new EmailStack(app, `${prefix}-Email`, {
   env: envConfig,
-  description: 'Chimera email channel: SES inbound, email parser/sender Lambdas, thread context in DDB',
+  description:
+    'Chimera email channel: SES inbound, email parser/sender Lambdas, thread context in DDB',
   envName,
   sessionsTable: dataStack.sessionsTable,
   agentEventBus: orchestrationStack.eventBus,
@@ -262,10 +273,17 @@ applyFrontendStackSuppressions(frontendStack);
 // Props are resolved CDK tokens — Cloud Map stores them as concrete strings at deploy time.
 const discoveryStack = new DiscoveryStack(app, `${prefix}-Discovery`, {
   env: envConfig,
-  description: 'Chimera discovery layer: Cloud Map HTTP namespace + service registrations for agent self-awareness',
+  description:
+    'Chimera discovery layer: Cloud Map HTTP namespace + service registrations for agent self-awareness',
   envName,
   restApiUrl: apiStack.api.url,
-  webSocketUrl: 'wss://' + apiStack.webSocketApi.ref + '.execute-api.' + envConfig.region + '.amazonaws.com/' + envName,
+  webSocketUrl:
+    'wss://' +
+    apiStack.webSocketApi.ref +
+    '.execute-api.' +
+    envConfig.region +
+    '.amazonaws.com/' +
+    envName,
   albDnsName: chatStack.alb.loadBalancerDnsName,
   ecsClusterName: chatStack.ecsCluster.clusterName,
   ecsServiceName: chatStack.ecsService.serviceName,
@@ -284,6 +302,7 @@ const discoveryStack = new DiscoveryStack(app, `${prefix}-Discovery`, {
     skills: dataStack.skillsBucket.bucketName,
   },
   pipelineName: pipelineStack.pipeline.pipelineName,
+  repositoryName: app.node.tryGetContext('repositoryName') ?? 'chimera',
   cloudFrontDomain: frontendStack.distribution.distributionDomainName,
   frontendBucketName: frontendStack.bucket.bucketName,
 });
@@ -296,7 +315,22 @@ discoveryStack.addDependency(pipelineStack);
 discoveryStack.addDependency(frontendStack);
 
 // Apply tags to all stacks
-for (const stack of [networkStack, dataStack, securityStack, observabilityStack, apiStack, skillPipelineStack, chatStack, orchestrationStack, evolutionStack, tenantOnboardingStack, pipelineStack, emailStack, frontendStack, discoveryStack]) {
+for (const stack of [
+  networkStack,
+  dataStack,
+  securityStack,
+  observabilityStack,
+  apiStack,
+  skillPipelineStack,
+  chatStack,
+  orchestrationStack,
+  evolutionStack,
+  tenantOnboardingStack,
+  pipelineStack,
+  emailStack,
+  frontendStack,
+  discoveryStack,
+]) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }

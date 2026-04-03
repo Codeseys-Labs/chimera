@@ -1,6 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -110,7 +113,7 @@ export class ObservabilityStack extends cdk.Stack {
         this.criticalAlarmTopic.addSubscription(
           new subscriptions.UrlSubscription(pagerDutyEndpoint, {
             protocol: sns.SubscriptionProtocol.HTTPS,
-          }),
+          })
         );
       }
       if (opsEmail) {
@@ -122,7 +125,7 @@ export class ObservabilityStack extends cdk.Stack {
         this.highAlarmTopic.addSubscription(
           new subscriptions.UrlSubscription(slackWebhook, {
             protocol: sns.SubscriptionProtocol.HTTPS,
-          }),
+          })
         );
       }
       if (opsEmail) {
@@ -172,7 +175,7 @@ export class ObservabilityStack extends cdk.Stack {
           title: 'Tenants Table Activity',
           left: [tenantsMetric],
           width: 8,
-        }),
+        })
       );
     }
 
@@ -186,7 +189,7 @@ export class ObservabilityStack extends cdk.Stack {
           title: 'Sessions Table Activity',
           left: [sessionsReadMetric],
           width: 8,
-        }),
+        })
       );
     }
 
@@ -200,7 +203,7 @@ export class ObservabilityStack extends cdk.Stack {
           title: 'Skills Table Activity',
           left: [skillsMetric],
           width: 8,
-        }),
+        })
       );
     }
 
@@ -224,14 +227,22 @@ export class ObservabilityStack extends cdk.Stack {
 
       // Read throttles
       const readThrottles = table.metricThrottledRequestsForOperations({
-        operations: [dynamodb.Operation.GET_ITEM, dynamodb.Operation.QUERY, dynamodb.Operation.SCAN],
+        operations: [
+          dynamodb.Operation.GET_ITEM,
+          dynamodb.Operation.QUERY,
+          dynamodb.Operation.SCAN,
+        ],
         statistic: 'Sum',
         period: cdk.Duration.minutes(5),
       });
 
       // Write throttles
       const writeThrottles = table.metricThrottledRequestsForOperations({
-        operations: [dynamodb.Operation.PUT_ITEM, dynamodb.Operation.UPDATE_ITEM, dynamodb.Operation.DELETE_ITEM],
+        operations: [
+          dynamodb.Operation.PUT_ITEM,
+          dynamodb.Operation.UPDATE_ITEM,
+          dynamodb.Operation.DELETE_ITEM,
+        ],
         statistic: 'Sum',
         period: cdk.Duration.minutes(5),
       });
@@ -242,7 +253,7 @@ export class ObservabilityStack extends cdk.Stack {
           left: [readThrottles, writeThrottles],
           width: 12,
           leftYAxis: { min: 0 },
-        }),
+        })
       );
 
       // Create alarm for throttles (>=10 throttled requests in 5 min indicates capacity issue)
@@ -282,7 +293,7 @@ export class ObservabilityStack extends cdk.Stack {
         markdown: `## Cost Tracking\n\nMonthly spend per tenant tracked in \`chimera-cost-tracking-${props.envName}\` table.\n\nBudget threshold alarms trigger when tenant exceeds tier quota.`,
         width: 24,
         height: 3,
-      }),
+      })
     );
 
     // --- Latency section: ECS task latency, API Gateway p99 ---
@@ -330,7 +341,7 @@ export class ObservabilityStack extends cdk.Stack {
         left: [ecsCpuUtilization, ecsMemoryUtilization],
         width: 12,
         leftYAxis: { label: 'Percent', min: 0, max: 100 },
-      }),
+      })
     );
 
     // --- Errors section: ECS task failures, Lambda errors, 4xx/5xx responses ---
@@ -382,7 +393,7 @@ export class ObservabilityStack extends cdk.Stack {
         left: [lambdaErrors, lambdaThrottles],
         width: 12,
         leftYAxis: { label: 'Count', min: 0 },
-      }),
+      })
     );
 
     // ======================================================================
@@ -451,6 +462,134 @@ export class ObservabilityStack extends cdk.Stack {
     });
     costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
     costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
+
+    // ======================================================================
+    // Cost Metric Publisher: Scheduled Lambda that reads cost-tracking table
+    // and publishes aggregated metrics to CloudWatch Chimera/Billing namespace.
+    // Runs hourly via EventBridge cron rule.
+    // ======================================================================
+    const costPublisherFn = new lambda.Function(this, 'CostMetricPublisher', {
+      functionName: `chimera-cost-publisher-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      code: lambda.Code.fromInline(`
+const { DynamoDBClient, ScanCommand } = require('@aws-sdk/client-dynamodb');
+const { CloudWatchClient, PutMetricDataCommand } = require('@aws-sdk/client-cloudwatch');
+const ddb = new DynamoDBClient({});
+const cw = new CloudWatchClient({});
+
+exports.handler = async () => {
+  const table = process.env.COST_TABLE;
+  if (!table) { console.log('No COST_TABLE configured'); return; }
+
+  try {
+    const now = new Date();
+    const period = now.toISOString().slice(0, 7); // YYYY-MM
+    const scan = await ddb.send(new ScanCommand({
+      TableName: table,
+      FilterExpression: 'begins_with(PK, :prefix) AND SK = :period',
+      ExpressionAttributeValues: {
+        ':prefix': { S: 'TENANT#' },
+        ':period': { S: 'PERIOD#' + period },
+      },
+      Limit: 500,
+    }));
+
+    let totalSpend = 0;
+    const tenantSpends = [];
+    for (const item of scan.Items || []) {
+      const spend = parseFloat(item.current_spend?.N || '0');
+      const tenantId = (item.PK?.S || '').replace('TENANT#', '').split('#')[0];
+      const quotaLimit = parseFloat(item.quota_limit?.N || '0');
+      totalSpend += spend;
+      tenantSpends.push({ tenantId, spend, quotaLimit });
+    }
+
+    const activeTenants = tenantSpends.filter(t => t.spend > 0);
+    const anomalyTenants = tenantSpends.filter(t => t.quotaLimit > 0 && t.spend / t.quotaLimit > 1.2);
+
+    const metrics = [
+      {
+        MetricName: 'TotalMonthlySpend',
+        Value: totalSpend,
+        Unit: 'None',
+        Timestamp: now,
+      },
+      {
+        MetricName: 'ActiveTenants',
+        Value: activeTenants.length,
+        Unit: 'Count',
+        Timestamp: now,
+      },
+    ];
+
+    // Publish per-tenant anomaly metrics
+    for (const t of anomalyTenants) {
+      metrics.push({
+        MetricName: 'TenantCostAnomaly',
+        Value: t.quotaLimit > 0 ? t.spend / t.quotaLimit : 0,
+        Unit: 'None',
+        Timestamp: now,
+        Dimensions: [{ Name: 'TenantId', Value: t.tenantId }],
+      });
+    }
+
+    // CloudWatch PutMetricData accepts max 1000 metrics per call
+    const batches = [];
+    for (let i = 0; i < metrics.length; i += 20) {
+      batches.push(metrics.slice(i, i + 20));
+    }
+    for (const batch of batches) {
+      await cw.send(new PutMetricDataCommand({
+        Namespace: 'Chimera/Billing',
+        MetricData: batch,
+      }));
+    }
+
+    console.log(JSON.stringify({
+      totalSpend,
+      activeTenants: activeTenants.length,
+      anomalyTenants: anomalyTenants.length,
+      period,
+    }));
+  } catch (err) {
+    console.error('Cost publish failed:', err.message);
+    throw err; // Surface errors to CloudWatch Lambda metrics
+  }
+};
+      `),
+      environment: {
+        COST_TABLE: props.costTrackingTable?.tableName ?? '',
+      },
+    });
+
+    // Grant the Lambda read access to the cost-tracking table
+    if (props.costTrackingTable) {
+      props.costTrackingTable.grantReadData(costPublisherFn);
+    }
+
+    // Grant CloudWatch PutMetricData permission
+    costPublisherFn.addToRolePolicy(
+      new cdk.aws_iam.PolicyStatement({
+        actions: ['cloudwatch:PutMetricData'],
+        resources: ['*'],
+        conditions: {
+          StringEquals: {
+            'cloudwatch:namespace': 'Chimera/Billing',
+          },
+        },
+      })
+    );
+
+    // Schedule: run every hour
+    new events.Rule(this, 'CostPublisherSchedule', {
+      ruleName: `chimera-cost-publisher-schedule-${props.envName}`,
+      description: 'Hourly trigger for cost metric publisher Lambda',
+      schedule: events.Schedule.rate(cdk.Duration.hours(1)),
+      targets: [new targets.LambdaFunction(costPublisherFn)],
+    });
 
     // ======================================================================
     // PITR Backup Monitoring: Continuous backup health checks
@@ -579,7 +718,7 @@ export class ObservabilityStack extends cdk.Stack {
         left: [tenantLatencyP99Metric],
         width: 12,
         leftYAxis: { label: 'Milliseconds', min: 0 },
-      }),
+      })
     );
 
     // --- Skill Usage Dashboard ---
@@ -644,7 +783,7 @@ export class ObservabilityStack extends cdk.Stack {
         markdown: `## Skill Health Monitoring\n\n- **Top skills**: Query Chimera/Skills metrics filtered by skill name\n- **Error analysis**: Check skill failure dimensions for error types\n- **Marketplace impact**: High failure rate skills trigger trust level downgrade`,
         width: 12,
         height: 4,
-      }),
+      })
     );
 
     // --- Cost Attribution Dashboard ---
@@ -702,7 +841,7 @@ export class ObservabilityStack extends cdk.Stack {
         markdown: `## Cost Tracking Data Sources\n\n- **DynamoDB**: \`chimera-cost-tracking-${props.envName}\` table\n- **Update frequency**: Real-time via DDB streams + Lambda aggregator\n- **Quota enforcement**: Rate limiter triggered at 90% quota, hard stop at 100%\n- **Billing cycle**: Monthly (PERIOD#{yyyy-mm})`,
         width: 12,
         height: 4,
-      }),
+      })
     );
 
     // ======================================================================
@@ -711,17 +850,18 @@ export class ObservabilityStack extends cdk.Stack {
     // ======================================================================
     if (props.replicaRegions && props.replicaRegions.length > 0) {
       // Create cross-region health composite alarm
-      const regionalHealthMetrics = props.replicaRegions.map((region) =>
-        new cloudwatch.Metric({
-          namespace: 'AWS/ApiGateway',
-          metricName: '5XXError',
-          statistic: 'Sum',
-          period: cdk.Duration.minutes(5),
-          dimensionsMap: {
-            Stage: props.envName,
-          },
-          region: region,
-        }),
+      const regionalHealthMetrics = props.replicaRegions.map(
+        (region) =>
+          new cloudwatch.Metric({
+            namespace: 'AWS/ApiGateway',
+            metricName: '5XXError',
+            statistic: 'Sum',
+            period: cdk.Duration.minutes(5),
+            dimensionsMap: {
+              Stage: props.envName,
+            },
+            region: region,
+          })
       );
 
       // Composite alarm: triggers if ANY region has >5% error rate
@@ -812,7 +952,7 @@ export class ObservabilityStack extends cdk.Stack {
             color: '#ff0000',
           },
         ],
-      }),
+      })
     );
 
     // ======================================================================

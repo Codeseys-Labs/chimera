@@ -17,26 +17,19 @@ import {
   DescribeStacksCommand,
   DescribeStackEventsCommand,
 } from '@aws-sdk/client-cloudformation';
-import {
-  CognitoIdentityProviderClient,
-} from '@aws-sdk/client-cognito-identity-provider';
+import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import {
   loadWorkspaceConfig,
   saveWorkspaceConfig,
   loadCredentials,
   saveCredentials,
 } from '../utils/workspace.js';
-import {
-  resolveSourcePath,
-  cleanupSource,
-  type SourceLocation,
-} from '../utils/source.js';
+import { resolveSourcePath, cleanupSource, type SourceLocation } from '../utils/source.js';
 import { pushToCodeCommit } from '../utils/codecommit.js';
 import { color } from '../lib/color.js';
 import { findProjectRoot } from '../utils/project.js';
 import { provisionAdminUser } from './setup.js';
 import { terminalLogin } from './login.js';
-
 
 /**
  * Get AWS account ID from STS.
@@ -53,10 +46,7 @@ async function getAccountId(): Promise<string> {
 /**
  * Create or get existing CodeCommit repository
  */
-async function ensureCodeCommitRepo(
-  client: CodeCommitClient,
-  repoName: string,
-): Promise<string> {
+async function ensureCodeCommitRepo(client: CodeCommitClient, repoName: string): Promise<string> {
   try {
     const getRepoCommand = new GetRepositoryCommand({ repositoryName: repoName });
     const repo = await client.send(getRepoCommand);
@@ -79,7 +69,7 @@ async function ensureCodeCommitRepo(
  */
 async function pipelineStackExists(
   client: CloudFormationClient,
-  environment: string,
+  environment: string
 ): Promise<boolean> {
   try {
     const stackName = `Chimera-${environment}-Pipeline`;
@@ -96,12 +86,51 @@ async function pipelineStackExists(
 }
 
 /**
+ * Ensure CDK is bootstrapped in the target account/region.
+ * Checks for CDKToolkit stack — if missing, runs `npx cdk bootstrap` automatically.
+ * Returns 'already' if bootstrap exists, 'bootstrapped' if we just did it, 'skipped' on error.
+ */
+async function ensureCdkBootstrap(
+  region: string,
+  accountId: string,
+  sourcePath: string | null
+): Promise<'already' | 'bootstrapped' | 'skipped'> {
+  const cfn = new CloudFormationClient({ region });
+  try {
+    const resp = await cfn.send(new DescribeStacksCommand({ StackName: 'CDKToolkit' }));
+    const stack = resp.Stacks?.[0];
+    if (stack && !stack.StackStatus?.includes('DELETE') && !stack.StackStatus?.includes('FAILED')) {
+      return 'already';
+    }
+  } catch (error: any) {
+    // Stack doesn't exist — need to bootstrap
+    if (error.name !== 'ValidationError') {
+      console.warn(`CDK bootstrap check warning: ${error.message}`);
+      return 'skipped';
+    }
+  }
+
+  // Bootstrap
+  try {
+    const cleanAccountId = accountId.trim();
+    const cwd = sourcePath ? `${sourcePath}/infra` : undefined;
+    const proc = Bun.$`npx cdk bootstrap aws://${cleanAccountId}/${region} --require-approval never`;
+    if (cwd) proc.cwd(cwd);
+    await proc.quiet();
+    return 'bootstrapped';
+  } catch (error: any) {
+    console.warn(`CDK bootstrap failed: ${error.message?.slice(0, 200)}`);
+    return 'skipped';
+  }
+}
+
+/**
  * Get all outputs from a CloudFormation stack.
  * Returns an empty object if the stack doesn't exist yet (graceful skip).
  */
 async function getStackOutputs(
   client: CloudFormationClient,
-  stackName: string,
+  stackName: string
 ): Promise<Record<string, string>> {
   try {
     const response = await client.send(new DescribeStacksCommand({ StackName: stackName }));
@@ -126,7 +155,7 @@ async function getStackOutputs(
 async function autoCollectEndpoints(
   cfnClient: CloudFormationClient,
   region: string,
-  env: string,
+  env: string
 ): Promise<boolean> {
   const [apiOutputs, chatOutputs, secOutputs, frontendOutputs] = await Promise.all([
     getStackOutputs(cfnClient, `Chimera-${env}-Api`),
@@ -186,7 +215,7 @@ function generatePassword(): string {
   const parts = [pick(upper), pick(lower), pick(digits), pick(special)];
   const buf = new Uint8Array(12);
   crypto.getRandomValues(buf);
-  Array.from(buf).forEach(byte => parts.push(all[byte % all.length]));
+  Array.from(buf).forEach((byte) => parts.push(all[byte % all.length]));
 
   // Fisher-Yates shuffle
   for (let i = parts.length - 1; i > 0; i--) {
@@ -202,10 +231,7 @@ function generatePassword(): string {
  * Ensure admin password is in ~/.chimera/credentials. Prompts interactively
  * unless autoGenerate is true. Returns the password, or null if user skipped.
  */
-async function ensureAdminCredentials(
-  email: string,
-  autoGenerate = false,
-): Promise<string | null> {
+async function ensureAdminCredentials(email: string, autoGenerate = false): Promise<string | null> {
   const creds = loadCredentials();
   if (creds.admin?.password) return creds.admin.password;
 
@@ -247,7 +273,7 @@ async function ensureAdminCredentials(
       type: 'password',
       name: 'entered',
       message: `Admin password for ${email}:`,
-      validate: (v: string) => v.length >= 12 ? true : 'Minimum 12 characters required',
+      validate: (v: string) => (v.length >= 12 ? true : 'Minimum 12 characters required'),
     },
   ]);
   saveCredentials({ ...creds, admin: { password: entered } });
@@ -263,7 +289,7 @@ async function runAutoSetup(
   region: string,
   env: string,
   email: string,
-  password: string,
+  password: string
 ): Promise<boolean> {
   const wsConfig = loadWorkspaceConfig();
   let userPoolId = wsConfig?.endpoints?.cognito_user_pool_id;
@@ -277,7 +303,7 @@ async function runAutoSetup(
   if (!userPoolId) {
     throw new Error(
       'Cognito user pool not found. Security stack may not be deployed yet. ' +
-      'Run "chimera setup" after the pipeline finishes.',
+        'Run "chimera setup" after the pipeline finishes.'
     );
   }
 
@@ -289,15 +315,17 @@ async function runAutoSetup(
  * Poll CloudFormation stack events until the stack reaches a terminal state.
  * Prints each new event as it arrives. Polls every 10 seconds.
  */
-async function monitorStackEvents(
-  client: CloudFormationClient,
-  stackName: string,
-): Promise<void> {
+async function monitorStackEvents(client: CloudFormationClient, stackName: string): Promise<void> {
   const terminalStatuses = new Set([
-    'CREATE_COMPLETE', 'CREATE_FAILED',
-    'ROLLBACK_COMPLETE', 'ROLLBACK_FAILED',
-    'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE', 'UPDATE_ROLLBACK_FAILED',
-    'DELETE_COMPLETE', 'DELETE_FAILED',
+    'CREATE_COMPLETE',
+    'CREATE_FAILED',
+    'ROLLBACK_COMPLETE',
+    'ROLLBACK_FAILED',
+    'UPDATE_COMPLETE',
+    'UPDATE_ROLLBACK_COMPLETE',
+    'UPDATE_ROLLBACK_FAILED',
+    'DELETE_COMPLETE',
+    'DELETE_FAILED',
   ]);
 
   console.log(color.gray(`\nMonitoring stack: ${stackName}`));
@@ -313,7 +341,7 @@ async function monitorStackEvents(
       currentStatus = stackResp.Stacks?.[0]?.StackStatus ?? '';
 
       const eventsResp = await client.send(
-        new DescribeStackEventsCommand({ StackName: stackName }),
+        new DescribeStackEventsCommand({ StackName: stackName })
       );
       // Reverse so events display oldest-first
       const events = (eventsResp.StackEvents ?? []).slice().reverse();
@@ -325,9 +353,11 @@ async function monitorStackEvents(
         const resource = (event.LogicalResourceId ?? '').padEnd(40);
         const status = event.ResourceStatus ?? '';
         const reason = event.ResourceStatusReason ? ` — ${event.ResourceStatusReason}` : '';
-        const statusStr = status.includes('FAILED') ? color.red(status)
-          : status.includes('COMPLETE') ? color.green(status)
-          : color.gray(status);
+        const statusStr = status.includes('FAILED')
+          ? color.red(status)
+          : status.includes('COMPLETE')
+            ? color.green(status)
+            : color.gray(status);
 
         console.log(`${color.gray(ts)} ${resource} ${statusStr}${color.gray(reason)}`);
       }
@@ -341,7 +371,7 @@ async function monitorStackEvents(
       }
     }
 
-    await new Promise<void>(resolve => setTimeout(resolve, 10_000));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10_000));
   }
 
   if (currentStatus.includes('FAILED') || currentStatus.includes('ROLLBACK')) {
@@ -351,7 +381,6 @@ async function monitorStackEvents(
   }
 }
 
-
 /**
  * Deploy only the Pipeline CDK stack via npx (not bunx).
  * npx spawns a separate Node.js process — CDK module resolution works correctly.
@@ -360,8 +389,10 @@ async function monitorStackEvents(
  */
 async function deployCdkStacks(repoRoot: string, environment: string, quiet = true): Promise<void> {
   const safeEnv = environment.replace(/[^a-zA-Z0-9-]/g, '');
-  const proc = Bun.$`npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`
-    .cwd(`${repoRoot}/infra`);
+  const proc =
+    Bun.$`npx cdk deploy Chimera-${safeEnv}-Pipeline --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`.cwd(
+      `${repoRoot}/infra`
+    );
   await (quiet ? proc.quiet() : proc);
 }
 
@@ -371,14 +402,16 @@ async function deployCdkStacks(repoRoot: string, environment: string, quiet = tr
 export function registerDeployCommands(program: Command): void {
   program
     .command('deploy')
-    .description('Deploy Chimera to AWS account (creates CodeCommit repo, pushes source, triggers pipeline)')
+    .description(
+      'Deploy Chimera to AWS account (creates CodeCommit repo, pushes source, triggers pipeline)'
+    )
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--repo-name <name>', 'CodeCommit repository name')
     .option(
       '--source <mode>',
       'Source mode: auto (latest release), local (current directory), github (release archive), git (clone from --remote)',
-      'auto',
+      'auto'
     )
     .option('--github-owner <owner>', 'GitHub repository owner', 'your-org')
     .option('--github-repo <repo>', 'GitHub repository name', 'chimera')
@@ -390,13 +423,16 @@ export function registerDeployCommands(program: Command): void {
     .option('--skip-setup-prompt', 'Auto-generate admin password without prompting')
     .option('--monitor', 'Watch CloudFormation stack events in real-time (10s polling)')
     .option('--json', 'Output result as JSON')
-    .addHelpText('after', `
+    .addHelpText(
+      'after',
+      `
 Examples:
   $ chimera deploy
   $ chimera deploy --region us-west-2 --env prod
   $ chimera deploy --source local
   $ chimera deploy --source git --remote https://github.com/org/chimera
-  $ chimera deploy --monitor --json`)
+  $ chimera deploy --monitor --json`
+    )
     .action(async (options) => {
       const spinner = ora('Starting Chimera deployment').start();
       if (options.json) spinner.stop();
@@ -418,7 +454,9 @@ Examples:
         }
         const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
         const repoName = options.repoName ?? wsConfig?.workspace?.repository ?? 'chimera';
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        if (wsConfig?.aws?.profile) {
+          process.env.AWS_PROFILE = wsConfig.aws.profile;
+        }
 
         if (!options.json) spinner.text = 'Verifying AWS credentials...';
         const accountId = await getAccountId();
@@ -433,7 +471,10 @@ Examples:
             tag: options.tag,
           };
           const ref = options.branch ?? options.tag;
-          if (!options.json) spinner.succeed(color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`));
+          if (!options.json)
+            spinner.succeed(
+              color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`)
+            );
         } else if (options.source === 'auto') {
           sourceLocation = {
             type: 'github-release',
@@ -441,7 +482,12 @@ Examples:
             repo: options.githubRepo,
             tag: options.githubTag,
           };
-          if (!options.json) spinner.succeed(color.green(`Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`));
+          if (!options.json)
+            spinner.succeed(
+              color.green(
+                `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`
+              )
+            );
         } else if (options.source === 'git') {
           if (!options.remote) {
             throw new Error('--source git requires --remote <url>');
@@ -453,7 +499,10 @@ Examples:
             tag: options.tag,
           };
           const ref = options.branch ?? options.tag;
-          if (!options.json) spinner.succeed(color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`));
+          if (!options.json)
+            spinner.succeed(
+              color.green(`Source: git clone (${options.remote}${ref ? `@${ref}` : ''})`)
+            );
         } else if (options.source === 'local') {
           const localRoot = findProjectRoot();
           sourceLocation = { type: 'local', path: localRoot };
@@ -465,9 +514,16 @@ Examples:
             repo: options.githubRepo,
             tag: options.githubTag,
           };
-          if (!options.json) spinner.succeed(color.green(`Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`));
+          if (!options.json)
+            spinner.succeed(
+              color.green(
+                `Source: GitHub release (${options.githubOwner}/${options.githubRepo}@${options.githubTag})`
+              )
+            );
         } else {
-          throw new Error(`Invalid source mode: ${options.source}. Use auto, local, github, or git.`);
+          throw new Error(
+            `Invalid source mode: ${options.source}. Use auto, local, github, or git.`
+          );
         }
 
         if (!options.json) spinner.start('Preparing source code...');
@@ -477,7 +533,24 @@ Examples:
         let sourceCommitSha: string | undefined;
         try {
           sourceCommitSha = await Bun.$`git rev-parse HEAD`.cwd(sourcePath!).quiet().text();
-        } catch { /* not a git repo — skip */ }
+        } catch {
+          /* not a git repo — skip */
+        }
+
+        // Ensure CDK is bootstrapped in the target account/region
+        if (!options.json) spinner.start('Checking CDK bootstrap status...');
+        const bootstrapped = await ensureCdkBootstrap(region, accountId, sourcePath);
+        if (bootstrapped === 'already') {
+          if (!options.json) spinner.succeed(color.green('CDK bootstrap: already configured'));
+        } else if (bootstrapped === 'bootstrapped') {
+          if (!options.json)
+            spinner.succeed(color.green('CDK bootstrap: environment bootstrapped successfully'));
+        } else {
+          if (!options.json)
+            spinner.warn(
+              color.yellow('CDK bootstrap check skipped — deploy may fail if not bootstrapped')
+            );
+        }
 
         if (!options.json) spinner.start('Setting up CodeCommit repository...');
         const codecommitClient = new CodeCommitClient({ region });
@@ -485,7 +558,12 @@ Examples:
         if (!options.json) spinner.succeed(color.green(`CodeCommit repository ready: ${repoName}`));
 
         if (!options.json) spinner.start('Pushing source code to CodeCommit...');
-        const codecommitCommitId = await pushToCodeCommit(codecommitClient, repoName, sourcePath, 'main');
+        const codecommitCommitId = await pushToCodeCommit(
+          codecommitClient,
+          repoName,
+          sourcePath,
+          'main'
+        );
         if (!options.json) spinner.succeed(color.green('Source code pushed to CodeCommit'));
 
         if (!options.json) spinner.start('Checking Pipeline stack status...');
@@ -494,20 +572,32 @@ Examples:
 
         if (stackExists) {
           if (!options.json) {
-            spinner.succeed(color.green('Pipeline stack exists - CodePipeline will handle deployment'));
-            console.log(color.gray('\nCodePipeline will automatically deploy infrastructure updates from the pushed code.'));
+            spinner.succeed(
+              color.green('Pipeline stack exists - CodePipeline will handle deployment')
+            );
+            console.log(
+              color.gray(
+                '\nCodePipeline will automatically deploy infrastructure updates from the pushed code.'
+              )
+            );
           }
         } else {
-          if (!options.json) spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
+          if (!options.json)
+            spinner.start('Deploying Pipeline stack (this will take 15-30 minutes)...');
           await deployCdkStacks(sourcePath, env, !options.monitor);
-          if (!options.json) spinner.succeed(color.green('Pipeline stack deployed - future pushes will auto-deploy'));
+          if (!options.json)
+            spinner.succeed(
+              color.green('Pipeline stack deployed - future pushes will auto-deploy')
+            );
         }
 
         // --monitor: watch Pipeline stack events in real-time
         if (options.monitor && !options.json) {
           await monitorStackEvents(cfnClient, `Chimera-${env}-Pipeline`);
         } else if (!options.monitor && !options.json && !stackExists) {
-          console.log(color.gray('\nRun "chimera monitor" to watch deployment progress in real-time.'));
+          console.log(
+            color.gray('\nRun "chimera monitor" to watch deployment progress in real-time.')
+          );
         }
 
         // Auto-collect endpoints (succeeds only if full infra is already deployed)
@@ -519,7 +609,11 @@ Examples:
             if (endpointsCollected) {
               spinner.succeed(color.green('API endpoints saved to chimera.toml'));
             } else {
-              spinner.warn(color.yellow('Endpoints not available yet — run "chimera endpoints" after the pipeline finishes'));
+              spinner.warn(
+                color.yellow(
+                  'Endpoints not available yet — run "chimera endpoints" after the pipeline finishes'
+                )
+              );
             }
           } catch (err: any) {
             spinner.warn(color.yellow(`Endpoint collection skipped: ${err.message}`));
@@ -551,15 +645,19 @@ Examples:
             spinner.start(`Provisioning admin user ${adminEmail}...`);
             try {
               const created = await runAutoSetup(region, env, adminEmail, adminPassword);
-              spinner.succeed(color.green(
-                created
-                  ? `Admin user created: ${adminEmail}`
-                  : `Admin user updated: ${adminEmail}`,
-              ));
+              spinner.succeed(
+                color.green(
+                  created
+                    ? `Admin user created: ${adminEmail}`
+                    : `Admin user updated: ${adminEmail}`
+                )
+              );
               setupDone = true;
             } catch (err: any) {
               spinner.warn(color.yellow(`Admin setup deferred: ${err.message}`));
-              console.log(color.gray('Password saved. Run "chimera setup" after the pipeline finishes.'));
+              console.log(
+                color.gray('Password saved. Run "chimera setup" after the pipeline finishes.')
+              );
             }
           } else {
             console.log(color.gray('Password not set. Run "chimera setup" when ready.'));
@@ -583,25 +681,29 @@ Examples:
         }
 
         if (options.json) {
-          console.log(JSON.stringify({
-            status: 'ok',
-            data: {
-              accountId,
-              repoName,
-              env,
-              region,
-              stackExists,
-              sourceCommitSha,
-              codecommitCommitId,
-              endpointsCollected,
-              setupDone,
-            },
-          }));
+          console.log(
+            JSON.stringify({
+              status: 'ok',
+              data: {
+                accountId,
+                repoName,
+                env,
+                region,
+                stackExists,
+                sourceCommitSha,
+                codecommitCommitId,
+                endpointsCollected,
+                setupDone,
+              },
+            })
+          );
         } else {
           console.log(color.green('\n✓ Deployment complete!'));
           const remaining: string[] = [];
           if (!endpointsCollected) {
-            remaining.push('Run "chimera endpoints" after the pipeline finishes to save API endpoints');
+            remaining.push(
+              'Run "chimera endpoints" after the pipeline finishes to save API endpoints'
+            );
           }
           if (!setupDone && adminEmail) {
             remaining.push('Run "chimera setup" to provision the admin user');
@@ -616,7 +718,9 @@ Examples:
         }
       } catch (error: any) {
         if (options.json) {
-          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'DEPLOY_FAILED' }));
+          console.log(
+            JSON.stringify({ status: 'error', error: error.message, code: 'DEPLOY_FAILED' })
+          );
           process.exit(1);
         }
         spinner.fail(color.red('Deployment failed'));

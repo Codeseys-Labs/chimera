@@ -15,6 +15,7 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp, entrypoint
 from bedrock_agentcore.memory.integrations.strands import AgentCoreMemorySessionManager
 
 from gateway_config import GatewayToolDiscovery
+from system_prompt import CHIMERA_SYSTEM_PROMPT
 
 
 # Initialize AgentCore app
@@ -202,19 +203,31 @@ def build_system_prompt(tenant_id: str, tier: str, config: Dict[str, Any]) -> st
 
     Loads SOUL.md (agent identity) and AGENTS.md (capability reference) from project root,
     then appends tenant-specific context (tier, features, budget).
+
+    Falls back to CHIMERA_SYSTEM_PROMPT constant from system_prompt.py if the
+    identity files are missing (e.g. running in a container without the repo root).
     """
     # Load agent identity and capability documents
     soul_content = load_identity_file("SOUL.md")
     agents_content = load_identity_file("AGENTS.md")
 
+    # If both files are missing, fall back to the structured system prompt constant
+    soul_missing = "not found" in soul_content or "Error loading" in soul_content
+    agents_missing = "not found" in agents_content or "Error loading" in agents_content
+
+    if soul_missing and agents_missing:
+        base_prompt = CHIMERA_SYSTEM_PROMPT
+    elif soul_missing:
+        base_prompt = f"{CHIMERA_SYSTEM_PROMPT}\n\n---\n\n{agents_content}"
+    elif agents_missing:
+        base_prompt = f"{soul_content}\n\n---\n\n{CHIMERA_SYSTEM_PROMPT}"
+    else:
+        base_prompt = f"{soul_content}\n\n---\n\n{agents_content}"
+
     features_str = ', '.join(config['features']) if config['features'] else 'standard features'
 
-    # Combine identity docs + tenant context
-    return f"""{soul_content}
-
----
-
-{agents_content}
+    # Combine base prompt + tenant context
+    return f"""{base_prompt}
 
 ---
 

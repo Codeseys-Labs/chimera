@@ -25,6 +25,8 @@ import { registerChatCommand } from './commands/chat';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerMonitorCommand } from './commands/monitor';
 import { registerCompletionCommand } from './commands/completion';
+import { diffCommand } from './commands/diff';
+import { triggerCommand } from './commands/trigger';
 import { color } from './lib/color';
 
 // Version embedded at build time via `bun build --define '__CHIMERA_VERSION__="x.y.z"'`.
@@ -47,12 +49,22 @@ function getVersion(): string {
 
 // Groups used by configureHelp to render chimera --help in logical sections.
 const COMMAND_GROUPS: Record<string, string[]> = {
-  'Setup':       ['init', 'deploy', 'endpoints', 'setup'],
-  'Operations':  ['status', 'sync', 'upgrade', 'destroy', 'cleanup', 'redeploy', 'monitor'],
-  'Auth':        ['login'],
-  'Agent':       ['chat', 'session'],
-  'Admin':       ['tenant', 'skill'],
-  'Diagnostic':  ['doctor', 'completion'],
+  Setup: ['init', 'deploy', 'endpoints', 'setup'],
+  Operations: [
+    'status',
+    'sync',
+    'upgrade',
+    'destroy',
+    'cleanup',
+    'redeploy',
+    'monitor',
+    'trigger',
+    'diff',
+  ],
+  Auth: ['login'],
+  Agent: ['chat', 'session'],
+  Admin: ['tenant', 'skill'],
+  Diagnostic: ['doctor', 'completion'],
 };
 
 const program = new Command();
@@ -72,14 +84,14 @@ program.configureHelp({
 
     // Compute column width so all terms align to the same indent.
     // All term strings are ASCII-only, so .length gives the correct visual width.
-    const termWidth = Math.max(
-      ...cmds.map(c => helper.subcommandTerm(c).length),
-      ...opts.map(o => helper.optionTerm(o).length),
-      0,
-    ) + 4;
+    const termWidth =
+      Math.max(
+        ...cmds.map((c) => helper.subcommandTerm(c).length),
+        ...opts.map((o) => helper.optionTerm(o).length),
+        0
+      ) + 4;
 
-    const fmt = (term: string, desc: string): string =>
-      `  ${term.padEnd(termWidth)}${desc}`;
+    const fmt = (term: string, desc: string): string => `  ${term.padEnd(termWidth)}${desc}`;
 
     const lines: string[] = [];
 
@@ -90,31 +102,31 @@ program.configureHelp({
 
     if (opts.length > 0) {
       lines.push('Options:');
-      opts.forEach(o => lines.push(fmt(helper.optionTerm(o), helper.optionDescription(o))));
+      opts.forEach((o) => lines.push(fmt(helper.optionTerm(o), helper.optionDescription(o))));
       lines.push('');
     }
 
     // Render each group, skipping groups whose commands are not registered.
-    const cmdMap = new Map(cmds.map(c => [c.name(), c]));
+    const cmdMap = new Map(cmds.map((c) => [c.name(), c]));
     const grouped = new Set<string>();
 
     for (const [groupName, names] of Object.entries(COMMAND_GROUPS)) {
-      const groupCmds = names.map(n => cmdMap.get(n)).filter((c): c is Command => !!c);
+      const groupCmds = names.map((n) => cmdMap.get(n)).filter((c): c is Command => !!c);
       if (groupCmds.length === 0) continue;
-      groupCmds.forEach(c => grouped.add(c.name()));
+      groupCmds.forEach((c) => grouped.add(c.name()));
       lines.push(`${groupName}:`);
-      groupCmds.forEach(c =>
-        lines.push(fmt(helper.subcommandTerm(c), helper.commandDescription(c))),
+      groupCmds.forEach((c) =>
+        lines.push(fmt(helper.subcommandTerm(c), helper.commandDescription(c)))
       );
       lines.push('');
     }
 
     // Any commands not in COMMAND_GROUPS fall through to an "Other" section.
-    const ungrouped = cmds.filter(c => !grouped.has(c.name()));
+    const ungrouped = cmds.filter((c) => !grouped.has(c.name()));
     if (ungrouped.length > 0) {
       lines.push('Other:');
-      ungrouped.forEach(c =>
-        lines.push(fmt(helper.subcommandTerm(c), helper.commandDescription(c))),
+      ungrouped.forEach((c) =>
+        lines.push(fmt(helper.subcommandTerm(c), helper.commandDescription(c)))
       );
       lines.push('');
     }
@@ -143,7 +155,7 @@ registerDestroyCommands(program);
 registerConnectCommand(program);
 // Hide deprecated 'connect' alias from help output; 'endpoints' is the canonical command.
 // Commander v11 uses ._hidden (checked by Help.visibleCommands); there is no public API.
-const connectCmd = program.commands.find(c => c.name() === 'connect');
+const connectCmd = program.commands.find((c) => c.name() === 'connect');
 if (connectCmd) (connectCmd as unknown as { _hidden: boolean })._hidden = true;
 registerStatusCommand(program);
 registerSyncCommand(program);
@@ -155,6 +167,8 @@ registerChatCommand(program);
 registerDoctorCommand(program);
 registerMonitorCommand(program);
 registerCompletionCommand(program);
+program.addCommand(diffCommand);
+program.addCommand(triggerCommand);
 
 // exitOverride() converts Commander's process.exit() into thrown CommanderError.
 // Exit code semantics: 0 = success (help/version), 2 = usage error, 1 = runtime.

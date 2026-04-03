@@ -4,7 +4,15 @@
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { createAgent, createDefaultSystemPrompt, StreamEvent, createBedrockModel, ToolRegistry, ToolLoader, AWSClientFactory } from '@chimera/core';
+import {
+  createAgent,
+  createDefaultSystemPrompt,
+  StreamEvent,
+  createBedrockModel,
+  ToolRegistry,
+  ToolLoader,
+  AWSClientFactory,
+} from '@chimera/core';
 import type { StrandsTool } from '@chimera/core';
 import type { TenantTier } from '@chimera/shared';
 import {
@@ -17,13 +25,22 @@ import {
 import { StrandsStreamEvent } from '@chimera/sse-bridge';
 import type { VercelDSPStreamPart } from '@chimera/sse-bridge';
 import { StreamTee } from '@chimera/sse-bridge';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { ChatRequest, ChatResponse, ErrorResponse, TenantContext } from '../types';
 import { getAdapter } from '../adapters';
 import { getConfig } from '../config';
 import { streamManager } from '../stream-manager';
+import { createPersistenceListener } from '../persistence-listener';
+import { attachDestinations } from '../multi-destination';
 
 const router = new Hono();
 const config = getConfig();
+
+// DynamoDB client for message history queries
+const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const SESSIONS_TABLE =
+  process.env.SESSIONS_TABLE_NAME || process.env.CHIMERA_SESSIONS_TABLE || 'chimera-sessions-dev';
 
 // ---------------------------------------------------------------------------
 // GatewayToolDiscovery — lazy singleton ToolLoader keyed on tenant tier
@@ -38,7 +55,8 @@ let _toolLoaderPromise: Promise<ToolLoader | null> | null = null;
 async function _initToolLoader(): Promise<ToolLoader | null> {
   const region = config.bedrock.region;
   const accountId = process.env.AWS_ACCOUNT_ID;
-  const rolePattern = process.env.CHIMERA_TENANT_ROLE_PATTERN || 'chimera-tenant-{tenantId}-agent-role';
+  const rolePattern =
+    process.env.CHIMERA_TENANT_ROLE_PATTERN || 'chimera-tenant-{tenantId}-agent-role';
 
   if (!accountId) {
     console.warn('[GatewayToolDiscovery] AWS_ACCOUNT_ID not set — tools disabled');
@@ -49,15 +67,12 @@ async function _initToolLoader(): Promise<ToolLoader | null> {
     // Dynamic imports of AWS SDK clients (available via monorepo root devDependencies).
     // Using dynamic imports so a missing package produces a runtime warning rather than
     // a module-load failure that would crash the entire server.
-    const [
-      { CostExplorerClient },
-      { ResourceGroupsTaggingAPIClient },
-      { ConfigServiceClient },
-    ] = await Promise.all([
-      import('@aws-sdk/client-cost-explorer'),
-      import('@aws-sdk/client-resource-groups-tagging-api'),
-      import('@aws-sdk/client-config-service'),
-    ]);
+    const [{ CostExplorerClient }, { ResourceGroupsTaggingAPIClient }, { ConfigServiceClient }] =
+      await Promise.all([
+        import('@aws-sdk/client-cost-explorer'),
+        import('@aws-sdk/client-resource-groups-tagging-api'),
+        import('@aws-sdk/client-config-service'),
+      ]);
 
     const clientFactory = new AWSClientFactory({
       defaultRegion: region,
@@ -223,9 +238,7 @@ async function* mapAgentStreamToStrands(
  * no await occurs between addListener() and the buffer replay loop —
  * the background consumer cannot advance during that synchronous window.
  */
-function createTeeSSEStream(
-  tee: StreamTee<VercelDSPStreamPart>
-): ReadableStream<Uint8Array> {
+function createTeeSSEStream(tee: StreamTee<VercelDSPStreamPart>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -298,10 +311,7 @@ function createTeeSSEStream(
       }
 
       // Start keepalive pings to prevent idle-connection timeouts
-      keepaliveTimer = setInterval(
-        () => enqueue(formatSSEKeepalive()),
-        KEEPALIVE_INTERVAL_MS
-      );
+      keepaliveTimer = setInterval(() => enqueue(formatSSEKeepalive()), KEEPALIVE_INTERVAL_MS);
     },
 
     cancel() {
@@ -410,12 +420,14 @@ router.post('/stream', async (c: Context) => {
       sessionId: (body as ChatRequest).sessionId,
       tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
       loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
-      model: config.bedrock.enabled ? createBedrockModel({
-        modelId: config.bedrock.modelId,
-        region: config.bedrock.region,
-        maxTokens: config.bedrock.maxTokens,
-        temperature: config.bedrock.temperature,
-      }) : undefined,
+      model: config.bedrock.enabled
+        ? createBedrockModel({
+            modelId: config.bedrock.modelId,
+            region: config.bedrock.region,
+            maxTokens: config.bedrock.maxTokens,
+            temperature: config.bedrock.temperature,
+          })
+        : undefined,
     });
 
     // Build DSP part stream from agent
@@ -427,6 +439,30 @@ router.post('/stream', async (c: Context) => {
     // Register with StreamManager — starts consuming in background.
     // The tee continues buffering even after the HTTP connection closes.
     const tee = streamManager.create(messageId, tenantContext.tenantId, dspStream);
+
+    // Attach DynamoDB persistence listener — writes messages as the stream progresses.
+    // The persistence listener accumulates text in-memory and writes the final message
+    // on completion. Agent generation continues even if the HTTP client disconnects.
+    const sessionId = (body as ChatRequest).sessionId || `session_${Date.now()}`;
+    const persistenceListener = createPersistenceListener({
+      messageId,
+      sessionId,
+      tenantId: tenantContext.tenantId,
+      userId: tenantContext.userId || 'unknown',
+      userContent: lastMessage.content,
+    });
+
+    // Wire persistence (and future destinations) via multi-destination broadcaster.
+    // StreamTee.onComplete/onError fire synchronous callbacks; the persistence
+    // listener's async onComplete/onError are wrapped to avoid blocking.
+    attachDestinations(tee.addListener.bind(tee), tee.onComplete.bind(tee), tee.onError.bind(tee), [
+      {
+        name: 'dynamodb-persistence',
+        onPart: persistenceListener.onPart,
+        onComplete: persistenceListener.onComplete,
+        onError: persistenceListener.onError,
+      },
+    ]);
 
     // Return SSE response: replays any immediately-buffered parts + follows live tail
     const responseBody = createTeeSSEStream(tee);
@@ -499,6 +535,105 @@ router.get('/stream/:messageId', async (c: Context) => {
         'X-Message-Id': messageId,
       },
     });
+  } catch (error) {
+    const errorResponse: ErrorResponse = {
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        details: error,
+      },
+      timestamp: new Date().toISOString(),
+    };
+    return c.json(errorResponse, 500);
+  }
+});
+
+/**
+ * GET /chat/sessions/:sessionId/messages
+ *
+ * Load persisted messages for a session from DynamoDB.
+ * Returns messages sorted chronologically (by SK).
+ *
+ * Tenant isolation: the PK includes the tenantId from the JWT, so a tenant
+ * can only query their own sessions. No cross-tenant access is possible.
+ *
+ * Query params:
+ *   ?limit=50  — max messages to return (default 50, max 200)
+ *   ?cursor=   — SK value to start after (for pagination)
+ */
+router.get('/sessions/:sessionId/messages', async (c: Context) => {
+  try {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'MISSING_TENANT_CONTEXT',
+          message: 'Tenant context not found. Ensure tenant middleware is active.',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 500);
+    }
+
+    const sessionId = c.req.param('sessionId') ?? '';
+    if (!sessionId) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'MISSING_SESSION_ID',
+          message: 'sessionId parameter is required',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 400);
+    }
+
+    const limitParam = parseInt(c.req.query('limit') || '50', 10);
+    const limit = Math.min(Math.max(1, limitParam), 200);
+    const cursor = c.req.query('cursor');
+
+    const pk = `TENANT#${tenantContext.tenantId}#SESSION#${sessionId}`;
+
+    const queryInput: any = {
+      TableName: SESSIONS_TABLE,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: {
+        ':pk': pk,
+        ':prefix': 'MSG#',
+      },
+      Limit: limit,
+      ScanIndexForward: true, // chronological order
+    };
+
+    if (cursor) {
+      queryInput.ExclusiveStartKey = { PK: pk, SK: cursor };
+    }
+
+    const result = await ddbClient.send(new QueryCommand(queryInput));
+
+    const messages = (result.Items || []).map((item: any) => ({
+      messageId: item.messageId,
+      role: item.role,
+      content: item.content,
+      status: item.status,
+      finishReason: item.finishReason,
+      toolCalls: item.toolCalls,
+      errorMessage: item.errorMessage,
+      createdAt: item.createdAt,
+      completedAt: item.completedAt,
+    }));
+
+    const response: any = {
+      sessionId,
+      messages,
+      count: messages.length,
+    };
+
+    // Include pagination cursor if there are more results
+    if (result.LastEvaluatedKey) {
+      response.nextCursor = result.LastEvaluatedKey.SK;
+    }
+
+    return c.json(response, 200);
   } catch (error) {
     const errorResponse: ErrorResponse = {
       error: {
@@ -604,12 +739,14 @@ router.post('/message', async (c: Context) => {
       sessionId: (body as ChatRequest).sessionId,
       tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
       loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
-      model: config.bedrock.enabled ? createBedrockModel({
-        modelId: config.bedrock.modelId,
-        region: config.bedrock.region,
-        maxTokens: config.bedrock.maxTokens,
-        temperature: config.bedrock.temperature,
-      }) : undefined,
+      model: config.bedrock.enabled
+        ? createBedrockModel({
+            modelId: config.bedrock.modelId,
+            region: config.bedrock.region,
+            maxTokens: config.bedrock.maxTokens,
+            temperature: config.bedrock.temperature,
+          })
+        : undefined,
     });
 
     // Invoke agent (non-streaming)

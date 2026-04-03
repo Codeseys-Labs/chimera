@@ -1,5 +1,5 @@
 ---
-title: "Chimera CLI Lifecycle"
+title: 'Chimera CLI Lifecycle'
 version: 1.0.0
 status: canonical
 last_updated: 2026-03-30
@@ -14,24 +14,26 @@ Detailed breakdown of the `chimera` CLI — its command registry, internal lifec
 
 ## Command Registry
 
-The CLI is implemented with [Commander.js](https://github.com/tj/commander.js) and registers 14 commands at startup. Each command lives in `packages/cli/src/commands/<name>.ts`.
+The CLI is implemented with [Commander.js](https://github.com/tj/commander.js) and registers 16 commands at startup. Each command lives in `packages/cli/src/commands/<name>.ts`.
 
-| Command | Description | Key Interactions |
-|---------|-------------|-----------------|
-| `init` | Scaffold `chimera.toml` with AWS config and admin email | Writes `~/.chimera/chimera.toml` |
-| `deploy` | Push source to CodeCommit + deploy Pipeline CDK stack | CodeCommit · CodePipeline · `npx cdk` |
-| `setup` | Provision admin Cognito user post-deploy | Cognito AdminCreateUser |
-| `connect` | Fetch stack outputs → endpoints in `chimera.toml` | CloudFormation DescribeStacks |
-| `login` | Authenticate via Cognito, persist tokens | Cognito InitiateAuth → `~/.chimera/credentials` |
-| `chat` | Interactive chat session (ink TUI or readline) | POST `/chat/stream` → SSE |
-| `doctor` | Health check all platform components | AWS STS · Cognito · ALB · CFN |
-| `tenant` | Manage tenant records (list, create, update) | DynamoDB `chimera-tenants` |
-| `session` | View and manage agent sessions | DynamoDB `chimera-sessions` |
-| `skill` | Install, list, remove skills | SkillPipeline Step Functions |
-| `status` | Show deployment status from `chimera.toml` | CloudFormation stack statuses |
-| `sync` | Sync local workspace config with deployed state | CloudFormation stack outputs |
-| `upgrade` | Download and install a new CLI binary | GitHub Releases |
-| `destroy` | Tear down all CDK stacks for an environment | `npx cdk destroy --all` |
+| Command   | Description                                             | Key Interactions                                |
+| --------- | ------------------------------------------------------- | ----------------------------------------------- |
+| `init`    | Scaffold `chimera.toml` with AWS config and admin email | Writes `~/.chimera/chimera.toml`                |
+| `deploy`  | Push source to CodeCommit + deploy Pipeline CDK stack   | CodeCommit · CodePipeline · `npx cdk`           |
+| `setup`   | Provision admin Cognito user post-deploy                | Cognito AdminCreateUser                         |
+| `connect` | Fetch stack outputs → endpoints in `chimera.toml`       | CloudFormation DescribeStacks                   |
+| `login`   | Authenticate via Cognito, persist tokens                | Cognito InitiateAuth → `~/.chimera/credentials` |
+| `chat`    | Interactive chat session (ink TUI or readline)          | POST `/chat/stream` → SSE                       |
+| `doctor`  | Health check all platform components                    | AWS STS · Cognito · ALB · CFN                   |
+| `tenant`  | Manage tenant records (list, create, update)            | DynamoDB `chimera-tenants`                      |
+| `session` | View and manage agent sessions                          | DynamoDB `chimera-sessions`                     |
+| `skill`   | Install, list, remove skills                            | SkillPipeline Step Functions                    |
+| `status`  | Show deployment status from `chimera.toml`              | CloudFormation stack statuses                   |
+| `sync`    | Sync local workspace config with deployed state         | CloudFormation stack outputs                    |
+| `upgrade` | Download and install a new CLI binary                   | GitHub Releases                                 |
+| `diff`    | Show differences between local workspace and CodeCommit | CodeCommit GetFile · GetFolder                  |
+| `trigger` | Manually trigger the CodePipeline                       | CodePipeline StartPipelineExecution             |
+| `destroy` | Tear down all CDK stacks for an environment             | `npx cdk destroy --all`                         |
 
 ---
 
@@ -56,6 +58,7 @@ flowchart TD
 ```
 
 Config resolution order for `chimera.toml`:
+
 1. `--config <path>` flag (if supported by command)
 2. Current directory (`./chimera.toml`)
 3. `~/.chimera/chimera.toml` (global config)
@@ -181,25 +184,31 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    D1["checkAwsCredentials<br/>AWS_PROFILE · AWS_DEFAULT_PROFILE<br/>AWS_ACCESS_KEY_ID"]
+    D1["checkAwsCredentials<br/>STS GetCallerIdentity<br/>credential validation"]
     D2["checkChimeraAuth<br/>loadCredentials TOML<br/>check token expiry"]
     D3["checkStackStatus<br/>Chimera-dev-{Stack}<br/>CloudFormation describe"]
     D4["checkApiConnectivity<br/>chat_url ECS ALB /health<br/>not api_url API GW"]
     D5["checkCognitoConfig<br/>cognito_client_id present"]
+    D6["checkCdkBootstrap<br/>CDKToolkit stack<br/>CloudFormation describe"]
+    D7["checkToolchain<br/>node version<br/>cdk version"]
+    D8["checkCodeCommitRepo<br/>repository exists<br/>CodeCommit GetRepository"]
 
-    D1 --> D2 --> D3 --> D4 --> D5
+    D1 --> D2 --> D3 --> D4 --> D5 --> D6 --> D7 --> D8
 ```
 
-**Key convention:** `checkApiConnectivity` must use `chat_url` (ECS ALB endpoint), not `api_url` (API Gateway). The ALB exposes `/health`; API Gateway does not.
+**Key conventions:**
+
+- `checkAwsCredentials` performs STS `GetCallerIdentity` validation (not just presence check of env vars).
+- `checkApiConnectivity` must use `chat_url` (ECS ALB endpoint), not `api_url` (API Gateway). The ALB exposes `/health`; API Gateway does not.
 
 ---
 
 ## Configuration Files
 
-| File | Format | Purpose |
-|------|--------|---------|
-| `./chimera.toml` (or `~/.chimera/chimera.toml`) | TOML | Workspace config: AWS region, environment, endpoints, deployment state |
-| `~/.chimera/credentials` | TOML | Auth tokens: `access_token`, `id_token`, `refresh_token`, `expires_at` |
+| File                                            | Format | Purpose                                                                |
+| ----------------------------------------------- | ------ | ---------------------------------------------------------------------- |
+| `./chimera.toml` (or `~/.chimera/chimera.toml`) | TOML   | Workspace config: AWS region, environment, endpoints, deployment state |
+| `~/.chimera/credentials`                        | TOML   | Auth tokens: `access_token`, `id_token`, `refresh_token`, `expires_at` |
 
 `chimera.toml` sections:
 
@@ -232,15 +241,17 @@ last_deployed = "2026-03-30T00:00:00.000Z"
 
 ```
 packages/cli/src/
-├── cli.ts                  # Commander.js setup, 14 command registrations
+├── cli.ts                  # Commander.js setup, 16 command registrations
 ├── commands/
 │   ├── chat.ts             # ink TUI + readline REPL, SSE parsing
 │   ├── deploy.ts           # CodeCommit push, npx cdk deploy Pipeline
-│   ├── doctor.ts           # 5 health checks, TOML credentials parsing
+│   ├── diff.ts             # CodeCommit GetFile/GetFolder, local vs remote diff
+│   ├── doctor.ts           # 8 health checks, STS validation, TOML credentials parsing
 │   ├── init.ts             # chimera.toml scaffold
 │   ├── login.ts            # Cognito challenge loop, credentials persistence
 │   ├── setup.ts            # Cognito AdminCreateUser
 │   ├── connect.ts          # CloudFormation stack outputs → chimera.toml
+│   ├── trigger.ts          # CodePipeline StartPipelineExecution
 │   └── ...                 # tenant, session, skill, status, sync, upgrade, destroy
 ├── auth/
 │   └── browser-server.ts   # Bun.serve localhost:9999, PKCE OAuth callback
@@ -259,4 +270,4 @@ packages/cli/src/
 
 ---
 
-*Author: builder-arch-docs | Task: chimera-17ef | Status: Canonical*
+_Author: builder-arch-docs | Task: chimera-17ef | Status: Canonical_

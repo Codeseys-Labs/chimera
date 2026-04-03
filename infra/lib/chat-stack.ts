@@ -98,7 +98,8 @@ export class ChatStack extends cdk.Stack {
     // ======================================================================
     const taskRole = new iam.Role(this, 'ChatTaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
-      description: 'IAM role for chat gateway ECS tasks to access DynamoDB, Bedrock, and Secrets Manager',
+      description:
+        'IAM role for chat gateway ECS tasks - DynamoDB, Bedrock, Secrets Manager, CodeCommit, CodePipeline, CloudFormation, Cloud Map, SSM, Verified Permissions',
     });
 
     // Grant DynamoDB access
@@ -112,16 +113,13 @@ export class ChatStack extends cdk.Stack {
     taskRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions: [
-          'bedrock:InvokeModel',
-          'bedrock:InvokeModelWithResponseStream',
-        ],
+        actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
         resources: [
           `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
           `arn:aws:bedrock:*::inference-profile/*`,
           `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
         ],
-      }),
+      })
     );
 
     // Grant Bedrock Agent Runtime — scoped to agents and knowledge bases
@@ -129,15 +127,12 @@ export class ChatStack extends cdk.Stack {
     taskRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions: [
-          'bedrock-agent-runtime:InvokeAgent',
-          'bedrock-agent-runtime:Retrieve',
-        ],
+        actions: ['bedrock-agent-runtime:InvokeAgent', 'bedrock-agent-runtime:Retrieve'],
         resources: [
           `arn:aws:bedrock:${this.region}:${this.account}:agent/*`,
           `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`,
         ],
-      }),
+      })
     );
 
     // Grant Secrets Manager access (for platform credentials: Slack tokens, etc.)
@@ -145,8 +140,102 @@ export class ChatStack extends cdk.Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ['secretsmanager:GetSecretValue'],
-        resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:chimera/${props.envName}/*`],
-      }),
+        resources: [
+          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:chimera/${props.envName}/*`,
+        ],
+      })
+    );
+
+    // Grant CodeCommit access for self-evolution (agent commits CDK code)
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'codecommit:CreateCommit',
+          'codecommit:GetBranch',
+          'codecommit:GetRepository',
+          'codecommit:GetFile',
+          'codecommit:GetFolder',
+          'codecommit:ListRepositories',
+        ],
+        resources: [`arn:aws:codecommit:${this.region}:${this.account}:chimera*`],
+      })
+    );
+
+    // Grant CodePipeline access for self-evolution monitoring
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'codepipeline:GetPipelineState',
+          'codepipeline:GetPipelineExecution',
+          'codepipeline:ListPipelineExecutions',
+          'codepipeline:StartPipelineExecution',
+        ],
+        resources: [`arn:aws:codepipeline:${this.region}:${this.account}:Chimera-*`],
+      })
+    );
+
+    // Grant CloudFormation read access for deployment verification
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['cloudformation:DescribeStacks', 'cloudformation:ListStacks'],
+        resources: [`arn:aws:cloudformation:${this.region}:${this.account}:stack/Chimera-*/*`],
+      })
+    );
+
+    // Grant Cloud Map discovery for runtime infrastructure lookup
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['servicediscovery:DiscoverInstances', 'servicediscovery:GetNamespace'],
+        resources: ['*'], // Cloud Map discovery requires wildcard
+      })
+    );
+
+    // Grant SSM Parameter Store read for evolution kill switch
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['ssm:GetParameter'],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/chimera/*`],
+      })
+    );
+
+    // Grant Verified Permissions for Cedar policy evaluation
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['verifiedpermissions:IsAuthorized'],
+        resources: [`arn:aws:verifiedpermissions:${this.region}:${this.account}:policy-store/*`],
+      })
+    );
+
+    // Grant AgentCore Code Interpreter access for sandbox execution
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock-agentcore:CreateCodeInterpreterSession',
+          'bedrock-agentcore:InvokeCodeInterpreter',
+          'bedrock-agentcore:DeleteCodeInterpreterSession',
+        ],
+        resources: ['*'], // Code Interpreter sessions are account-scoped, no resource ARN pattern
+      })
+    );
+
+    // Grant AgentCore Browser access for web content extraction
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock-agentcore:CreateBrowserSession',
+          'bedrock-agentcore:InvokeBrowser',
+          'bedrock-agentcore:DeleteBrowserSession',
+        ],
+        resources: ['*'],
+      })
     );
 
     // ======================================================================
@@ -188,12 +277,15 @@ export class ChatStack extends cdk.Stack {
         AWS_ACCOUNT_ID: this.account,
         TENANTS_TABLE_NAME: props.tenantsTable.tableName,
         SESSIONS_TABLE_NAME: props.sessionsTable.tableName,
+        CHIMERA_SESSIONS_TABLE: props.sessionsTable.tableName,
         SKILLS_TABLE_NAME: props.skillsTable.tableName,
         BEDROCK_MODEL_ID: props.bedrockModelId || 'us.anthropic.claude-sonnet-4-6',
         PORT: '8080',
         LOG_LEVEL: isProd ? 'info' : 'debug',
         COGNITO_USER_POOL_ID: props.cognitoUserPoolId ?? '',
         COGNITO_CLIENT_ID: props.cognitoUserPoolClientId ?? '',
+        CODE_INTERPRETER_NETWORK_MODE: 'PUBLIC',
+        CODE_INTERPRETER_SESSION_TTL: '3600',
       },
       healthCheck: {
         command: ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1'],
@@ -236,7 +328,7 @@ export class ChatStack extends cdk.Stack {
         principals: [new iam.ServicePrincipal('elasticloadbalancing.amazonaws.com')],
         actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
         resources: [albLogGroup.logGroupArn],
-      }),
+      })
     );
 
     // ======================================================================
@@ -494,6 +586,5 @@ export class ChatStack extends cdk.Stack {
       exportName: `${this.stackName}-CloudFrontUrl`,
       description: 'CloudFront HTTPS endpoint URL',
     });
-
   }
 }
