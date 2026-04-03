@@ -34,6 +34,7 @@ app.route('/', healthRouter);
 app.route('/auth', authRouter);
 
 // Tenant provisioning API (administrative, requires authentication)
+app.use('/tenants/*', authenticateJWT);
 app.use('/tenants/*', extractTenantContext);
 app.route('/tenants', tenantRouter);
 
