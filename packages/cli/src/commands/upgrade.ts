@@ -19,7 +19,7 @@ import { findProjectRoot } from '../utils/project.js';
  */
 export async function git(cwd: string, args: string[], ignoreError = false): Promise<string> {
   try {
-    return await Bun.$`git ${args}`.cwd(cwd).quiet().text();
+    return await Bun.$`git -C ${cwd} ${args}`.quiet().text();
   } catch (err: any) {
     if (ignoreError) return '';
     throw new Error(err.stderr?.toString() || err.message || `git ${args[0]} failed`);
@@ -68,13 +68,13 @@ async function upgradeFromGitHub(
   region: string,
   repoName: string,
   githubUrl: string,
-  dryRun = false,
+  dryRun = false
 ): Promise<void> {
   if (await hasUncommittedChanges(repoRoot)) {
     throw new Error(
       'You have uncommitted changes. Please commit or stash them before upgrading:\n' +
         '  git add .\n' +
-        '  git commit -m "your message"',
+        '  git commit -m "your message"'
     );
   }
 
@@ -119,8 +119,8 @@ async function upgradeFromGitHub(
     }
     console.log(
       color.dim(
-        `  Applied ${changedCount} changed file(s) (skipped ${totalCount - changedCount} unchanged)`,
-      ),
+        `  Applied ${changedCount} changed file(s) (skipped ${totalCount - changedCount} unchanged)`
+      )
     );
 
     await git(repoRoot, ['add', '-A']);
@@ -177,13 +177,13 @@ async function upgradeFromGitHub(
         repoName,
         repoRoot,
         'main',
-        'Upgrade: merge upstream GitHub changes',
+        'Upgrade: merge upstream GitHub changes'
       );
       console.log(color.dim('  Push successful'));
     } catch (pushError: any) {
       console.error(color.yellow('\n  Push to CodeCommit failed — rolling back local changes'));
       throw new Error(
-        `CodeCommit push failed (local state will be restored): ${pushError.message}`,
+        `CodeCommit push failed (local state will be restored): ${pushError.message}`
       );
     }
   } finally {
@@ -197,17 +197,23 @@ export function registerUpgradeCommand(program: Command): void {
   program
     .command('upgrade')
     .description('Apply upstream GitHub changes to CodeCommit while preserving agent edits')
-    .option('--github-url <url>', 'GitHub repository URL (defaults to package.json repository field)')
+    .option(
+      '--github-url <url>',
+      'GitHub repository URL (defaults to package.json repository field)'
+    )
     .option('--dry-run', 'Show what changes would be applied without merging')
     .option('--region <region>', 'AWS region override (default: read from chimera.toml)')
     .option('--json', 'Output result as JSON')
-    .addHelpText('after', `
+    .addHelpText(
+      'after',
+      `
 Examples:
   $ chimera upgrade                              # upgrade from GitHub upstream
   $ chimera upgrade --dry-run                    # preview changes without applying
   $ chimera upgrade --github-url <url>           # explicit GitHub URL
   $ chimera upgrade --region us-west-2           # use specific region
-  $ chimera upgrade --json                       # machine-readable output`)
+  $ chimera upgrade --json                       # machine-readable output`
+    )
     .action(async (options) => {
       const spinner = ora('Starting upgrade operation').start();
       if (options.json) spinner.stop();
@@ -223,7 +229,7 @@ Examples:
                 status: 'error',
                 error: 'No workspace configuration found',
                 code: 'NO_CONFIG',
-              }),
+              })
             );
             process.exit(1);
           }
@@ -234,7 +240,8 @@ Examples:
         if (wsConfig?.aws?.profile) {
           process.env.AWS_PROFILE = wsConfig.aws.profile;
         }
-        if (!options.json) spinner.succeed(color.green('Workspace: ' + repositoryName + ' in ' + region));
+        if (!options.json)
+          spinner.succeed(color.green('Workspace: ' + repositoryName + ' in ' + region));
 
         if (!options.json) spinner.start('Locating project root...');
         const repoRoot = findProjectRoot();
@@ -261,7 +268,7 @@ Examples:
             JSON.stringify({
               status: 'ok',
               data: { githubUrl, repository: repositoryName, dryRun: options.dryRun ?? false },
-            }),
+            })
           );
         } else if (!options.dryRun) {
           console.log(color.green('\n✓ CodeCommit upgraded with latest upstream changes'));
@@ -275,7 +282,7 @@ Examples:
       } catch (error: any) {
         if (options.json) {
           console.log(
-            JSON.stringify({ status: 'error', error: error.message, code: 'UPGRADE_FAILED' }),
+            JSON.stringify({ status: 'error', error: error.message, code: 'UPGRADE_FAILED' })
           );
           process.exit(1);
         }

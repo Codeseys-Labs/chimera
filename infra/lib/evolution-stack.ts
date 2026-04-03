@@ -15,6 +15,7 @@ import { ChimeraLambda } from '../constructs/chimera-lambda';
 export interface EvolutionStackProps extends cdk.StackProps {
   envName: string;
   auditTable: dynamodb.ITable;
+  eventBus: events.IEventBus;
 }
 
 /**
@@ -86,10 +87,12 @@ export class EvolutionStack extends cdk.Stack {
     evolutionArtifactsChimera.bucket.addLifecycleRule({
       id: 'archive-golden-datasets',
       prefix: 'golden-datasets/',
-      transitions: [{
-        storageClass: s3.StorageClass.GLACIER,
-        transitionAfter: cdk.Duration.days(180),
-      }],
+      transitions: [
+        {
+          storageClass: s3.StorageClass.GLACIER,
+          transitionAfter: cdk.Duration.days(180),
+        },
+      ],
     });
     evolutionArtifactsChimera.bucket.addLifecycleRule({
       id: 'expire-noncurrent-versions',
@@ -103,11 +106,14 @@ export class EvolutionStack extends cdk.Stack {
     // X-Ray tracing, log retention, DLQ, and default env vars.
     // ======================================================================
 
-    const analyzeConversationLogsChimera = new ChimeraLambda(this, 'AnalyzeConversationLogsFunction', {
-      functionName: `chimera-evolution-analyze-logs-${props.envName}`,
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(`
+    const analyzeConversationLogsChimera = new ChimeraLambda(
+      this,
+      'AnalyzeConversationLogsFunction',
+      {
+        functionName: `chimera-evolution-analyze-logs-${props.envName}`,
+        runtime: lambda.Runtime.PYTHON_3_12,
+        handler: 'index.handler',
+        code: lambda.Code.fromInline(`
 import boto3
 import os
 from datetime import datetime, timedelta
@@ -177,13 +183,14 @@ def handler(event, context):
         'analysis_key': analysis_key
     }
 `),
-      timeout: cdk.Duration.minutes(5),
-      memorySize: 1024,
-      environment: {
-        EVOLUTION_TABLE: this.evolutionStateTable.tableName,
-        ARTIFACTS_BUCKET: this.evolutionArtifactsBucket.bucketName,
-      },
-    });
+        timeout: cdk.Duration.minutes(5),
+        memorySize: 1024,
+        environment: {
+          EVOLUTION_TABLE: this.evolutionStateTable.tableName,
+          ARTIFACTS_BUCKET: this.evolutionArtifactsBucket.bucketName,
+        },
+      }
+    );
 
     const generatePromptVariantChimera = new ChimeraLambda(this, 'GeneratePromptVariantFunction', {
       functionName: `chimera-evolution-generate-prompt-${props.envName}`,
@@ -1000,19 +1007,30 @@ def handler(event, context):
         stepfunctions.Condition.numberGreaterThan('$.avg_quality_score', 0.8),
         new stepfunctions.Succeed(this, 'PromptEvolutionSuccess')
       )
-      .otherwise(new stepfunctions.Fail(this, 'PromptEvolutionFailed', {
-        error: 'VariantDidNotImprove',
-        cause: 'New prompt variant did not exceed quality threshold',
-      }));
+      .otherwise(
+        new stepfunctions.Fail(this, 'PromptEvolutionFailed', {
+          error: 'VariantDidNotImprove',
+          cause: 'New prompt variant did not exceed quality threshold',
+        })
+      );
 
     const promptEvolutionError = new stepfunctions.Fail(this, 'PromptEvolutionError', {
       error: 'PromptEvolutionFailed',
       cause: 'Lambda invocation failed after retries',
     });
 
-    analyzeLogsTask.addCatch(promptEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
-    generateVariantTask.addCatch(promptEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
-    testVariantTask.addCatch(promptEvolutionError, { errors: ['States.ALL'], resultPath: '$.error' });
+    analyzeLogsTask.addCatch(promptEvolutionError, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
+    generateVariantTask.addCatch(promptEvolutionError, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
+    testVariantTask.addCatch(promptEvolutionError, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
 
     const promptEvolutionDefinition = analyzeLogsTask
       .next(generateVariantTask)
@@ -1025,17 +1043,21 @@ def handler(event, context):
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    this.promptEvolutionStateMachine = new stepfunctions.StateMachine(this, 'PromptEvolutionPipeline', {
-      stateMachineName: `chimera-prompt-evolution-${props.envName}`,
-      definition: promptEvolutionDefinition,
-      stateMachineType: stepfunctions.StateMachineType.STANDARD,
-      logs: {
-        destination: promptEvolutionLogGroup,
-        level: stepfunctions.LogLevel.ALL,
-        includeExecutionData: true,
-      },
-      tracingEnabled: true,
-    });
+    this.promptEvolutionStateMachine = new stepfunctions.StateMachine(
+      this,
+      'PromptEvolutionPipeline',
+      {
+        stateMachineName: `chimera-prompt-evolution-${props.envName}`,
+        definition: promptEvolutionDefinition,
+        stateMachineType: stepfunctions.StateMachineType.STANDARD,
+        logs: {
+          destination: promptEvolutionLogGroup,
+          level: stepfunctions.LogLevel.ALL,
+          includeExecutionData: true,
+        },
+        tracingEnabled: true,
+      }
+    );
 
     // ======================================================================
     // Step Functions: Skill Auto-Generation Pipeline
@@ -1075,8 +1097,14 @@ def handler(event, context):
       cause: 'Lambda invocation failed after retries',
     });
 
-    detectPatternsTask.addCatch(skillGenerationError, { errors: ['States.ALL'], resultPath: '$.error' });
-    generateSkillTask.addCatch(skillGenerationError, { errors: ['States.ALL'], resultPath: '$.error' });
+    detectPatternsTask.addCatch(skillGenerationError, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
+    generateSkillTask.addCatch(skillGenerationError, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
 
     const skillGenerationDefinition = detectPatternsTask.next(patternsFound);
 
@@ -1086,17 +1114,21 @@ def handler(event, context):
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    this.skillGenerationStateMachine = new stepfunctions.StateMachine(this, 'SkillGenerationPipeline', {
-      stateMachineName: `chimera-skill-generation-${props.envName}`,
-      definition: skillGenerationDefinition,
-      stateMachineType: stepfunctions.StateMachineType.STANDARD,
-      logs: {
-        destination: skillGenerationLogGroup,
-        level: stepfunctions.LogLevel.ALL,
-        includeExecutionData: true,
-      },
-      tracingEnabled: true,
-    });
+    this.skillGenerationStateMachine = new stepfunctions.StateMachine(
+      this,
+      'SkillGenerationPipeline',
+      {
+        stateMachineName: `chimera-skill-generation-${props.envName}`,
+        definition: skillGenerationDefinition,
+        stateMachineType: stepfunctions.StateMachineType.STANDARD,
+        logs: {
+          destination: skillGenerationLogGroup,
+          level: stepfunctions.LogLevel.ALL,
+          includeExecutionData: true,
+        },
+        tracingEnabled: true,
+      }
+    );
 
     // ======================================================================
     // Step Functions: Memory Evolution Pipeline
@@ -1130,17 +1162,21 @@ def handler(event, context):
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    this.memoryEvolutionStateMachine = new stepfunctions.StateMachine(this, 'MemoryEvolutionPipeline', {
-      stateMachineName: `chimera-memory-evolution-${props.envName}`,
-      definition: memoryEvolutionDefinition,
-      stateMachineType: stepfunctions.StateMachineType.STANDARD,
-      logs: {
-        destination: memoryEvolutionLogGroup,
-        level: stepfunctions.LogLevel.ALL,
-        includeExecutionData: true,
-      },
-      tracingEnabled: true,
-    });
+    this.memoryEvolutionStateMachine = new stepfunctions.StateMachine(
+      this,
+      'MemoryEvolutionPipeline',
+      {
+        stateMachineName: `chimera-memory-evolution-${props.envName}`,
+        definition: memoryEvolutionDefinition,
+        stateMachineType: stepfunctions.StateMachineType.STANDARD,
+        logs: {
+          destination: memoryEvolutionLogGroup,
+          level: stepfunctions.LogLevel.ALL,
+          includeExecutionData: true,
+        },
+        tracingEnabled: true,
+      }
+    );
 
     // ======================================================================
     // Step Functions: Feedback Processing Pipeline
@@ -1162,7 +1198,10 @@ def handler(event, context):
       cause: 'Lambda invocation failed after retries',
     });
 
-    processFeedbackTask.addCatch(feedbackProcessorError, { errors: ['States.ALL'], resultPath: '$.error' });
+    processFeedbackTask.addCatch(feedbackProcessorError, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
 
     const feedbackProcessorDefinition = processFeedbackTask.next(
       new stepfunctions.Succeed(this, 'FeedbackProcessingSuccess')
@@ -1174,17 +1213,21 @@ def handler(event, context):
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    this.feedbackProcessorStateMachine = new stepfunctions.StateMachine(this, 'FeedbackProcessorPipeline', {
-      stateMachineName: `chimera-feedback-processor-${props.envName}`,
-      definition: feedbackProcessorDefinition,
-      stateMachineType: stepfunctions.StateMachineType.STANDARD,
-      logs: {
-        destination: feedbackProcessorLogGroup,
-        level: stepfunctions.LogLevel.ALL,
-        includeExecutionData: true,
-      },
-      tracingEnabled: true,
-    });
+    this.feedbackProcessorStateMachine = new stepfunctions.StateMachine(
+      this,
+      'FeedbackProcessorPipeline',
+      {
+        stateMachineName: `chimera-feedback-processor-${props.envName}`,
+        definition: feedbackProcessorDefinition,
+        stateMachineType: stepfunctions.StateMachineType.STANDARD,
+        logs: {
+          destination: feedbackProcessorLogGroup,
+          level: stepfunctions.LogLevel.ALL,
+          includeExecutionData: true,
+        },
+        tracingEnabled: true,
+      }
+    );
 
     // ======================================================================
     // EventBridge: Scheduled Evolution Tasks
@@ -1217,6 +1260,106 @@ def handler(event, context):
       schedule: events.Schedule.rate(cdk.Duration.hours(1)),
       targets: [new targets.SfnStateMachine(this.feedbackProcessorStateMachine)],
     });
+
+    // ======================================================================
+    // Pipeline Completion Handler
+    // Listens for CodePipeline state changes on the default event bus and
+    // updates evolution records in DynamoDB. Bridges AWS-native events to
+    // Chimera's custom event bus for agent notification.
+    // ======================================================================
+    const pipelineCompletionFn = new lambda.Function(this, 'PipelineCompletionHandler', {
+      functionName: `chimera-evolution-pipeline-completion-${props.envName}`,
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+const { DynamoDB, EventBridge } = require('aws-sdk');
+const ddb = new DynamoDB.DocumentClient();
+const eb = new EventBridge();
+
+exports.handler = async (event) => {
+  const { pipeline, state, 'execution-id': executionId } = event.detail;
+  const envName = process.env.ENV_NAME || 'dev';
+  const tableName = process.env.EVOLUTION_TABLE;
+  const eventBusName = process.env.EVENT_BUS_NAME;
+
+  console.log(JSON.stringify({ message: 'Pipeline state change', pipeline, state, executionId }));
+
+  // Only process chimera pipelines
+  if (!pipeline.startsWith('Chimera-')) return;
+
+  const newStatus = state === 'SUCCEEDED' ? 'deployed' : state === 'FAILED' ? 'deploy_failed' : 'stopped';
+
+  // Find pending evolution records
+  const scan = await ddb.scan({
+    TableName: tableName,
+    FilterExpression: '#s = :deploying AND begins_with(PK, :prefix)',
+    ExpressionAttributeNames: { '#s': 'status' },
+    ExpressionAttributeValues: { ':deploying': 'deploying', ':prefix': 'EVOLUTION#' },
+    Limit: 50,
+  }).promise();
+
+  const updates = (scan.Items || []).map(async (item) => {
+    await ddb.update({
+      TableName: tableName,
+      Key: { PK: item.PK, SK: item.SK },
+      UpdateExpression: 'SET #s = :status, updated_at = :now, pipeline_execution_id = :execId',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: {
+        ':status': newStatus,
+        ':now': new Date().toISOString(),
+        ':execId': executionId,
+      },
+    }).promise();
+
+    // Publish completion event to custom bus
+    await eb.putEvents({
+      Entries: [{
+        Source: 'chimera.evolution',
+        DetailType: 'Evolution Deployment Complete',
+        EventBusName: eventBusName,
+        Detail: JSON.stringify({
+          evolutionId: item.PK.replace('EVOLUTION#', ''),
+          status: newStatus,
+          pipeline,
+          executionId,
+          capabilityName: item.capability_name || 'unknown',
+          tenantId: item.tenant_id || 'unknown',
+        }),
+      }],
+    }).promise();
+  });
+
+  await Promise.all(updates);
+  console.log(JSON.stringify({ message: 'Updated evolution records', count: updates.length, newStatus }));
+};
+`),
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        EVOLUTION_TABLE: this.evolutionStateTable.tableName,
+        EVENT_BUS_NAME: props.eventBus.eventBusName,
+        ENV_NAME: props.envName,
+      },
+      logRetention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+    });
+
+    // Grant DynamoDB + EventBridge access
+    this.evolutionStateTable.grantReadWriteData(pipelineCompletionFn);
+    props.eventBus.grantPutEventsTo(pipelineCompletionFn);
+
+    // EventBridge rule on DEFAULT bus for CodePipeline state changes
+    const pipelineRule = new events.Rule(this, 'PipelineCompletionRule', {
+      ruleName: `chimera-pipeline-completion-${props.envName}`,
+      description: 'Routes CodePipeline completion events to evolution status updater',
+      eventPattern: {
+        source: ['aws.codepipeline'],
+        detailType: ['CodePipeline Pipeline Execution State Change'],
+        detail: {
+          state: ['SUCCEEDED', 'FAILED', 'STOPPED'],
+        },
+      },
+    });
+    pipelineRule.addTarget(new targets.LambdaFunction(pipelineCompletionFn));
 
     // ======================================================================
     // Stack Outputs

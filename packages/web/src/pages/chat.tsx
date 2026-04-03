@@ -1,39 +1,56 @@
-import { getCurrentUser } from 'aws-amplify/auth'
-import { useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { ChatMessage } from '@/components/chat-message'
-import { SessionList } from '@/components/session-list'
-import { useChat } from '@/hooks/use-chat'
-import { useSessions } from '@/hooks/use-sessions'
-import { Send, Square } from 'lucide-react'
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { ChatMessage } from '@/components/chat-message';
+import { SessionList } from '@/components/session-list';
+import { useChat } from '@/hooks/use-chat';
+import { useSessions } from '@/hooks/use-sessions';
+import { Send, Square, Loader2 } from 'lucide-react';
 
 export function ChatPage() {
-  const [tenantId, setTenantId] = useState('')
-  const [input, setInput] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [tenantId, setTenantId] = useState('');
+  const [input, setInput] = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getCurrentUser()
-      .then((u) => setTenantId(u.userId))
-      .catch(console.error)
-  }, [])
+    fetchAuthSession()
+      .then((session) => {
+        const claims = session.tokens?.idToken?.payload;
+        const tid = (claims?.['custom:tenant_id'] as string) || 'default-tenant';
+        setTenantId(tid);
+      })
+      .catch(console.error);
+  }, []);
 
-  const { data: sessionsData } = useSessions(tenantId, 20)
-  const { messages, isStreaming, error, sendMessage, abort, clearMessages, sessionId } = useChat({
-    tenantId,
-  })
+  const { data: sessionsData } = useSessions(tenantId, 20);
+  const {
+    messages,
+    isStreaming,
+    isLoadingSession,
+    error,
+    sendMessage,
+    loadSession,
+    abort,
+    clearMessages,
+    sessionId,
+  } = useChat({ tenantId });
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim() || isStreaming) return
-    sendMessage(input)
-    setInput('')
+    e.preventDefault();
+    if (!input.trim() || isStreaming) return;
+    sendMessage(input);
+    setInput('');
+  }
+
+  function handleSelectSession(id: string) {
+    if (id === sessionId) return; // already active
+    void loadSession(id);
   }
 
   return (
@@ -43,9 +60,7 @@ export function ChatPage() {
         <SessionList
           sessions={sessionsData?.sessions ?? []}
           activeSessionId={sessionId ?? undefined}
-          onSelect={() => {
-            /* TODO: load existing session */
-          }}
+          onSelect={handleSelectSession}
           onNew={clearMessages}
         />
       </aside>
@@ -55,25 +70,42 @@ export function ChatPage() {
         {/* Messages */}
         <ScrollArea className="flex-1 px-4">
           <div className="mx-auto max-w-3xl py-4">
-            {messages.length === 0 && (
+            {isLoadingSession && (
+              <div className="flex h-64 flex-col items-center justify-center text-center text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <p className="mt-2 text-sm">Loading conversation...</p>
+              </div>
+            )}
+
+            {!isLoadingSession && messages.length === 0 && (
               <div className="flex h-64 flex-col items-center justify-center text-center text-muted-foreground">
                 <p className="text-lg font-medium">Welcome to Chimera</p>
                 <p className="text-sm">Start a conversation with your AI assistant.</p>
               </div>
             )}
 
-            {messages.map((msg, i) => {
-              const isLast = i === messages.length - 1
-              return (
-                <ChatMessage
-                  key={msg.id}
-                  role={msg.role}
-                  content={msg.content}
-                  timestamp={msg.timestamp}
-                  isStreaming={isLast && isStreaming && msg.role === 'assistant'}
-                />
-              )
-            })}
+            {!isLoadingSession &&
+              messages.map((msg, i) => {
+                const isLast = i === messages.length - 1;
+                const msgStreaming = isLast && isStreaming && msg.role === 'assistant';
+                const hasError = msg.status === 'error';
+
+                return (
+                  <div key={msg.id}>
+                    <ChatMessage
+                      role={msg.role}
+                      content={msg.content}
+                      timestamp={msg.timestamp}
+                      isStreaming={msgStreaming}
+                    />
+                    {hasError && msg.errorMessage && (
+                      <div className="ml-11 mb-2 rounded-md bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+                        Error: {msg.errorMessage}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
             {error && (
               <div className="mx-auto max-w-3xl rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -94,11 +126,11 @@ export function ChatPage() {
               placeholder="Type a message…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={isStreaming}
+              disabled={isStreaming || isLoadingSession}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSubmit(e)
+                  e.preventDefault();
+                  handleSubmit(e);
                 }
               }}
             />
@@ -107,7 +139,12 @@ export function ChatPage() {
                 <Square className="h-4 w-4" />
               </Button>
             ) : (
-              <Button type="submit" size="icon" disabled={!input.trim()} aria-label="Send">
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!input.trim() || isLoadingSession}
+                aria-label="Send"
+              >
                 <Send className="h-4 w-4" />
               </Button>
             )}
@@ -115,5 +152,5 @@ export function ChatPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

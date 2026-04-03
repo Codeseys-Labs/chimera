@@ -16,10 +16,7 @@ import {
   DescribeStackEventsCommand,
   StackStatus,
 } from '@aws-sdk/client-cloudformation';
-import {
-  CodeCommitClient,
-  DeleteRepositoryCommand,
-} from '@aws-sdk/client-codecommit';
+import { CodeCommitClient, DeleteRepositoryCommand } from '@aws-sdk/client-codecommit';
 import {
   DynamoDBClient,
   ScanCommand,
@@ -28,11 +25,7 @@ import {
   type AttributeValue,
   type WriteRequest,
 } from '@aws-sdk/client-dynamodb';
-import {
-  S3Client,
-  ListObjectVersionsCommand,
-  DeleteObjectsCommand,
-} from '@aws-sdk/client-s3';
+import { S3Client, ListObjectVersionsCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import * as os from 'os';
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
@@ -41,10 +34,7 @@ import { findProjectRoot } from '../utils/project.js';
 /**
  * Clean up failed CloudFormation stacks in ROLLBACK_COMPLETE state
  */
-async function cleanupFailedStacks(
-  client: CloudFormationClient,
-  envName: string,
-): Promise<number> {
+async function cleanupFailedStacks(client: CloudFormationClient, envName: string): Promise<number> {
   const command = new ListStacksCommand({
     StackStatusFilter: [StackStatus.ROLLBACK_COMPLETE],
   });
@@ -53,8 +43,8 @@ async function cleanupFailedStacks(
   const prefix = `Chimera-${envName}-`;
 
   const failedStacks = (response.StackSummaries || [])
-    .filter(stack => stack.StackName && stack.StackName.startsWith(prefix))
-    .map(stack => stack.StackName!);
+    .filter((stack) => stack.StackName && stack.StackName.startsWith(prefix))
+    .map((stack) => stack.StackName!);
 
   for (const stackName of failedStacks) {
     await client.send(new DeleteStackCommand({ StackName: stackName }));
@@ -68,30 +58,34 @@ async function cleanupFailedStacks(
  * Archives are written to ~/.chimera/archives/<env>-<timestamp>/.
  * Returns the archive directory path.
  */
-async function exportDataArchive(options: { env: string; region: string; exportPath?: string }): Promise<string> {
+async function exportDataArchive(options: {
+  env: string;
+  region: string;
+  exportPath?: string;
+}): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const defaultDir = path.join(os.homedir(), '.chimera', 'archives', `${options.env}-${timestamp}`);
-  const archiveDir = options.exportPath
-    ? path.resolve(options.exportPath)
-    : defaultDir;
+  const archiveDir = options.exportPath ? path.resolve(options.exportPath) : defaultDir;
   fs.mkdirSync(archiveDir, { recursive: true });
 
   const cfClient = new CloudFormationClient({ region: options.region });
   const ddbClient = new DynamoDBClient({ region: options.region });
 
-  const listResp = await cfClient.send(new ListStacksCommand({
-    StackStatusFilter: [
-      StackStatus.CREATE_COMPLETE,
-      StackStatus.UPDATE_COMPLETE,
-      StackStatus.UPDATE_ROLLBACK_COMPLETE,
-      StackStatus.ROLLBACK_COMPLETE,
-    ],
-  }));
+  const listResp = await cfClient.send(
+    new ListStacksCommand({
+      StackStatusFilter: [
+        StackStatus.CREATE_COMPLETE,
+        StackStatus.UPDATE_COMPLETE,
+        StackStatus.UPDATE_ROLLBACK_COMPLETE,
+        StackStatus.ROLLBACK_COMPLETE,
+      ],
+    })
+  );
 
   const prefix = `Chimera-${options.env}-`;
   const stacks = (listResp.StackSummaries || [])
-    .filter(s => s.StackName?.startsWith(prefix))
-    .map(s => s.StackName!);
+    .filter((s) => s.StackName?.startsWith(prefix))
+    .map((s) => s.StackName!);
 
   const tables: string[] = [];
   for (const stackName of stacks) {
@@ -114,10 +108,12 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     let lastKey: Record<string, AttributeValue> | undefined;
 
     do {
-      const scanResp = await ddbClient.send(new ScanCommand({
-        TableName: tableName,
-        ExclusiveStartKey: lastKey,
-      }));
+      const scanResp = await ddbClient.send(
+        new ScanCommand({
+          TableName: tableName,
+          ExclusiveStartKey: lastKey,
+        })
+      );
       items.push(...(scanResp.Items || []));
       lastKey = scanResp.LastEvaluatedKey;
     } while (lastKey);
@@ -130,7 +126,12 @@ async function exportDataArchive(options: { env: string; region: string; exportP
     );
   }
 
-  const manifest = { tables, timestamp: new Date().toISOString(), env: options.env, region: options.region };
+  const manifest = {
+    tables,
+    timestamp: new Date().toISOString(),
+    env: options.env,
+    region: options.region,
+  };
   fs.writeFileSync(
     path.join(archiveDir, 'manifest.json'),
     JSON.stringify(manifest, null, 2),
@@ -155,7 +156,7 @@ async function exportDataArchive(options: { env: string; region: string; exportP
 async function monitorStackEvents(
   client: CloudFormationClient,
   stackName: string,
-  stopSignal: { done: boolean },
+  stopSignal: { done: boolean }
 ): Promise<void> {
   const seen = new Set<string>();
 
@@ -184,7 +185,7 @@ async function monitorStackEvents(
       break;
     }
 
-    await new Promise<void>(r => setTimeout(r, 10_000));
+    await new Promise<void>((r) => setTimeout(r, 10_000));
   }
 }
 
@@ -196,7 +197,7 @@ async function monitorStackEvents(
 async function deleteCodeCommitRepo(
   client: CodeCommitClient,
   repoName: string,
-  keepRepo: boolean,
+  keepRepo: boolean
 ): Promise<void> {
   if (keepRepo) {
     return;
@@ -213,21 +214,28 @@ async function deleteCodeCommitRepo(
 
 /**
  * Reverse dependency order for stack teardown (most dependent stacks first).
- * Must stay in sync with CHIMERA_STACK_SUFFIXES in doctor.ts.
+ * Must stay in sync with CHIMERA_STACK_SUFFIXES in doctor.ts (all 14 deployed stacks).
  */
 const STACK_DESTROY_ORDER = [
   // Tier 1: no dependents — leaf stacks
-  'Frontend', 'Discovery', 'GatewayRegistration',
+  'Frontend',
+  'Discovery',
   // Tier 2: depend on Data/Security
-  'Evolution', 'SkillPipeline', 'Email', 'TenantOnboarding',
+  'Evolution',
+  'SkillPipeline',
+  'Email',
+  'TenantOnboarding',
   // Tier 3: depend on Network/Data/Pipeline
-  'Chat', 'Orchestration',
+  'Chat',
+  'Orchestration',
   // Tier 4: depend on Security
-  'Observability', 'Api',
+  'Observability',
+  'Api',
   // Tier 5: depends on Network
   'Pipeline',
   // Tier 6: base infrastructure (Security/Data before Network)
-  'Security', 'Data',
+  'Security',
+  'Data',
   // Tier 7: last — all stacks depend on Network
   'Network',
 ];
@@ -248,22 +256,26 @@ async function emptyS3Bucket(bucketName: string, s3Client: S3Client): Promise<vo
 
   let isTruncated = true;
   while (isTruncated) {
-    const resp = await s3Client.send(new ListObjectVersionsCommand({
-      Bucket: bucketName,
-      KeyMarker: keyMarker,
-      VersionIdMarker: versionIdMarker,
-    }));
+    const resp = await s3Client.send(
+      new ListObjectVersionsCommand({
+        Bucket: bucketName,
+        KeyMarker: keyMarker,
+        VersionIdMarker: versionIdMarker,
+      })
+    );
 
     const toDelete = [
-      ...(resp.Versions ?? []).map(v => ({ Key: v.Key!, VersionId: v.VersionId })),
-      ...(resp.DeleteMarkers ?? []).map(m => ({ Key: m.Key!, VersionId: m.VersionId })),
-    ].filter(o => o.Key);
+      ...(resp.Versions ?? []).map((v) => ({ Key: v.Key!, VersionId: v.VersionId })),
+      ...(resp.DeleteMarkers ?? []).map((m) => ({ Key: m.Key!, VersionId: m.VersionId })),
+    ].filter((o) => o.Key);
 
     if (toDelete.length > 0) {
-      await s3Client.send(new DeleteObjectsCommand({
-        Bucket: bucketName,
-        Delete: { Objects: toDelete, Quiet: true },
-      }));
+      await s3Client.send(
+        new DeleteObjectsCommand({
+          Bucket: bucketName,
+          Delete: { Objects: toDelete, Quiet: true },
+        })
+      );
     }
 
     isTruncated = !!resp.IsTruncated;
@@ -279,7 +291,7 @@ async function emptyS3Bucket(bucketName: string, s3Client: S3Client): Promise<vo
 async function emptyStackS3Buckets(
   stackName: string,
   cfClient: CloudFormationClient,
-  s3Client: S3Client,
+  s3Client: S3Client
 ): Promise<void> {
   let resources;
   try {
@@ -290,8 +302,8 @@ async function emptyStackS3Buckets(
   }
 
   const buckets = resources
-    .filter(r => r.ResourceType === 'AWS::S3::Bucket' && r.PhysicalResourceId)
-    .map(r => r.PhysicalResourceId!);
+    .filter((r) => r.ResourceType === 'AWS::S3::Bucket' && r.PhysicalResourceId)
+    .map((r) => r.PhysicalResourceId!);
 
   for (const bucket of buckets) {
     await emptyS3Bucket(bucket, s3Client);
@@ -305,7 +317,7 @@ async function emptyStackS3Buckets(
 async function disableDdbDeletionProtection(
   stackName: string,
   cfClient: CloudFormationClient,
-  ddbClient: DynamoDBClient,
+  ddbClient: DynamoDBClient
 ): Promise<void> {
   let resources;
   try {
@@ -316,14 +328,16 @@ async function disableDdbDeletionProtection(
   }
 
   const tables = resources
-    .filter(r => r.ResourceType === 'AWS::DynamoDB::Table' && r.PhysicalResourceId)
-    .map(r => r.PhysicalResourceId!);
+    .filter((r) => r.ResourceType === 'AWS::DynamoDB::Table' && r.PhysicalResourceId)
+    .map((r) => r.PhysicalResourceId!);
 
   for (const table of tables) {
-    await ddbClient.send(new UpdateTableCommand({
-      TableName: table,
-      DeletionProtectionEnabled: false,
-    }));
+    await ddbClient.send(
+      new UpdateTableCommand({
+        TableName: table,
+        DeletionProtectionEnabled: false,
+      })
+    );
   }
 }
 
@@ -356,7 +370,9 @@ export async function reseedFromArchive(archivePath: string, region: string): Pr
       const MAX_RETRIES = 5;
       let delay = 100;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        const response = await ddbClient.send(new BatchWriteItemCommand({ RequestItems: requestItems }));
+        const response = await ddbClient.send(
+          new BatchWriteItemCommand({ RequestItems: requestItems })
+        );
         const unprocessed = response.UnprocessedItems?.[tableName];
         if (!unprocessed || unprocessed.length === 0) break;
         if (attempt === MAX_RETRIES) {
@@ -364,7 +380,7 @@ export async function reseedFromArchive(archivePath: string, region: string): Pr
             `BatchWriteItem failed after ${MAX_RETRIES} retries: ${unprocessed.length} items unprocessed in table "${tableName}"`
           );
         }
-        await new Promise<void>(resolve => setTimeout(resolve, delay));
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
         delay *= 2;
         requestItems = { [tableName]: unprocessed };
       }
@@ -381,16 +397,22 @@ export function registerDestroyCommands(program: Command): void {
     .option('--env <environment>', 'Environment name')
     .option('--force', 'Skip confirmation prompt')
     .option('--retain-data', 'Export DynamoDB table data to a local archive before destroying')
-    .option('--export-path <path>', 'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)')
+    .option(
+      '--export-path <path>',
+      'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)'
+    )
     .option('--keep-repo', 'Preserve the CodeCommit repository (skip deletion)')
     .option('--monitor', 'Stream CloudFormation stack events in real-time during destruction')
     .option('--json', 'Output result as JSON')
-    .addHelpText('after', `
+    .addHelpText(
+      'after',
+      `
 Examples:
   $ chimera destroy
   $ chimera destroy --force --env prod
   $ chimera destroy --retain-data --export-path ./backup
-  $ chimera destroy --json`)
+  $ chimera destroy --json`
+    )
     .action(async (options) => {
       const spinner = ora('Starting Chimera destruction').start();
       if (options.json) spinner.stop();
@@ -408,7 +430,9 @@ Examples:
           process.exit(1);
         }
         const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        if (wsConfig?.aws?.profile) {
+          process.env.AWS_PROFILE = wsConfig.aws.profile;
+        }
 
         if (!wsConfig.deployment) {
           if (options.json) {
@@ -427,7 +451,9 @@ Examples:
             {
               type: 'confirm',
               name: 'confirmed',
-              message: color.yellow('⚠️  WARNING: This will delete all Chimera infrastructure. Continue?'),
+              message: color.yellow(
+                '⚠️  WARNING: This will delete all Chimera infrastructure. Continue?'
+              ),
               default: false,
             },
           ]);
@@ -446,7 +472,9 @@ Examples:
           archivePath = await exportDataArchive({ env, region, exportPath: options.exportPath });
           if (!options.json) {
             spinner.succeed(color.green(`Data archived to ${archivePath}`));
-            console.log(color.gray('  Archive path saved to ~/.chimera/last-archive.json for reseeding'));
+            console.log(
+              color.gray('  Archive path saved to ~/.chimera/last-archive.json for reseeding')
+            );
             spinner.start('Destroying infrastructure');
           }
         }
@@ -462,7 +490,9 @@ Examples:
           spinner.stop();
           console.log(color.bold('\nMonitoring CloudFormation events (Ctrl-C to abort):\n'));
         } else if (!options.json) {
-          console.log(color.gray("  Tip: use --monitor to stream CloudFormation events in real-time"));
+          console.log(
+            color.gray('  Tip: use --monitor to stream CloudFormation events in real-time')
+          );
         }
 
         for (const stackSuffix of STACK_DESTROY_ORDER) {
@@ -470,26 +500,37 @@ Examples:
 
           // Pre-delete: disable DDB deletion protection before Data stack teardown
           if (stackSuffix === 'Data') {
-            if (!options.json && !options.monitor) spinner.text = `Disabling DynamoDB deletion protection in ${stackName}...`;
+            if (!options.json && !options.monitor)
+              spinner.text = `Disabling DynamoDB deletion protection in ${stackName}...`;
             await disableDdbDeletionProtection(stackName, cfClient, ddbClient);
           }
 
           // Pre-delete: empty S3 buckets so CloudFormation can delete them
           if (S3_STACK_SUFFIXES.has(stackSuffix)) {
-            if (!options.json && !options.monitor) spinner.text = `Emptying S3 buckets in ${stackName}...`;
+            if (!options.json && !options.monitor)
+              spinner.text = `Emptying S3 buckets in ${stackName}...`;
             await emptyStackS3Buckets(stackName, cfClient, s3Client);
           }
 
           if (!options.json && !options.monitor) spinner.text = `Destroying ${stackName}...`;
-          if (!options.json && options.monitor) console.log(color.bold(`\n→ Destroying ${stackName}`));
+          if (!options.json && options.monitor)
+            console.log(color.bold(`\n→ Destroying ${stackName}`));
 
           if (options.monitor && !options.json) {
             // Run CDK destroy in background so we can poll events in parallel
             const stopSignal = { done: false };
             const monitorPromise = monitorStackEvents(cfClient, stackName, stopSignal);
             const proc = Bun.spawn(
-              ['npx', 'cdk', 'destroy', stackName, '--force', '--context', `environment=${safeEnv}`],
-              { cwd: `${repoRoot}/infra`, stdout: 'ignore', stderr: 'ignore' },
+              [
+                'npx',
+                'cdk',
+                'destroy',
+                stackName,
+                '--force',
+                '--context',
+                `environment=${safeEnv}`,
+              ],
+              { cwd: `${repoRoot}/infra`, stdout: 'ignore', stderr: 'ignore' }
             );
             await proc.exited;
             stopSignal.done = true;
@@ -501,12 +542,16 @@ Examples:
                 .cwd(`${repoRoot}/infra`)
                 .quiet()
                 .nothrow();
-            } catch { /* Stack may not exist — continue */ }
+            } catch {
+              /* Stack may not exist — continue */
+            }
           }
         }
 
-        if (!options.json && !options.monitor) spinner.succeed(color.green('All CloudFormation stacks destroyed'));
-        if (!options.json && options.monitor) console.log(color.bold('\n✓ All CloudFormation stacks destroyed'));
+        if (!options.json && !options.monitor)
+          spinner.succeed(color.green('All CloudFormation stacks destroyed'));
+        if (!options.json && options.monitor)
+          console.log(color.bold('\n✓ All CloudFormation stacks destroyed'));
 
         // Delete CodeCommit repo after CDK stacks are gone (Pipeline must be
         // destroyed first so the repo is no longer referenced by any trigger).
@@ -525,13 +570,20 @@ Examples:
         saveWorkspaceConfig({ ...cur, deployment: undefined });
 
         if (options.json) {
-          console.log(JSON.stringify({ status: 'ok', data: { env, region, repoName, repoDeleted: !options.keepRepo, archivePath } }));
+          console.log(
+            JSON.stringify({
+              status: 'ok',
+              data: { env, region, repoName, repoDeleted: !options.keepRepo, archivePath },
+            })
+          );
         } else {
           console.log(color.green('\n✓ Infrastructure destroyed'));
         }
       } catch (error: any) {
         if (options.json) {
-          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'DESTROY_FAILED' }));
+          console.log(
+            JSON.stringify({ status: 'error', error: error.message, code: 'DESTROY_FAILED' })
+          );
           process.exit(1);
         }
         spinner.fail(color.red('Destruction failed'));
@@ -564,7 +616,9 @@ Examples:
           process.exit(1);
         }
         const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        if (wsConfig?.aws?.profile) {
+          process.env.AWS_PROFILE = wsConfig.aws.profile;
+        }
 
         const client = new CloudFormationClient({ region });
 
@@ -581,11 +635,15 @@ Examples:
           console.log(color.gray('All stacks are in a healthy state'));
         } else {
           spinner.succeed(color.green(`Cleaned up ${deletedCount} failed stack(s)`));
-          console.log(color.green(`\n✓ Deleted ${deletedCount} stack(s) in ROLLBACK_COMPLETE state`));
+          console.log(
+            color.green(`\n✓ Deleted ${deletedCount} stack(s) in ROLLBACK_COMPLETE state`)
+          );
         }
       } catch (error: any) {
         if (options.json) {
-          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'CLEANUP_FAILED' }));
+          console.log(
+            JSON.stringify({ status: 'error', error: error.message, code: 'CLEANUP_FAILED' })
+          );
           process.exit(1);
         }
         spinner.fail(color.red('Cleanup failed'));
@@ -618,7 +676,9 @@ Examples:
           process.exit(1);
         }
         const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        if (wsConfig?.aws?.profile) {
+          process.env.AWS_PROFILE = wsConfig.aws.profile;
+        }
 
         const client = new CloudFormationClient({ region });
 
@@ -643,8 +703,9 @@ Examples:
         const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
 
         // npx spawns Node.js — CDK module resolution works correctly
-        await Bun.$`npx cdk deploy --all --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`
-          .cwd(`${repoRoot}/infra`);
+        await Bun.$`npx cdk deploy --all --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`.cwd(
+          `${repoRoot}/infra`
+        );
 
         if (!options.json) spinner.succeed(color.green('Deployment complete'));
 
@@ -662,7 +723,11 @@ Examples:
         const cur = loadWorkspaceConfig();
         saveWorkspaceConfig({
           ...cur,
-          deployment: { ...cur.deployment, status: 'deployed', last_deployed: new Date().toISOString() },
+          deployment: {
+            ...cur.deployment,
+            status: 'deployed',
+            last_deployed: new Date().toISOString(),
+          },
         });
 
         if (options.json) {
@@ -673,7 +738,9 @@ Examples:
         }
       } catch (error: any) {
         if (options.json) {
-          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'REDEPLOY_FAILED' }));
+          console.log(
+            JSON.stringify({ status: 'error', error: error.message, code: 'REDEPLOY_FAILED' })
+          );
           process.exit(1);
         }
         console.error(color.red('\n✗ Redeploy failed'));

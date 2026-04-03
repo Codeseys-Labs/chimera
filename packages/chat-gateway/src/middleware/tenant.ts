@@ -54,48 +54,57 @@ const tenantService = new TenantService({
 });
 
 /**
- * Extract tenant context from headers with DynamoDB validation
+ * Extract tenant context — JWT claims are the source of truth.
  *
- * Expected headers:
- * - X-Tenant-Id: tenant identifier (required)
- * - X-User-Id: user identifier (optional)
+ * Resolution order:
+ * 1. JWT `custom:tenant_id` claim (set by authenticateJWT / optionalAuth)
+ * 2. X-Tenant-Id header — ONLY allowed in development mode
  *
- * Returns 401 if X-Tenant-Id is missing.
- * Returns 403 if tenant is SUSPENDED or not found.
+ * In production the header is ignored entirely to prevent tenant spoofing.
+ *
+ * Returns 401 if no tenant ID can be resolved.
  */
-export async function extractTenantContext(
-  c: Context,
-  next: Next
-): Promise<Response | void> {
-  // Primary: extract from X-Tenant-Id header (API Gateway / direct header path)
-  let tenantId = c.req.header('x-tenant-id');
-  let userId = c.req.header('x-user-id');
+export async function extractTenantContext(c: Context, next: Next): Promise<Response | void> {
+  const isDev = process.env.NODE_ENV === 'development' || process.env.CHIMERA_ENV === 'dev';
 
-  // Fallback: populate from JWT auth context set by optionalAuth/authenticateJWT
-  // This enables direct CLI access via Bearer JWT without X-Tenant-Id header
-  if (!tenantId) {
-    const auth = c.get('auth') as AuthContext | undefined;
-    if (auth) {
-      tenantId = auth.tenantId;
-      userId = userId || auth.sub;
-    }
+  // Primary: extract from verified JWT claims (AuthContext populated by authenticateJWT)
+  const auth = c.get('auth') as AuthContext | undefined;
+  let tenantId: string | undefined;
+  let userId: string | undefined;
+  let tenantTier: string | undefined;
+
+  if (auth) {
+    tenantId = auth.tenantId;
+    userId = auth.sub;
+    tenantTier = auth.tenantTier;
+  }
+
+  // Fallback: X-Tenant-Id header — development only, never trust in production
+  if (!tenantId && isDev) {
+    tenantId = c.req.header('x-tenant-id');
+    userId = userId || c.req.header('x-user-id');
   }
 
   if (!tenantId) {
-    return c.json({
-      error: {
-        code: 'MISSING_TENANT_ID',
-        message: 'X-Tenant-Id header is required',
+    return c.json(
+      {
+        error: {
+          code: 'MISSING_TENANT_ID',
+          message: 'Tenant ID must be present in JWT claims (custom:tenant_id)',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 401);
+      401
+    );
   }
 
-  // For development/testing: accept header-provided tier without DynamoDB lookup
-  // In production, this would be replaced with actual DynamoDB validation
-  const tierHeader = c.req.header('x-tenant-tier') || 'basic';
+  // Tier from JWT claims; fall back to header only in dev, default to 'basic'
   const validTiers = ['basic', 'advanced', 'premium'];
-  const tier = validTiers.includes(tierHeader) ? tierHeader : 'basic';
+  let tier = tenantTier;
+  if (!tier && isDev) {
+    tier = c.req.header('x-tenant-tier') || undefined;
+  }
+  tier = tier && validTiers.includes(tier) ? tier : 'basic';
 
   // Attach tenant context to Hono context
   c.set('tenantContext', {
@@ -111,49 +120,60 @@ export async function extractTenantContext(
  * Enhanced tenant context with DynamoDB validation
  *
  * Use this middleware in production for full tenant validation.
+ * Resolves tenantId from JWT claims (never from headers in production).
  * Checks tenant status and feature availability.
  */
 export async function extractTenantContextWithValidation(
   c: Context,
   next: Next
 ): Promise<Response | void> {
-  const tenantId = c.req.header('x-tenant-id');
+  const auth = c.get('auth') as AuthContext | undefined;
+  const tenantId = auth?.tenantId;
 
   if (!tenantId) {
-    return c.json({
-      error: {
-        code: 'MISSING_TENANT_ID',
-        message: 'X-Tenant-Id header is required',
+    return c.json(
+      {
+        error: {
+          code: 'MISSING_TENANT_ID',
+          message: 'Tenant ID must be present in JWT claims (custom:tenant_id)',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 401);
+      401
+    );
   }
 
-  const userId = c.req.header('x-user-id');
+  const userId = auth?.sub;
 
   try {
     // Fetch tenant profile from DynamoDB
     const profile = await tenantService.getTenantProfile(tenantId);
 
     if (!profile) {
-      return c.json({
-        error: {
-          code: 'TENANT_NOT_FOUND',
-          message: 'Tenant does not exist',
+      return c.json(
+        {
+          error: {
+            code: 'TENANT_NOT_FOUND',
+            message: 'Tenant does not exist',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     // Check tenant status
     if (profile.status === 'SUSPENDED') {
-      return c.json({
-        error: {
-          code: 'TENANT_SUSPENDED',
-          message: 'Tenant account is suspended. Contact support.',
+      return c.json(
+        {
+          error: {
+            code: 'TENANT_SUSPENDED',
+            message: 'Tenant account is suspended. Contact support.',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     // Attach validated tenant context
@@ -166,12 +186,15 @@ export async function extractTenantContextWithValidation(
     await next();
   } catch (error) {
     console.error('Tenant validation error:', error);
-    return c.json({
-      error: {
-        code: 'TENANT_VALIDATION_ERROR',
-        message: 'Failed to validate tenant',
+    return c.json(
+      {
+        error: {
+          code: 'TENANT_VALIDATION_ERROR',
+          message: 'Failed to validate tenant',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 }

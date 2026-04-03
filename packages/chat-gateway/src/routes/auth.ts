@@ -10,7 +10,6 @@ import { authenticateJWT } from '../middleware/auth';
 import type { AuthContext } from '../middleware/auth';
 import {
   CognitoIdentityProviderClient,
-  SignUpCommand,
   ConfirmSignUpCommand,
   ResendConfirmationCodeCommand,
   ListUsersCommand,
@@ -32,7 +31,6 @@ const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID;
 const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
 const COGNITO_REGION = process.env.AWS_REGION || 'us-east-1';
 const REDIRECT_URI = process.env.OAUTH_REDIRECT_URI || 'http://localhost:8080/auth/callback';
-const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'default';
 
 /**
  * GET /auth/config
@@ -42,13 +40,16 @@ const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'default';
  */
 router.get('/config', (c: Context) => {
   if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
-    return c.json({
-      error: {
-        code: 'AUTH_NOT_CONFIGURED',
-        message: 'OAuth not configured',
+    return c.json(
+      {
+        error: {
+          code: 'AUTH_NOT_CONFIGURED',
+          message: 'OAuth not configured',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 
   const oauthUrl = `https://${COGNITO_DOMAIN}.auth.${COGNITO_REGION}.amazoncognito.com`;
@@ -81,23 +82,29 @@ router.post('/exchange', async (c: Context) => {
     const { code, codeVerifier } = body as { code?: string; codeVerifier?: string };
 
     if (!code || !codeVerifier) {
-      return c.json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'Missing code or codeVerifier',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'Missing code or codeVerifier',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'OAuth not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'OAuth not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     // Exchange authorization code for tokens
@@ -120,29 +127,37 @@ router.post('/exchange', async (c: Context) => {
     });
 
     if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.json().catch(() => ({})) as { error_description?: string };
+      const errorData = (await tokenResponse.json().catch(() => ({}))) as {
+        error_description?: string;
+      };
       console.error('Token exchange failed:', errorData);
-      return c.json({
-        error: {
-          code: 'TOKEN_EXCHANGE_FAILED',
-          message: errorData.error_description || 'Failed to exchange authorization code',
-          details: errorData,
+      return c.json(
+        {
+          error: {
+            code: 'TOKEN_EXCHANGE_FAILED',
+            message: errorData.error_description || 'Failed to exchange authorization code',
+            details: errorData,
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, tokenResponse.status as any);
+        tokenResponse.status as any
+      );
     }
 
     const tokens = await tokenResponse.json();
     return c.json(tokens);
   } catch (error) {
     console.error('Token exchange error:', error);
-    return c.json({
-      error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Token exchange failed',
+    return c.json(
+      {
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Token exchange failed',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
@@ -178,23 +193,29 @@ router.post('/refresh', async (c: Context) => {
     const { refreshToken } = body as { refreshToken?: string };
 
     if (!refreshToken) {
-      return c.json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'Missing refreshToken',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'Missing refreshToken',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'OAuth not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'OAuth not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     const tokenUrl = `https://${COGNITO_DOMAIN}.auth.${COGNITO_REGION}.amazoncognito.com/oauth2/token`;
@@ -214,131 +235,58 @@ router.post('/refresh', async (c: Context) => {
     });
 
     if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.json().catch(() => ({})) as { error_description?: string };
+      const errorData = (await tokenResponse.json().catch(() => ({}))) as {
+        error_description?: string;
+      };
       console.error('Token refresh failed:', errorData);
-      return c.json({
-        error: {
-          code: 'TOKEN_REFRESH_FAILED',
-          message: errorData.error_description || 'Failed to refresh token',
-          details: errorData,
+      return c.json(
+        {
+          error: {
+            code: 'TOKEN_REFRESH_FAILED',
+            message: errorData.error_description || 'Failed to refresh token',
+            details: errorData,
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, tokenResponse.status as any);
+        tokenResponse.status as any
+      );
     }
 
     const tokens = await tokenResponse.json();
     return c.json(tokens);
   } catch (error) {
     console.error('Token refresh error:', error);
-    return c.json({
-      error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Token refresh failed',
+    return c.json(
+      {
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Token refresh failed',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
 /**
  * POST /auth/register
  *
- * Register a new user via Cognito SignUp.
- * User receives email confirmation code.
- *
- * Body: { name: string, email: string, password: string }
- * Returns: { userSub: string, codeDeliveryDetails: {...} }
+ * Self-registration is disabled. The Cognito user pool has self-signup turned off,
+ * so the SignUp API will always reject requests. Return a clear error directing
+ * callers to contact their administrator for account provisioning.
  */
-router.post('/register', async (c: Context) => {
-  try {
-    const body = await c.req.json();
-    const { name, email, password } = body as { name?: string; email?: string; password?: string };
-
-    if (!name || !email || !password) {
-      return c.json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'Missing required fields: name, email, password',
-        },
-        timestamp: new Date().toISOString(),
-      }, 400);
-    }
-
-    if (!COGNITO_CLIENT_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
-        },
-        timestamp: new Date().toISOString(),
-      }, 500);
-    }
-
-    // Register user with Cognito
-    // Assign default tenant - new users get assigned to DEFAULT_TENANT_ID
-    // Admin can reassign tenants later via AdminUpdateUserAttributes
-    const command = new SignUpCommand({
-      ClientId: COGNITO_CLIENT_ID,
-      Username: email,
-      Password: password,
-      UserAttributes: [
-        { Name: 'email', Value: email },
-        { Name: 'name', Value: name },
-        { Name: 'custom:tenant_id', Value: DEFAULT_TENANT_ID },
-        { Name: 'custom:tenant_tier', Value: 'free' },
-      ],
-    });
-
-    const response = await cognitoClient.send(command);
-
-    return c.json({
-      userSub: response.UserSub,
-      userConfirmed: response.UserConfirmed,
-      codeDeliveryDetails: response.CodeDeliveryDetails,
-      message: 'Registration successful. Please check your email for confirmation code.',
-    }, 201);
-  } catch (error: any) {
-    console.error('Registration error:', error);
-
-    // Handle Cognito-specific errors
-    if (error.name === 'UsernameExistsException') {
-      return c.json({
-        error: {
-          code: 'USER_EXISTS',
-          message: 'User with this email already exists',
-        },
-        timestamp: new Date().toISOString(),
-      }, 409);
-    }
-
-    if (error.name === 'InvalidPasswordException') {
-      return c.json({
-        error: {
-          code: 'INVALID_PASSWORD',
-          message: error.message || 'Password does not meet requirements',
-        },
-        timestamp: new Date().toISOString(),
-      }, 400);
-    }
-
-    if (error.name === 'InvalidParameterException') {
-      return c.json({
-        error: {
-          code: 'INVALID_PARAMETER',
-          message: error.message || 'Invalid registration parameters',
-        },
-        timestamp: new Date().toISOString(),
-      }, 400);
-    }
-
-    return c.json({
+router.post('/register', (c: Context) => {
+  return c.json(
+    {
       error: {
-        code: 'REGISTRATION_FAILED',
-        message: 'Registration failed',
+        code: 'REGISTRATION_DISABLED',
+        message: 'Self-registration is disabled. Contact your administrator.',
       },
       timestamp: new Date().toISOString(),
-    }, 500);
-  }
+    },
+    403
+  );
 });
 
 /**
@@ -355,23 +303,29 @@ router.post('/confirm-signup', async (c: Context) => {
     const { email, code } = body as { email?: string; code?: string };
 
     if (!email || !code) {
-      return c.json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'Missing email or code',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'Missing email or code',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (!COGNITO_CLIENT_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Cognito not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     const command = new ConfirmSignUpCommand({
@@ -390,42 +344,54 @@ router.post('/confirm-signup', async (c: Context) => {
     console.error('Confirmation error:', error);
 
     if (error.name === 'CodeMismatchException') {
-      return c.json({
-        error: {
-          code: 'INVALID_CODE',
-          message: 'Invalid confirmation code',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_CODE',
+            message: 'Invalid confirmation code',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (error.name === 'ExpiredCodeException') {
-      return c.json({
-        error: {
-          code: 'EXPIRED_CODE',
-          message: 'Confirmation code has expired. Request a new code.',
+      return c.json(
+        {
+          error: {
+            code: 'EXPIRED_CODE',
+            message: 'Confirmation code has expired. Request a new code.',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (error.name === 'UserNotFoundException') {
-      return c.json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
+      return c.json(
+        {
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 404);
+        404
+      );
     }
 
-    return c.json({
-      error: {
-        code: 'CONFIRMATION_FAILED',
-        message: 'Confirmation failed',
+    return c.json(
+      {
+        error: {
+          code: 'CONFIRMATION_FAILED',
+          message: 'Confirmation failed',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
@@ -443,23 +409,29 @@ router.post('/resend-code', async (c: Context) => {
     const { email } = body as { email?: string };
 
     if (!email) {
-      return c.json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'Missing email',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'Missing email',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (!COGNITO_CLIENT_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Cognito not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     const command = new ResendConfirmationCodeCommand({
@@ -477,32 +449,41 @@ router.post('/resend-code', async (c: Context) => {
     console.error('Resend code error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      return c.json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
+      return c.json(
+        {
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 404);
+        404
+      );
     }
 
     if (error.name === 'InvalidParameterException') {
-      return c.json({
-        error: {
-          code: 'INVALID_PARAMETER',
-          message: 'User is already confirmed',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_PARAMETER',
+            message: 'User is already confirmed',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
-    return c.json({
-      error: {
-        code: 'RESEND_FAILED',
-        message: 'Failed to resend confirmation code',
+    return c.json(
+      {
+        error: {
+          code: 'RESEND_FAILED',
+          message: 'Failed to resend confirmation code',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
@@ -518,23 +499,29 @@ router.get('/admin/users', authenticateJWT, async (c: Context) => {
 
     // Check if user is admin
     if (!auth?.groups?.includes('admin')) {
-      return c.json({
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Admin access required',
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Admin access required',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Cognito not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     const command = new ListUsersCommand({
@@ -545,28 +532,33 @@ router.get('/admin/users', authenticateJWT, async (c: Context) => {
     const response = await cognitoClient.send(command);
 
     return c.json({
-      users: response.Users?.map((user: any) => ({
-        username: user.Username,
-        email: user.Attributes?.find((attr: any) => attr.Name === 'email')?.Value,
-        name: user.Attributes?.find((attr: any) => attr.Name === 'name')?.Value,
-        tenantId: user.Attributes?.find((attr: any) => attr.Name === 'custom:tenant_id')?.Value,
-        tenantTier: user.Attributes?.find((attr: any) => attr.Name === 'custom:tenant_tier')?.Value,
-        enabled: user.Enabled,
-        status: user.UserStatus,
-        created: user.UserCreateDate,
-        modified: user.UserLastModifiedDate,
-      })) || [],
+      users:
+        response.Users?.map((user: any) => ({
+          username: user.Username,
+          email: user.Attributes?.find((attr: any) => attr.Name === 'email')?.Value,
+          name: user.Attributes?.find((attr: any) => attr.Name === 'name')?.Value,
+          tenantId: user.Attributes?.find((attr: any) => attr.Name === 'custom:tenant_id')?.Value,
+          tenantTier: user.Attributes?.find((attr: any) => attr.Name === 'custom:tenant_tier')
+            ?.Value,
+          enabled: user.Enabled,
+          status: user.UserStatus,
+          created: user.UserCreateDate,
+          modified: user.UserLastModifiedDate,
+        })) || [],
       paginationToken: response.PaginationToken,
     });
   } catch (error: any) {
     console.error('List users error:', error);
-    return c.json({
-      error: {
-        code: 'LIST_USERS_FAILED',
-        message: 'Failed to list users',
+    return c.json(
+      {
+        error: {
+          code: 'LIST_USERS_FAILED',
+          message: 'Failed to list users',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
@@ -583,23 +575,29 @@ router.post('/admin/users/:username/disable', authenticateJWT, async (c: Context
 
     // Check if user is admin
     if (!auth?.groups?.includes('admin')) {
-      return c.json({
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Admin access required',
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Admin access required',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Cognito not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     const command = new AdminDisableUserCommand({
@@ -617,22 +615,28 @@ router.post('/admin/users/:username/disable', authenticateJWT, async (c: Context
     console.error('Disable user error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      return c.json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
+      return c.json(
+        {
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 404);
+        404
+      );
     }
 
-    return c.json({
-      error: {
-        code: 'DISABLE_USER_FAILED',
-        message: 'Failed to disable user',
+    return c.json(
+      {
+        error: {
+          code: 'DISABLE_USER_FAILED',
+          message: 'Failed to disable user',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
@@ -649,23 +653,29 @@ router.post('/admin/users/:username/enable', authenticateJWT, async (c: Context)
 
     // Check if user is admin
     if (!auth?.groups?.includes('admin')) {
-      return c.json({
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Admin access required',
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Admin access required',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Cognito not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     const command = new AdminEnableUserCommand({
@@ -683,22 +693,28 @@ router.post('/admin/users/:username/enable', authenticateJWT, async (c: Context)
     console.error('Enable user error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      return c.json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
+      return c.json(
+        {
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 404);
+        404
+      );
     }
 
-    return c.json({
-      error: {
-        code: 'ENABLE_USER_FAILED',
-        message: 'Failed to enable user',
+    return c.json(
+      {
+        error: {
+          code: 'ENABLE_USER_FAILED',
+          message: 'Failed to enable user',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 
@@ -719,38 +735,45 @@ router.patch('/admin/users/:username/tenant', authenticateJWT, async (c: Context
 
     // Check if user is admin
     if (!auth?.groups?.includes('admin')) {
-      return c.json({
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Admin access required',
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Admin access required',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     if (!tenantId) {
-      return c.json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'Missing tenantId',
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'Missing tenantId',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 400);
+        400
+      );
     }
 
     if (!COGNITO_USER_POOL_ID) {
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Cognito not configured',
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Cognito not configured',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
-    const attributes = [
-      { Name: 'custom:tenant_id', Value: tenantId },
-    ];
+    const attributes = [{ Name: 'custom:tenant_id', Value: tenantId }];
 
     if (tenantTier) {
       attributes.push({ Name: 'custom:tenant_tier', Value: tenantTier });
@@ -774,22 +797,28 @@ router.patch('/admin/users/:username/tenant', authenticateJWT, async (c: Context
     console.error('Update tenant error:', error);
 
     if (error.name === 'UserNotFoundException') {
-      return c.json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
+      return c.json(
+        {
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 404);
+        404
+      );
     }
 
-    return c.json({
-      error: {
-        code: 'UPDATE_TENANT_FAILED',
-        message: 'Failed to update user tenant',
+    return c.json(
+      {
+        error: {
+          code: 'UPDATE_TENANT_FAILED',
+          message: 'Failed to update user tenant',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 500);
+      500
+    );
   }
 });
 

@@ -17,9 +17,9 @@ phases:
   build:
     commands:
       - export PATH="$HOME/.bun/bin:$PATH"
-      - bun run lint || true
-      - bun run typecheck || true
-      - bun test --coverage || true
+      - 'bun run lint || true'
+      - 'bun run typecheck || true'
+      - 'bun run test || true'
       - cd infra && npx cdk synth --all && cd ..
       - cd packages/web && bun run build && cd ../..
 

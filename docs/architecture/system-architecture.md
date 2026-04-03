@@ -1,5 +1,5 @@
 ---
-title: "Chimera System Architecture"
+title: 'Chimera System Architecture'
 version: 1.0.0
 status: canonical
 last_updated: 2026-03-30
@@ -51,22 +51,22 @@ flowchart TD
 
 **Stack responsibilities at a glance:**
 
-| Stack | Key Resources |
-|-------|---------------|
-| Network | VPC, public/private subnets, NAT gateways, VPC endpoints, security groups |
-| Data | 6 DynamoDB tables, 3 S3 buckets, optional DAX cluster |
-| Security | Cognito user pool + app client, WAF WebACL, KMS CMK |
-| Observability | CloudWatch dashboards, SNS alarm topic, DDB throttle alarms |
-| Api | REST API (v1 + WebSocket), JWT authorizer, webhook routes |
-| Pipeline | CodePipeline, CodeCommit repo, CodeBuild project, ECR repositories |
-| SkillPipeline | Step Functions 7-stage skill security scanner |
-| Chat | ECS Fargate cluster + service, ALB, CloudFront OAC distribution |
-| Orchestration | EventBridge bus, SQS FIFO task queues, agent-to-agent queues |
-| Evolution | Step Functions evolution engine, DynamoDB state table, S3 artifacts |
-| TenantOnboarding | Step Functions provisioning workflow, Cedar policy store, Lambda functions |
-| Email | SES receipt rules, S3 inbound bucket, parser/sender Lambdas, SQS queue |
-| Frontend | S3 bucket + CloudFront OAC, React SPA hosting |
-| GatewayRegistration | AgentCore Gateway targets, MCP endpoint registry |
+| Stack               | Key Resources                                                              |
+| ------------------- | -------------------------------------------------------------------------- |
+| Network             | VPC, public/private subnets, NAT gateways, VPC endpoints, security groups  |
+| Data                | 6 DynamoDB tables, 3 S3 buckets, optional DAX cluster                      |
+| Security            | Cognito user pool + app client, WAF WebACL, KMS CMK                        |
+| Observability       | CloudWatch dashboards, SNS alarm topic, DDB throttle alarms                |
+| Api                 | REST API (v1 + WebSocket), JWT authorizer, webhook routes                  |
+| Pipeline            | CodePipeline, CodeCommit repo, CodeBuild project, ECR repositories         |
+| SkillPipeline       | Step Functions 7-stage skill security scanner                              |
+| Chat                | ECS Fargate cluster + service, ALB, CloudFront OAC distribution            |
+| Orchestration       | EventBridge bus, SQS FIFO task queues, agent-to-agent queues               |
+| Evolution           | Step Functions evolution engine, DynamoDB state table, S3 artifacts        |
+| TenantOnboarding    | Step Functions provisioning workflow, Cedar policy store, Lambda functions |
+| Email               | SES receipt rules, S3 inbound bucket, parser/sender Lambdas, SQS queue     |
+| Frontend            | S3 bucket + CloudFront OAC, React SPA hosting                              |
+| GatewayRegistration | AgentCore Gateway targets, MCP endpoint registry                           |
 
 ---
 
@@ -87,8 +87,8 @@ flowchart LR
     style G fill:#1d3557,color:#fff
 ```
 
-**Command registry (14 commands):**
-`chat` · `connect` (deprecated) · `deploy` · `destroy` · `doctor` · `init` · `login` · `session` · `setup` · `skill` · `status` · `sync` · `tenant` · `upgrade`
+**Command registry (16 commands):**
+`chat` · `connect` (deprecated) · `deploy` · `destroy` · `diff` · `doctor` · `init` · `login` · `session` · `setup` · `skill` · `status` · `sync` · `tenant` · `trigger` · `upgrade`
 
 ---
 
@@ -102,7 +102,7 @@ sequenceDiagram
     participant CLI as "chimera chat (ink TUI / readline)"
     participant ALB as "ALB (ECS Fargate)"
     participant GW as "Hono chat-gateway"
-    participant AUTH as "optionalAuth middleware"
+    participant AUTH as "authenticateJWT middleware"
     participant TC as "extractTenantContext middleware"
     participant RL as rateLimitMiddleware
     participant AGENT as "AgentCore Runtime (MicroVM)"
@@ -112,7 +112,7 @@ sequenceDiagram
     U->>CLI: user types message
     CLI->>ALB: POST /chat/stream — Authorization: Bearer JWT
     ALB->>GW: HTTP request
-    GW->>AUTH: optionalAuth (extracts JWT claims)
+    GW->>AUTH: authenticateJWT (validates + extracts JWT claims)
     AUTH->>TC: extractTenantContext (tenantId from JWT or header)
     TC->>RL: rateLimitMiddleware (token bucket check)
     RL->>AGENT: invoke agent (tenantId · userId · message)
@@ -189,6 +189,10 @@ flowchart TD
     ECS["ECS Fargate<br/>rolling update"]
     REGISTER["GatewayRegistration<br/>new MCP endpoint registered"]
     MONITOR["Post-health check<br/>drop &gt;10% → auto-rollback"]
+    EB["EventBridge<br/>Pipeline Execution<br/>State Change"]
+    LAMBDA["PipelineCompletionHandler<br/>Lambda"]
+    DDB_STATE["evolution-state<br/>DynamoDB"]
+    POLL["Agent polling<br/>wait_for_evolution_deployment<br/>every 30s, max 15 min"]
 
     DETECT --> HARNESS
     HARNESS --> HUMAN
@@ -204,11 +208,49 @@ flowchart TD
     ECR --> ECS
     ECS --> REGISTER
     REGISTER --> MONITOR
-    MONITOR -- "Healthy" --> DETECT
+    MONITOR -- "Healthy" --> EB
     MONITOR -- "Degraded" --> ROLLBACK["Auto-rollback<br/>restore S3 snapshot"]
+    PIPELINE -- "SUCCEEDED / FAILED" --> EB
+    EB --> LAMBDA
+    LAMBDA --> DDB_STATE
+    POLL --> DDB_STATE
+    DDB_STATE -- "deployed ✓" --> DETECT
+    DDB_STATE -- "deploy_failed ✗" --> ROLLBACK
 ```
 
 **Safety limits:** 10 evolutions/day total · 3 infra changes/day · 3 prompt A/B tests/week
+
+---
+
+## 5a. Evolution Feedback Loop
+
+How the agent knows when its self-evolution deployment completes.
+
+```mermaid
+sequenceDiagram
+    participant AGENT as Agent Runtime
+    participant CC as CodeCommit
+    participant PIPE as CodePipeline
+    participant EB_DEFAULT as "Default EventBridge"
+    participant LAMBDA as "PipelineCompletionHandler"
+    participant DDB as "evolution-state DynamoDB"
+    participant EB_CUSTOM as "chimera-agents EventBridge"
+
+    AGENT->>CC: create_commit (CDK stack code)
+    CC->>PIPE: EventBridge trigger (push to main)
+    PIPE->>PIPE: Build → Deploy → Test → Canary
+    PIPE->>EB_DEFAULT: Pipeline Execution State Change (SUCCEEDED/FAILED)
+    EB_DEFAULT->>LAMBDA: PipelineCompletionRule trigger
+    LAMBDA->>DDB: Update status: deploying → deployed/deploy_failed
+    LAMBDA->>EB_CUSTOM: Publish "Evolution Deployment Complete"
+
+    loop Polling (every 30s, max 15 min)
+        AGENT->>DDB: wait_for_evolution_deployment (check status)
+    end
+
+    DDB-->>AGENT: status = deployed ✓ (or deploy_failed ✗)
+    AGENT->>AGENT: Verify, register capability, report to user
+```
 
 ---
 
@@ -365,6 +407,7 @@ stateDiagram-v2
 **Session ID format:** `tenant-{tenantId}-user-{userId}-{uuid}`
 
 **Memory window by tier:**
+
 - Basic: STM 10 turns
 - Advanced: STM 50 turns
 - Premium: STM 200 turns
@@ -375,18 +418,19 @@ LTM compression strategy: SUMMARY (all tiers), USER_PREFERENCE (Advanced+), SEMA
 
 ## Cross-Reference
 
-| Diagram | Related Docs |
-|---------|-------------|
-| CDK Stacks (§1) | [deployment-architecture.md](deployment-architecture.md) |
-| CLI Lifecycle (§2) | [cli-lifecycle.md](cli-lifecycle.md) |
-| Request Flow (§3) | [agent-architecture.md](agent-architecture.md) §1 |
-| Auth Flow (§4) | `packages/cli/src/commands/login.ts`, `packages/cli/src/auth/` |
-| Self-Evolution (§5) | [agent-architecture.md](agent-architecture.md) §4 |
-| Multi-Tenant (§6) | [canonical-data-model.md](canonical-data-model.md) |
-| Skill Lifecycle (§7) | [agent-architecture.md](agent-architecture.md) §3 |
-| Deploy Pipeline (§8) | `packages/cli/src/commands/deploy.ts` |
-| Session State (§9) | [agent-architecture.md](agent-architecture.md) §1, §7 |
+| Diagram                  | Related Docs                                                   |
+| ------------------------ | -------------------------------------------------------------- |
+| CDK Stacks (§1)          | [deployment-architecture.md](deployment-architecture.md)       |
+| CLI Lifecycle (§2)       | [cli-lifecycle.md](cli-lifecycle.md)                           |
+| Request Flow (§3)        | [agent-architecture.md](agent-architecture.md) §1              |
+| Auth Flow (§4)           | `packages/cli/src/commands/login.ts`, `packages/cli/src/auth/` |
+| Self-Evolution (§5)      | [agent-architecture.md](agent-architecture.md) §4              |
+| Evolution Feedback (§5a) | `infra/lib/evolution-stack.ts`, `packages/agents/`             |
+| Multi-Tenant (§6)        | [canonical-data-model.md](canonical-data-model.md)             |
+| Skill Lifecycle (§7)     | [agent-architecture.md](agent-architecture.md) §3              |
+| Deploy Pipeline (§8)     | `packages/cli/src/commands/deploy.ts`                          |
+| Session State (§9)       | [agent-architecture.md](agent-architecture.md) §1, §7          |
 
 ---
 
-*Author: builder-arch-docs | Task: chimera-17ef | Status: Canonical*
+_Author: builder-arch-docs | Task: chimera-17ef | Status: Canonical_

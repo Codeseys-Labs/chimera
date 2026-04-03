@@ -13,6 +13,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as events from 'aws-cdk-lib/aws-events';
 import { EvolutionStack } from '../lib/evolution-stack';
 
 // Timeout configured in infra/bunfig.toml: [test] timeout = 30000
@@ -32,11 +33,15 @@ describe('EvolutionStack', () => {
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
     });
+    const eventBus = new events.EventBus(auditStack, 'TestEventBus', {
+      eventBusName: 'chimera-agent-events-dev',
+    });
 
     stack = new EvolutionStack(app, 'TestEvolutionStack', {
       env: ENV,
       envName: 'dev',
       auditTable,
+      eventBus,
     });
     template = Template.fromStack(stack);
   });
@@ -191,9 +196,7 @@ describe('EvolutionStack', () => {
       const sslEnforced = bucketPolicies.some((policy: any) => {
         const statements = policy.Properties.PolicyDocument.Statement;
         return statements.some(
-          (s: any) =>
-            s.Effect === 'Deny' &&
-            s.Condition?.Bool?.['aws:SecureTransport'] === 'false',
+          (s: any) => s.Effect === 'Deny' && s.Condition?.Bool?.['aws:SecureTransport'] === 'false'
         );
       });
       expect(sslEnforced).toBe(true);
@@ -354,8 +357,8 @@ describe('EvolutionStack', () => {
   });
 
   describe('EventBridge Scheduled Rules', () => {
-    it('should create 4 scheduled evolution rules', () => {
-      template.resourceCountIs('AWS::Events::Rule', 4);
+    it('should create 4 scheduled evolution rules + 1 pipeline completion rule', () => {
+      template.resourceCountIs('AWS::Events::Rule', 5);
     });
 
     it('should create daily prompt evolution rule at 2 AM UTC', () => {
@@ -502,10 +505,14 @@ describe('EvolutionStack', () => {
         partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
         sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       });
+      const prodEventBus = new events.EventBus(prodAuditStack, 'ProdTestEventBus', {
+        eventBusName: 'chimera-agent-events-prod',
+      });
       prodStack = new EvolutionStack(prodApp, 'ProdEvolutionStack', {
         env: ENV,
         envName: 'prod',
         auditTable: prodAuditTable,
+        eventBus: prodEventBus,
       });
       prodTemplate = Template.fromStack(prodStack);
     });
@@ -530,7 +537,7 @@ describe('EvolutionStack', () => {
       }
       // If no bucket has Retain, the test should fail
       const retainedBuckets = Object.values(allBuckets).filter(
-        (b: any) => b.DeletionPolicy === 'Retain',
+        (b: any) => b.DeletionPolicy === 'Retain'
       );
       expect(retainedBuckets.length).toBeGreaterThan(0);
     });

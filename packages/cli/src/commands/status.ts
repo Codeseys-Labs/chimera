@@ -10,10 +10,7 @@ import {
   ListStacksCommand,
   StackStatus,
 } from '@aws-sdk/client-cloudformation';
-import {
-  CodePipelineClient,
-  ListPipelineExecutionsCommand,
-} from '@aws-sdk/client-codepipeline';
+import { CodePipelineClient, ListPipelineExecutionsCommand } from '@aws-sdk/client-codepipeline';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 
@@ -28,7 +25,7 @@ interface StackInfo {
  */
 async function getChimeraStacks(
   client: CloudFormationClient,
-  envName: string,
+  envName: string
 ): Promise<StackInfo[]> {
   try {
     const command = new ListStacksCommand({
@@ -59,7 +56,22 @@ async function getChimeraStacks(
     }
 
     // Sort by standard deployment order
-    const order = ['Network', 'Data', 'Security', 'Observability', 'Api', 'SkillPipeline', 'Chat', 'Orchestration', 'Evolution', 'TenantOnboarding', 'Pipeline'];
+    const order = [
+      'Network',
+      'Data',
+      'Security',
+      'Observability',
+      'Api',
+      'SkillPipeline',
+      'Chat',
+      'Orchestration',
+      'Evolution',
+      'TenantOnboarding',
+      'Pipeline',
+      'Frontend',
+      'Email',
+      'Discovery',
+    ];
     stacks.sort((a, b) => {
       const aIndex = order.indexOf(a.name);
       const bIndex = order.indexOf(b.name);
@@ -77,11 +89,11 @@ async function getChimeraStacks(
  */
 async function getPipelineStatus(
   client: CodePipelineClient,
-  pipelineName: string,
+  pipelineName: string
 ): Promise<string> {
   try {
     const response = await client.send(
-      new ListPipelineExecutionsCommand({ pipelineName, maxResults: 1 }),
+      new ListPipelineExecutionsCommand({ pipelineName, maxResults: 1 })
     );
     const latest = response.pipelineExecutionSummaries?.[0];
     if (!latest) return 'No executions';
@@ -96,18 +108,17 @@ async function getPipelineStatus(
  * Format status with color
  */
 function formatStatus(status: string): string {
-  if (status.includes('COMPLETE')) {
-    return color.green(status);
-  } else if (status.includes('PROGRESS')) {
-    return color.yellow(status);
-  } else if (status.includes('FAILED')) {
+  // ROLLBACK states are failures even if they end in _COMPLETE
+  if (status.includes('ROLLBACK') || status.includes('FAILED')) {
     return color.red(status);
-  } else if (status === 'Succeeded') {
+  } else if (status.includes('COMPLETE') || status === 'Succeeded') {
     return color.green(status);
-  } else if (status === 'InProgress') {
+  } else if (status.includes('PROGRESS') || status === 'InProgress') {
     return color.yellow(status);
   } else if (status === 'Failed') {
     return color.red(status);
+  } else if (status === 'NOT_FOUND' || status === 'Not found') {
+    return color.gray(status);
   }
   return color.gray(status);
 }
@@ -120,12 +131,15 @@ export function registerStatusCommand(program: Command): void {
     .option('--env <environment>', 'Environment name')
     .option('--pipeline', 'Show pipeline execution status')
     .option('--json', 'Output result as JSON')
-    .addHelpText('after', `
+    .addHelpText(
+      'after',
+      `
 Examples:
   $ chimera status
   $ chimera status --env prod --pipeline
   $ chimera status --region us-west-2
-  $ chimera status --json`)
+  $ chimera status --json`
+    )
     .action(async (options) => {
       const spinner = ora('Checking deployment status').start();
       if (options.json) spinner.stop();
@@ -143,7 +157,9 @@ Examples:
           process.exit(1);
         }
         const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
-        if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+        if (wsConfig?.aws?.profile) {
+          process.env.AWS_PROFILE = wsConfig.aws.profile;
+        }
 
         const client = new CloudFormationClient({ region });
 
@@ -167,18 +183,20 @@ Examples:
         const pipelineStatus = await getPipelineStatus(pipelineClient, pipelineName);
 
         if (options.json) {
-          console.log(JSON.stringify({
-            status: 'ok',
-            data: {
-              stacks: stacks.map(s => ({
-                name: s.name,
-                status: s.status,
-                lastUpdated: s.lastUpdated,
-              })),
-              pipelineStatus,
-              endpoints: wsConfig?.endpoints,
-            },
-          }));
+          console.log(
+            JSON.stringify({
+              status: 'ok',
+              data: {
+                stacks: stacks.map((s) => ({
+                  name: s.name,
+                  status: s.status,
+                  lastUpdated: s.lastUpdated,
+                })),
+                pipelineStatus,
+                endpoints: wsConfig?.endpoints,
+              },
+            })
+          );
           return;
         }
 
@@ -206,9 +224,17 @@ Examples:
         if (allComplete) {
           console.log(color.green(`  ✓ All ${stacks.length} stacks deployed successfully`));
         } else if (anyFailed) {
-          console.log(color.red(`  ✗ ${stacks.filter((s) => s.status.includes('FAILED')).length} stack(s) failed`));
+          console.log(
+            color.red(
+              `  ✗ ${stacks.filter((s) => s.status.includes('FAILED')).length} stack(s) failed`
+            )
+          );
         } else if (anyInProgress) {
-          console.log(color.yellow(`  ⋯ ${stacks.filter((s) => s.status.includes('PROGRESS')).length} stack(s) in progress`));
+          console.log(
+            color.yellow(
+              `  ⋯ ${stacks.filter((s) => s.status.includes('PROGRESS')).length} stack(s) in progress`
+            )
+          );
         }
 
         if (wsConfig?.endpoints?.api_url) {
@@ -219,7 +245,9 @@ Examples:
         }
       } catch (error: any) {
         if (options.json) {
-          console.log(JSON.stringify({ status: 'error', error: error.message, code: 'STATUS_FAILED' }));
+          console.log(
+            JSON.stringify({ status: 'error', error: error.message, code: 'STATUS_FAILED' })
+          );
           process.exit(1);
         }
         spinner.fail(color.red('Status check failed'));

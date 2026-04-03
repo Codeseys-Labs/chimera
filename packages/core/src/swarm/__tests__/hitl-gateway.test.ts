@@ -23,7 +23,10 @@ class MemoryDDB implements HITLDDBClient {
     return `${pk}::${sk}`;
   }
 
-  async get(input: { TableName: string; Key: Record<string, unknown> }): Promise<{ Item?: Record<string, unknown> }> {
+  async get(input: {
+    TableName: string;
+    Key: Record<string, unknown>;
+  }): Promise<{ Item?: Record<string, unknown> }> {
     const k = this.key(input.Key['PK'] as string, input.Key['SK'] as string);
     const item = this.store.get(k);
     return { Item: item };
@@ -259,7 +262,9 @@ describe('HITLGateway — tenant isolation', () => {
 
 describe('createHITLGateway factory', () => {
   it('should create gateway with default config', () => {
-    const gw = createHITLGateway();
+    // Provide a mock DDB client to avoid real AWS SDK credential resolution
+    const ddb = new MemoryDDB();
+    const gw = createHITLGateway({ ddb });
     expect(gw).toBeInstanceOf(HITLGateway);
   });
 

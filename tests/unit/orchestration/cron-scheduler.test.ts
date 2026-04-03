@@ -8,26 +8,82 @@ import {
   createCronScheduler,
   CronPatterns,
   CronJobPresets,
-  type CronJob
+  type CronJob,
 } from '../../../packages/core/src/orchestration/cron-scheduler';
-import { createOrchestrator } from '../../../packages/core/src/orchestration/orchestrator';
+import {
+  createOrchestrator,
+  type OrchestratorSQSClient,
+  type OrchestratorDDBClient,
+  type OrchestratorEventBridgeClient,
+} from '../../../packages/core/src/orchestration/orchestrator';
+
+// ---------------------------------------------------------------------------
+// In-memory stubs — avoid real AWS SDK credential resolution
+// ---------------------------------------------------------------------------
+
+let queueCounter = 0;
+
+function createMockSQS(): OrchestratorSQSClient {
+  return {
+    async createQueue(input) {
+      const url = `https://sqs.us-east-1.amazonaws.com/123456789012/${input.QueueName}`;
+      return { QueueUrl: url };
+    },
+    async getQueueAttributes() {
+      return {
+        Attributes: { QueueArn: `arn:aws:sqs:us-east-1:123456789012:queue-${++queueCounter}` },
+      };
+    },
+    async sendMessage() {
+      return { MessageId: `msg-${Date.now()}` };
+    },
+    async deleteQueue() {
+      return {};
+    },
+  };
+}
+
+function createMockDDB(): OrchestratorDDBClient {
+  return {
+    async put() {
+      return {};
+    },
+    async update() {
+      return {};
+    },
+  };
+}
+
+function createMockEventBridge(): OrchestratorEventBridgeClient {
+  return {
+    async putEvents() {
+      return { FailedEntryCount: 0 };
+    },
+  };
+}
 
 describe('CronScheduler', () => {
   let scheduler: CronScheduler;
   let orchestrator: ReturnType<typeof createOrchestrator>;
 
   beforeEach(() => {
+    queueCounter = 0;
     orchestrator = createOrchestrator({
       region: 'us-east-1',
       eventBusName: 'test-event-bus',
       agentTableName: 'test-agents',
-      defaultQueuePrefix: 'test-queue'
+      defaultQueuePrefix: 'test-queue',
+      clients: {
+        sqs: createMockSQS(),
+        dynamodb: createMockDDB(),
+        eventBridge: createMockEventBridge(),
+      },
     });
 
     scheduler = createCronScheduler(orchestrator, {
       region: 'us-east-1',
       eventBusName: 'test-event-bus',
-      executionTableName: 'test-executions'
+      executionTableName: 'test-executions',
     });
   });
 
@@ -40,7 +96,7 @@ describe('CronScheduler', () => {
         name: 'Daily Report',
         schedule: CronPatterns.daily9am,
         instruction: 'Generate daily report',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -58,7 +114,7 @@ describe('CronScheduler', () => {
         name: 'Hourly Check',
         schedule: CronPatterns.hourly,
         instruction: 'Check system status',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -75,7 +131,7 @@ describe('CronScheduler', () => {
         name: 'Disabled Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test job',
-        enabled: false
+        enabled: false,
       };
 
       await scheduler.registerJob(job);
@@ -94,7 +150,7 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test',
-        enabled: false
+        enabled: false,
       };
 
       await scheduler.registerJob(job);
@@ -105,9 +161,9 @@ describe('CronScheduler', () => {
     });
 
     it('should throw error for non-existent job', async () => {
-      await expect(
-        scheduler.enableJob('non-existent')
-      ).rejects.toThrow('Job not found: non-existent');
+      await expect(scheduler.enableJob('non-existent')).rejects.toThrow(
+        'Job not found: non-existent'
+      );
     });
   });
 
@@ -120,7 +176,7 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -131,9 +187,9 @@ describe('CronScheduler', () => {
     });
 
     it('should throw error for non-existent job', async () => {
-      await expect(
-        scheduler.disableJob('non-existent')
-      ).rejects.toThrow('Job not found: non-existent');
+      await expect(scheduler.disableJob('non-existent')).rejects.toThrow(
+        'Job not found: non-existent'
+      );
     });
   });
 
@@ -146,7 +202,7 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -157,9 +213,9 @@ describe('CronScheduler', () => {
     });
 
     it('should throw error for non-existent job', async () => {
-      await expect(
-        scheduler.deleteJob('non-existent')
-      ).rejects.toThrow('Job not found: non-existent');
+      await expect(scheduler.deleteJob('non-existent')).rejects.toThrow(
+        'Job not found: non-existent'
+      );
     });
   });
 
@@ -170,7 +226,7 @@ describe('CronScheduler', () => {
         tenantId: 'tenant-123',
         agentId: 'agent-001',
         role: 'worker',
-        capabilities: []
+        capabilities: [],
       });
 
       const job: CronJob = {
@@ -181,7 +237,7 @@ describe('CronScheduler', () => {
         schedule: CronPatterns.hourly,
         instruction: 'Test task',
         enabled: true,
-        timeoutSeconds: 60
+        timeoutSeconds: 60,
       };
 
       await scheduler.registerJob(job);
@@ -202,7 +258,7 @@ describe('CronScheduler', () => {
         tenantId: 'tenant-123',
         agentId: 'agent-001',
         role: 'worker',
-        capabilities: []
+        capabilities: [],
       });
 
       const job: CronJob = {
@@ -212,7 +268,7 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test task',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -229,9 +285,9 @@ describe('CronScheduler', () => {
     it('should throw error for non-existent job', async () => {
       const scheduledTime = new Date().toISOString();
 
-      await expect(
-        scheduler.executeCronJob('non-existent', scheduledTime)
-      ).rejects.toThrow('Job not found: non-existent');
+      await expect(scheduler.executeCronJob('non-existent', scheduledTime)).rejects.toThrow(
+        'Job not found: non-existent'
+      );
     });
   });
 
@@ -242,7 +298,7 @@ describe('CronScheduler', () => {
         tenantId: 'tenant-123',
         agentId: 'agent-001',
         role: 'worker',
-        capabilities: []
+        capabilities: [],
       });
 
       const job: CronJob = {
@@ -252,14 +308,14 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test task',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
 
       // Execute multiple times
       await scheduler.executeCronJob('job-009', new Date().toISOString());
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       await scheduler.executeCronJob('job-009', new Date().toISOString());
 
       const history = scheduler.getExecutionHistory('job-009');
@@ -272,7 +328,7 @@ describe('CronScheduler', () => {
         tenantId: 'tenant-123',
         agentId: 'agent-001',
         role: 'worker',
-        capabilities: []
+        capabilities: [],
       });
 
       const job: CronJob = {
@@ -282,7 +338,7 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test task',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -290,14 +346,15 @@ describe('CronScheduler', () => {
       const time1 = new Date().toISOString();
       await scheduler.executeCronJob('job-010', time1);
 
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       const time2 = new Date().toISOString();
       await scheduler.executeCronJob('job-010', time2);
 
       const history = scheduler.getExecutionHistory('job-010');
-      expect(new Date(history[0].scheduledTime).getTime())
-        .toBeGreaterThanOrEqual(new Date(history[1].scheduledTime).getTime());
+      expect(new Date(history[0].scheduledTime).getTime()).toBeGreaterThanOrEqual(
+        new Date(history[1].scheduledTime).getTime()
+      );
     });
 
     it('should respect limit parameter', async () => {
@@ -306,7 +363,7 @@ describe('CronScheduler', () => {
         tenantId: 'tenant-123',
         agentId: 'agent-001',
         role: 'worker',
-        capabilities: []
+        capabilities: [],
       });
 
       const job: CronJob = {
@@ -316,7 +373,7 @@ describe('CronScheduler', () => {
         name: 'Test Job',
         schedule: CronPatterns.hourly,
         instruction: 'Test task',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job);
@@ -324,7 +381,7 @@ describe('CronScheduler', () => {
       // Execute 5 times
       for (let i = 0; i < 5; i++) {
         await scheduler.executeCronJob('job-011', new Date().toISOString());
-        await new Promise(resolve => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 5));
       }
 
       const history = scheduler.getExecutionHistory('job-011', 3);
@@ -341,7 +398,7 @@ describe('CronScheduler', () => {
         name: 'Job 1',
         schedule: CronPatterns.hourly,
         instruction: 'Test 1',
-        enabled: true
+        enabled: true,
       };
 
       const job2: CronJob = {
@@ -351,7 +408,7 @@ describe('CronScheduler', () => {
         name: 'Job 2',
         schedule: CronPatterns.daily9am,
         instruction: 'Test 2',
-        enabled: true
+        enabled: true,
       };
 
       const job3: CronJob = {
@@ -361,7 +418,7 @@ describe('CronScheduler', () => {
         name: 'Job 3',
         schedule: CronPatterns.hourly,
         instruction: 'Test 3',
-        enabled: true
+        enabled: true,
       };
 
       await scheduler.registerJob(job1);

@@ -1,14 +1,15 @@
 /**
  * chimera doctor — Pre-flight checks for the Chimera platform
  *
- * Runs 7 checks and prints pass/fail for each:
- *   1. AWS credentials
+ * Runs 8 checks and prints pass/fail for each:
+ *   1. AWS credentials (validated via STS)
  *   2. Chimera auth tokens
  *   3. API connectivity
  *   4. Cognito pool config
- *   5. CloudFormation stack status (all 11 stacks)
- *   6. chimera.toml schema (required fields)
- *   7. Toolchain (bun, npx, aws CLI)
+ *   5. CDK Bootstrap (CDKToolkit stack)
+ *   6. CloudFormation stack status (all 14 stacks)
+ *   7. chimera.toml schema (required fields)
+ *   8. Toolchain (bun, node, npx, aws CLI, cdk)
  */
 
 import { Command } from 'commander';
@@ -33,20 +34,61 @@ export interface CheckResult {
 
 // ─── Individual checks ────────────────────────────────────────────────────────
 
-export function checkAwsCredentials(awsProfile?: string): CheckResult {
-  const hasEnvKey = Boolean(process.env['AWS_ACCESS_KEY_ID']);
-  const hasEnvRole = Boolean(process.env['AWS_ROLE_ARN'] ?? process.env['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI']);
-  const hasFile = fs.existsSync(AWS_CREDENTIALS_FILE);
-  const hasProfile = Boolean(process.env['AWS_PROFILE'] ?? process.env['AWS_DEFAULT_PROFILE'] ?? awsProfile);
+export async function checkAwsCredentials(awsProfile?: string): Promise<CheckResult> {
+  try {
+    // Check for credential sources
+    const hasEnvKey = !!process.env.AWS_ACCESS_KEY_ID;
+    const hasRoleArn =
+      !!process.env.AWS_ROLE_ARN || !!process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI;
+    const hasProfile =
+      !!process.env.AWS_PROFILE || !!process.env.AWS_DEFAULT_PROFILE || !!awsProfile;
+    const hasCredFile = fs.existsSync(AWS_CREDENTIALS_FILE);
 
-  if (hasEnvKey || hasEnvRole || hasFile || hasProfile) {
-    return { label: 'AWS credentials', ok: true };
+    if (!hasEnvKey && !hasRoleArn && !hasProfile && !hasCredFile) {
+      return {
+        label: 'AWS credentials',
+        ok: false,
+        detail:
+          'No AWS credentials found. Set AWS_ACCESS_KEY_ID, AWS_PROFILE, or configure ~/.aws/credentials',
+      };
+    }
+
+    // Actually validate credentials with STS
+    const env = { ...process.env };
+    if (awsProfile) env.AWS_PROFILE = awsProfile;
+
+    const result = execFileSync('aws', ['sts', 'get-caller-identity', '--output', 'json'], {
+      encoding: 'utf-8',
+      timeout: 10_000,
+      env,
+    });
+    const identity = JSON.parse(result);
+    return {
+      label: 'AWS credentials',
+      ok: true,
+      detail: `Authenticated as ${identity.Arn} (Account: ${identity.Account})`,
+    };
+  } catch (error: any) {
+    if (error.message?.includes('ExpiredToken')) {
+      return {
+        label: 'AWS credentials',
+        ok: false,
+        detail: 'AWS credentials expired. Run `aws sso login` or refresh your credentials.',
+      };
+    }
+    if (error.message?.includes('InvalidClientTokenId')) {
+      return {
+        label: 'AWS credentials',
+        ok: false,
+        detail: 'AWS credentials are invalid. Check your access key configuration.',
+      };
+    }
+    return {
+      label: 'AWS credentials',
+      ok: false,
+      detail: `AWS credential validation failed: ${error.message?.slice(0, 200) || 'Unknown error'}`,
+    };
   }
-  return {
-    label: 'AWS credentials',
-    ok: false,
-    detail: 'No AWS credentials found. Set AWS_ACCESS_KEY_ID, AWS_PROFILE, or configure ~/.aws/credentials',
-  };
 }
 
 export async function checkChimeraAuth(credFile = CREDENTIALS_FILE): Promise<CheckResult> {
@@ -78,11 +120,18 @@ export async function checkChimeraAuth(credFile = CREDENTIALS_FILE): Promise<Che
   }
 }
 
-export async function checkApiConnectivity(baseUrl: string, chatUrl?: string): Promise<CheckResult> {
+export async function checkApiConnectivity(
+  baseUrl: string,
+  chatUrl?: string
+): Promise<CheckResult> {
   // Prefer chat_url (ECS ALB) for health check — api_url (API Gateway) returns 403 on /health
   const healthBase = chatUrl || baseUrl;
   if (!healthBase) {
-    return { label: 'API connectivity', ok: false, detail: 'api_url not set in chimera.toml [endpoints]' };
+    return {
+      label: 'API connectivity',
+      ok: false,
+      detail: 'api_url not set in chimera.toml [endpoints]',
+    };
   }
   try {
     const healthUrl = `${healthBase.replace(/\/$/, '')}/health`;
@@ -127,13 +176,70 @@ export function checkCognitoConfig(): CheckResult {
   return { label: 'Cognito pool config', ok: true, detail: `Pool: ${poolId}` };
 }
 
+export async function checkCdkBootstrap(region?: string): Promise<CheckResult> {
+  try {
+    const args = [
+      'cloudformation',
+      'describe-stacks',
+      '--stack-name',
+      'CDKToolkit',
+      '--output',
+      'json',
+    ];
+    if (region) args.push('--region', region);
+
+    const result = execFileSync('aws', args, { encoding: 'utf-8', timeout: 10_000 });
+    const stacks = JSON.parse(result);
+    const stack = stacks?.Stacks?.[0];
+    if (!stack)
+      return {
+        label: 'CDK Bootstrap (CDKToolkit stack)',
+        ok: false,
+        detail: 'CDKToolkit stack not found. Run: npx cdk bootstrap',
+      };
+
+    const status = stack.StackStatus;
+    if (!status.endsWith('_COMPLETE') || status.includes('ROLLBACK')) {
+      return {
+        label: 'CDK Bootstrap (CDKToolkit stack)',
+        ok: false,
+        detail: `CDKToolkit stack in bad state: ${status}`,
+      };
+    }
+
+    const versionOutput = stack.Outputs?.find((o: any) => o.OutputKey === 'BootstrapVersion');
+    const version = versionOutput?.OutputValue || 'unknown';
+    return {
+      label: 'CDK Bootstrap (CDKToolkit stack)',
+      ok: true,
+      detail: `CDK bootstrap v${version} (${status})`,
+    };
+  } catch {
+    return {
+      label: 'CDK Bootstrap (CDKToolkit stack)',
+      ok: false,
+      detail: 'CDKToolkit stack not found. Run: npx cdk bootstrap aws://<account>/<region>',
+    };
+  }
+}
+
 // Chimera stack suffixes — actual names follow Chimera-{env}-{Suffix} pattern.
-// Kept in sync with STACK_DESTROY_ORDER in destroy.ts (all 15 deployed stacks).
+// Kept in sync with STACK_DESTROY_ORDER in destroy.ts (all 14 deployed stacks).
 const CHIMERA_STACK_SUFFIXES = [
-  'Network', 'Data', 'Security', 'Observability',
-  'Api', 'Pipeline', 'SkillPipeline', 'Chat',
-  'Orchestration', 'Evolution', 'TenantOnboarding',
-  'Frontend', 'Discovery', 'GatewayRegistration', 'Email',
+  'Network',
+  'Data',
+  'Security',
+  'Observability',
+  'Api',
+  'Pipeline',
+  'SkillPipeline',
+  'Chat',
+  'Orchestration',
+  'Evolution',
+  'TenantOnboarding',
+  'Frontend',
+  'Discovery',
+  'Email',
 ];
 
 export async function checkStackStatus(region?: string, env?: string): Promise<CheckResult> {
@@ -205,6 +311,7 @@ export function checkTomlSchema(): CheckResult {
 export function checkToolchain(): CheckResult {
   const tools: { name: string; args: string[] }[] = [
     { name: 'bun', args: ['--version'] },
+    { name: 'node', args: ['--version'] },
     { name: 'npx', args: ['--version'] },
     { name: 'aws', args: ['--version'] },
   ];
@@ -216,6 +323,14 @@ export function checkToolchain(): CheckResult {
       missing.push(tool.name);
     }
   }
+
+  // Verify npx cdk resolves (separate check because it may need to install)
+  try {
+    execFileSync('npx', ['cdk', '--version'], { stdio: 'pipe', timeout: 15_000 });
+  } catch {
+    missing.push('cdk (via npx)');
+  }
+
   if (missing.length > 0) {
     return {
       label: 'Toolchain',
@@ -242,12 +357,18 @@ export function registerDoctorCommand(program: Command): void {
     .command('doctor')
     .description('Run pre-flight checks for the Chimera platform')
     .option('--json', 'Output results as JSON')
-    .option('--region <region>', 'AWS region override (default: read from chimera.toml [aws] region)')
-    .addHelpText('after', `
+    .option(
+      '--region <region>',
+      'AWS region override (default: read from chimera.toml [aws] region)'
+    )
+    .addHelpText(
+      'after',
+      `
 Examples:
   $ chimera doctor
   $ chimera doctor --region us-west-2
-  $ chimera doctor --json`)
+  $ chimera doctor --json`
+    )
     .action(async (options: { json?: boolean; region?: string }) => {
       const config = loadWorkspaceConfig();
       const region = options.region ?? config.aws?.region;
@@ -260,10 +381,11 @@ Examples:
       }
 
       const checks = await Promise.all([
-        Promise.resolve(checkAwsCredentials(config.aws?.profile)),
+        checkAwsCredentials(config.aws?.profile),
         checkChimeraAuth(),
         checkApiConnectivity(baseUrl, chatUrl),
         Promise.resolve(checkCognitoConfig()),
+        checkCdkBootstrap(region),
         checkStackStatus(region, env),
         Promise.resolve(checkTomlSchema()),
         Promise.resolve(checkToolchain()),
@@ -286,7 +408,7 @@ Examples:
       console.log(
         allPassed
           ? `\n${color.green('All checks passed.')}`
-          : `\n${color.red('Some checks failed.')} ${color.dim('Review the items above.')}`,
+          : `\n${color.red('Some checks failed.')} ${color.dim('Review the items above.')}`
       );
 
       if (!allPassed) process.exit(1);
