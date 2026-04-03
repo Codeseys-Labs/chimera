@@ -35,10 +35,34 @@ logger = logging.getLogger(__name__)
 _active_sessions: dict[str, dict] = {}
 
 
+class CodeInterpreterUnavailableError(Exception):
+    """Raised when the AgentCore Code Interpreter service is not available."""
+
+    pass
+
+
 def _get_agentcore_client():
-    """Get the Bedrock AgentCore Runtime client."""
+    """
+    Get the Bedrock AgentCore Runtime client.
+
+    Note: As of 2026-04, the boto3 service name for AgentCore Code Interpreter
+    may not be available in all SDK versions. The correct service name is
+    'bedrock-agent-runtime' for GA Bedrock Agents, but 'bedrock-agentcore-runtime'
+    is only available if the AgentCore Code Interpreter SDK has been installed.
+    When the service is unavailable, callers should fall back to regex-based
+    CDK validation instead of sandbox execution.
+    """
     region = os.environ.get("AWS_REGION", "us-west-2")
-    return boto3.client("bedrock-agentcore-runtime", region_name=region)
+    try:
+        return boto3.client("bedrock-agentcore-runtime", region_name=region)
+    except Exception as e:
+        raise CodeInterpreterUnavailableError(
+            f"AgentCore Code Interpreter service 'bedrock-agentcore-runtime' is not "
+            f"available in this environment. This may mean the service has not GA'd "
+            f"in this region, or the boto3 version does not include the service model. "
+            f"Use regex-based CDK validation (evolution_tools._validate_cdk_code) "
+            f"as a fallback. Original error: {e}"
+        ) from e
 
 
 def _ensure_session(tenant_id: str, session_name: str = "default") -> dict:
@@ -66,6 +90,8 @@ def _ensure_session(tenant_id: str, session_name: str = "default") -> dict:
             f"Created Code Interpreter session {session['sessionId']} for tenant {tenant_id}"
         )
         return session
+    except CodeInterpreterUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create Code Interpreter session: {e}")
         raise
@@ -95,8 +121,20 @@ def validate_cdk_in_sandbox(
         Validation result: success with CloudFormation template summary,
         or failure with compilation errors for the agent to fix.
     """
-    session = _ensure_session(tenant_id, f"cdk-validate-{capability_name}")
-    client = _get_agentcore_client()
+    try:
+        session = _ensure_session(tenant_id, f"cdk-validate-{capability_name}")
+        client = _get_agentcore_client()
+    except CodeInterpreterUnavailableError as e:
+        return (
+            f"CDK SANDBOX VALIDATION UNAVAILABLE\n"
+            f"{'=' * 50}\n"
+            f"AgentCore Code Interpreter is not available in this environment.\n"
+            f"Reason: {e}\n\n"
+            f"FALLBACK: Use regex-based CDK validation instead by calling\n"
+            f"trigger_infra_evolution() directly — it includes built-in\n"
+            f"pattern-based validation (forbidden patterns, size limits, etc.).\n"
+            f"{'=' * 50}"
+        )
 
     # Escape the CDK code for safe embedding in the Python script.
     # Use json.dumps to produce a valid Python string literal.
@@ -266,8 +304,14 @@ def execute_in_sandbox(
     if not tenant_id:
         return "Error: tenant_id is required for sandbox execution."
 
-    session = _ensure_session(tenant_id, session_name)
-    client = _get_agentcore_client()
+    try:
+        session = _ensure_session(tenant_id, session_name)
+        client = _get_agentcore_client()
+    except CodeInterpreterUnavailableError as e:
+        return (
+            f"Code Interpreter sandbox is not available: {e}\n"
+            f"Consider running this code locally or using AWS Lambda instead."
+        )
 
     try:
         response = client.invoke_code_interpreter(
@@ -312,8 +356,14 @@ def fetch_url_content(
     Returns:
         Extracted content from the URL, or error message.
     """
-    session = _ensure_session(tenant_id, "browser")
-    client = _get_agentcore_client()
+    try:
+        session = _ensure_session(tenant_id, "browser")
+        client = _get_agentcore_client()
+    except CodeInterpreterUnavailableError as e:
+        return (
+            f"Code Interpreter sandbox is not available for URL fetching: {e}\n"
+            f"Use an alternative HTTP tool or direct boto3 calls instead."
+        )
 
     # Escape url for safe embedding in the Python script
     escaped_url = json.dumps(url)

@@ -7,6 +7,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { ChimeraTable } from '../constructs/chimera-table';
 import { ChimeraBucket } from '../constructs/chimera-bucket';
@@ -1233,32 +1234,54 @@ def handler(event, context):
     // EventBridge: Scheduled Evolution Tasks
     // ======================================================================
 
+    // Scheduled rules pass a default tenant_id for system-level operations.
+    // Without this, Lambda handlers would throw KeyError on event['tenant_id'].
+    const scheduledInput = events.RuleTargetInput.fromObject({
+      tenant_id: 'system',
+    });
+
     new events.Rule(this, 'DailyPromptEvolutionRule', {
       ruleName: `chimera-daily-prompt-evolution-${props.envName}`,
       description: 'Trigger daily prompt evolution analysis',
       schedule: events.Schedule.cron({ hour: '2', minute: '0' }),
-      targets: [new targets.SfnStateMachine(this.promptEvolutionStateMachine)],
+      targets: [
+        new targets.SfnStateMachine(this.promptEvolutionStateMachine, {
+          input: scheduledInput,
+        }),
+      ],
     });
 
     new events.Rule(this, 'WeeklySkillGenerationRule', {
       ruleName: `chimera-weekly-skill-generation-${props.envName}`,
       description: 'Trigger weekly skill auto-generation',
       schedule: events.Schedule.cron({ weekDay: 'SUN', hour: '3', minute: '0' }),
-      targets: [new targets.SfnStateMachine(this.skillGenerationStateMachine)],
+      targets: [
+        new targets.SfnStateMachine(this.skillGenerationStateMachine, {
+          input: scheduledInput,
+        }),
+      ],
     });
 
     new events.Rule(this, 'DailyMemoryEvolutionRule', {
       ruleName: `chimera-daily-memory-evolution-${props.envName}`,
       description: 'Trigger daily memory evolution and GC',
       schedule: events.Schedule.cron({ hour: '4', minute: '0' }),
-      targets: [new targets.SfnStateMachine(this.memoryEvolutionStateMachine)],
+      targets: [
+        new targets.SfnStateMachine(this.memoryEvolutionStateMachine, {
+          input: scheduledInput,
+        }),
+      ],
     });
 
     new events.Rule(this, 'HourlyFeedbackProcessingRule', {
       ruleName: `chimera-hourly-feedback-processing-${props.envName}`,
       description: 'Trigger hourly feedback event processing',
       schedule: events.Schedule.rate(cdk.Duration.hours(1)),
-      targets: [new targets.SfnStateMachine(this.feedbackProcessorStateMachine)],
+      targets: [
+        new targets.SfnStateMachine(this.feedbackProcessorStateMachine, {
+          input: scheduledInput,
+        }),
+      ],
     });
 
     // ======================================================================
@@ -1272,9 +1295,13 @@ def handler(event, context):
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-const { DynamoDB, EventBridge } = require('aws-sdk');
-const ddb = new DynamoDB.DocumentClient();
-const eb = new EventBridge();
+const { DynamoDBClient, ScanCommand, UpdateCommand } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
+const { EventBridgeClient, PutEventsCommand } = require('@aws-sdk/client-eventbridge');
+
+const rawDdb = new DynamoDBClient({});
+const ddb = DynamoDBDocumentClient.from(rawDdb);
+const eb = new EventBridgeClient({});
 
 exports.handler = async (event) => {
   const { pipeline, state, 'execution-id': executionId } = event.detail;
@@ -1284,24 +1311,27 @@ exports.handler = async (event) => {
 
   console.log(JSON.stringify({ message: 'Pipeline state change', pipeline, state, executionId }));
 
-  // Only process chimera pipelines
-  if (!pipeline.startsWith('Chimera-')) return;
+  // Only process chimera pipelines (pipeline name is chimera-deploy-{env}, lowercase)
+  if (!pipeline.includes('chimera')) return;
 
   const newStatus = state === 'SUCCEEDED' ? 'deployed' : state === 'FAILED' ? 'deploy_failed' : 'stopped';
 
-  // Find pending evolution records
-  const scan = await ddb.scan({
+  // Find pending evolution records.
+  // evolution_tools.py writes status = 'deploying', self-evolution-orchestrator.ts writes status = 'deploying'.
+  const scan = await ddb.send(new ScanCommand({
     TableName: tableName,
     FilterExpression: '#s = :deploying AND begins_with(PK, :prefix)',
     ExpressionAttributeNames: { '#s': 'status' },
-    ExpressionAttributeValues: { ':deploying': 'deploying', ':prefix': 'EVOLUTION#' },
+    ExpressionAttributeValues: { ':deploying': { S: 'deploying' }, ':prefix': { S: 'EVOLUTION#' } },
     Limit: 50,
-  }).promise();
+  }));
 
   const updates = (scan.Items || []).map(async (item) => {
-    await ddb.update({
+    const pk = item.PK.S || item.PK;
+    const sk = item.SK.S || item.SK;
+    await ddb.send(new UpdateCommand({
       TableName: tableName,
-      Key: { PK: item.PK, SK: item.SK },
+      Key: { PK: pk, SK: sk },
       UpdateExpression: 'SET #s = :status, updated_at = :now, pipeline_execution_id = :execId',
       ExpressionAttributeNames: { '#s': 'status' },
       ExpressionAttributeValues: {
@@ -1309,24 +1339,24 @@ exports.handler = async (event) => {
         ':now': new Date().toISOString(),
         ':execId': executionId,
       },
-    }).promise();
+    }));
 
     // Publish completion event to custom bus
-    await eb.putEvents({
+    await eb.send(new PutEventsCommand({
       Entries: [{
         Source: 'chimera.evolution',
         DetailType: 'Evolution Deployment Complete',
         EventBusName: eventBusName,
         Detail: JSON.stringify({
-          evolutionId: item.PK.replace('EVOLUTION#', ''),
+          evolutionId: (pk || '').replace('EVOLUTION#', ''),
           status: newStatus,
           pipeline,
           executionId,
-          capabilityName: item.capability_name || 'unknown',
-          tenantId: item.tenant_id || 'unknown',
+          capabilityName: item.capability_name?.S || item.capability_name || 'unknown',
+          tenantId: item.tenant_id?.S || item.tenant_id || 'unknown',
         }),
       }],
-    }).promise();
+    }));
   });
 
   await Promise.all(updates);
@@ -1360,6 +1390,18 @@ exports.handler = async (event) => {
       },
     });
     pipelineRule.addTarget(new targets.LambdaFunction(pipelineCompletionFn));
+
+    // ======================================================================
+    // SSM Parameter: evolution kill switch (default: enabled)
+    // Referenced by evolution_tools.py _check_kill_switch() at runtime.
+    // Set to "false" to disable all infrastructure self-modifications.
+    // ======================================================================
+    new ssm.StringParameter(this, 'EvolutionKillSwitch', {
+      parameterName: `/chimera/evolution/self-modify-enabled/${props.envName}`,
+      stringValue: 'true',
+      description:
+        'Kill switch for self-evolution. Set to "false" to disable all infrastructure modifications.',
+    });
 
     // ======================================================================
     // Stack Outputs

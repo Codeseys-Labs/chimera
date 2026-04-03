@@ -14,13 +14,14 @@ const CLIENT_ID = process.env.COGNITO_CLIENT_ID;
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 
 // JWT verifier instance (cached for performance)
-const verifier = USER_POOL_ID && CLIENT_ID
-  ? CognitoJwtVerifier.create({
-      userPoolId: USER_POOL_ID,
-      tokenUse: 'access',
-      clientId: CLIENT_ID,
-    })
-  : null;
+const verifier =
+  USER_POOL_ID && CLIENT_ID
+    ? CognitoJwtVerifier.create({
+        userPoolId: USER_POOL_ID,
+        tokenUse: 'id',
+        clientId: CLIENT_ID,
+      })
+    : null;
 
 // Auth context type (stored in Hono context)
 export interface AuthContext {
@@ -54,33 +55,38 @@ function extractToken(c: Context): string | null {
  *   app.use('/chat/*', authenticateJWT);
  *   app.use('/admin/*', authenticateJWT);
  */
-export async function authenticateJWT(
-  c: Context,
-  next: Next
-): Promise<Response | void> {
+export async function authenticateJWT(c: Context, next: Next): Promise<Response | void> {
   try {
     // Extract token
     const token = extractToken(c);
     if (!token) {
-      return c.json({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Missing or invalid Authorization header',
+      return c.json(
+        {
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Missing or invalid Authorization header',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 401);
+        401
+      );
     }
 
     // Verify configuration
     if (!verifier) {
-      console.error('JWT verifier not configured: missing COGNITO_USER_POOL_ID or COGNITO_CLIENT_ID');
-      return c.json({
-        error: {
-          code: 'AUTH_NOT_CONFIGURED',
-          message: 'Authentication service unavailable',
+      console.error(
+        'JWT verifier not configured: missing COGNITO_USER_POOL_ID or COGNITO_CLIENT_ID'
+      );
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'Authentication service unavailable',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 500);
+        500
+      );
     }
 
     // Verify token
@@ -90,9 +96,8 @@ export async function authenticateJWT(
     // Admin users created via `chimera setup` may not have custom:tenant_id set;
     // fall back to sub so they still receive a valid auth context.
     const customTenantId = payload['custom:tenant_id'];
-    const tenantId = (typeof customTenantId === 'string' && customTenantId)
-      ? customTenantId
-      : payload.sub;
+    const tenantId =
+      typeof customTenantId === 'string' && customTenantId ? customTenantId : payload.sub;
 
     // Populate auth context in Hono context
     c.set('auth', {
@@ -107,13 +112,16 @@ export async function authenticateJWT(
   } catch (error) {
     // Token verification failed
     console.error('JWT verification failed:', error);
-    return c.json({
-      error: {
-        code: 'INVALID_TOKEN',
-        message: 'Token verification failed',
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Token verification failed',
+        },
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString(),
-    }, 401);
+      401
+    );
   }
 }
 
@@ -128,26 +136,32 @@ export function requireGroup(...allowedGroups: string[]) {
     const auth = c.get('auth') as AuthContext | undefined;
 
     if (!auth) {
-      return c.json({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
+      return c.json(
+        {
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 401);
+        401
+      );
     }
 
     const userGroups = auth.groups || [];
     const hasAccess = allowedGroups.some((group) => userGroups.includes(group));
 
     if (!hasAccess) {
-      return c.json({
-        error: {
-          code: 'FORBIDDEN',
-          message: `Required group: ${allowedGroups.join(' or ')}`,
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: `Required group: ${allowedGroups.join(' or ')}`,
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      }, 403);
+        403
+      );
     }
 
     await next();
@@ -160,10 +174,7 @@ export function requireGroup(...allowedGroups: string[]) {
  * Validates token if present, but allows requests without tokens.
  * Useful for endpoints that support both authenticated and anonymous access.
  */
-export async function optionalAuth(
-  c: Context,
-  next: Next
-): Promise<void> {
+export async function optionalAuth(c: Context, next: Next): Promise<void> {
   const token = extractToken(c);
   if (!token) {
     await next();
@@ -175,9 +186,8 @@ export async function optionalAuth(
       const payload = await verifier.verify(token);
       // Fall back to sub for admin users without custom:tenant_id
       const customTenantId = payload['custom:tenant_id'];
-      const tenantId = (typeof customTenantId === 'string' && customTenantId)
-        ? customTenantId
-        : payload.sub;
+      const tenantId =
+        typeof customTenantId === 'string' && customTenantId ? customTenantId : payload.sub;
 
       c.set('auth', {
         sub: payload.sub,

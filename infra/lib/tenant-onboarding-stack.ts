@@ -108,7 +108,8 @@ export class TenantOnboardingStack extends cdk.Stack {
         const client = new DynamoDBClient({});
 
         exports.handler = async (event) => {
-          const { tenantId, name, tier, adminEmail, region } = event;
+          const { tenantId, tier, adminEmail, region, email } = event;
+          const name = event.name || email || adminEmail || tenantId;
           const tableName = process.env.TENANTS_TABLE_NAME;
           const now = new Date().toISOString();
 
@@ -245,11 +246,11 @@ export class TenantOnboardingStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-        const { CognitoIdentityProviderClient, CreateGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+        const { CognitoIdentityProviderClient, CreateGroupCommand, AdminAddUserToGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
         const client = new CognitoIdentityProviderClient({});
 
         exports.handler = async (event) => {
-          const { tenantId, tier, iamRoleArn } = event;
+          const { tenantId, tier, iamRoleArn, userId } = event;
           const userPoolId = process.env.USER_POOL_ID;
 
           try {
@@ -261,15 +262,30 @@ export class TenantOnboardingStack extends cdk.Stack {
             }));
 
             console.log(\`Created Cognito group for tenant \${tenantId}\`);
-            return { success: true, groupName: \`tenant-\${tenantId}\` };
           } catch (error) {
-            if (error.name === 'GroupExistsException') {
-              console.log(\`Group already exists for tenant \${tenantId}\`);
-              return { success: true, groupName: \`tenant-\${tenantId}\`, alreadyExists: true };
+            if (error.name !== 'GroupExistsException') {
+              console.error('Failed to create Cognito group:', error);
+              throw error;
             }
-            console.error('Failed to create Cognito group:', error);
-            throw error;
+            console.log(\`Group already exists for tenant \${tenantId}\`);
           }
+
+          // Add the onboarding user to the tenant group
+          if (userId) {
+            try {
+              await client.send(new AdminAddUserToGroupCommand({
+                UserPoolId: userPoolId,
+                Username: userId,
+                GroupName: \`tenant-\${tenantId}\`,
+              }));
+              console.log(\`Added user \${userId} to group tenant-\${tenantId}\`);
+            } catch (error) {
+              console.error('Failed to add user to Cognito group:', error);
+              throw error;
+            }
+          }
+
+          return { success: true, groupName: \`tenant-\${tenantId}\` };
         };
       `),
       environment: {
@@ -279,10 +295,12 @@ export class TenantOnboardingStack extends cdk.Stack {
       memorySize: 256,
       logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
     });
-    this.createCognitoGroupFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['cognito-idp:CreateGroup'],
-      resources: [props.userPool.userPoolArn],
-    }));
+    this.createCognitoGroupFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
+        resources: [props.userPool.userPoolArn],
+      })
+    );
 
     // ======================================================================
     // Lambda: Create IAM Role
@@ -416,10 +434,12 @@ export class TenantOnboardingStack extends cdk.Stack {
       memorySize: 256,
       logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
     });
-    this.createIamRoleFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['iam:CreateRole', 'iam:PutRolePolicy', 'iam:TagRole'],
-      resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
-    }));
+    this.createIamRoleFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['iam:CreateRole', 'iam:PutRolePolicy', 'iam:TagRole'],
+        resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
+      })
+    );
 
     // ======================================================================
     // Lambda: Initialize S3 Prefix
@@ -551,10 +571,12 @@ forbid(
       memorySize: 256,
       logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
     });
-    this.createCedarPoliciesFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['verifiedpermissions:CreatePolicy'],
-      resources: [this.cedarPolicy.policyStore.attrArn],
-    }));
+    this.createCedarPoliciesFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['verifiedpermissions:CreatePolicy'],
+        resources: [this.cedarPolicy.policyStore.attrArn],
+      })
+    );
 
     // ======================================================================
     // Lambda: Initialize Cost Tracking
@@ -641,6 +663,7 @@ forbid(
         tenantId: sfn.JsonPath.stringAt('$.tenantId'),
         tier: sfn.JsonPath.stringAt('$.tier'),
         iamRoleArn: sfn.JsonPath.stringAt('$.createRoleResult.Payload.roleArn'),
+        userId: sfn.JsonPath.stringAt('$.userId'),
       }),
     });
     createGroupTask.addRetry({
@@ -687,7 +710,9 @@ forbid(
     const updateStatusTask = new tasks.DynamoUpdateItem(this, 'UpdateTenantStatus', {
       table: props.tenantsTable,
       key: {
-        PK: tasks.DynamoAttributeValue.fromString(sfn.JsonPath.format('TENANT#{}', sfn.JsonPath.stringAt('$.tenantId'))),
+        PK: tasks.DynamoAttributeValue.fromString(
+          sfn.JsonPath.format('TENANT#{}', sfn.JsonPath.stringAt('$.tenantId'))
+        ),
         SK: tasks.DynamoAttributeValue.fromString('PROFILE'),
       },
       updateExpression: 'SET #status = :status, updatedAt = :now',
@@ -696,7 +721,9 @@ forbid(
       },
       expressionAttributeValues: {
         ':status': tasks.DynamoAttributeValue.fromString('ACTIVE'),
-        ':now': tasks.DynamoAttributeValue.fromString(sfn.JsonPath.stringAt('$$.State.EnteredTime')),
+        ':now': tasks.DynamoAttributeValue.fromString(
+          sfn.JsonPath.stringAt('$$.State.EnteredTime')
+        ),
       },
       resultPath: sfn.JsonPath.DISCARD,
     });
@@ -859,18 +886,24 @@ forbid(
     props.tenantsTable.grantWriteData(this.compensateTenantFunction);
     props.costTrackingTable.grantWriteData(this.compensateTenantFunction);
     props.tenantBucket.grantDelete(this.compensateTenantFunction, 'tenants/*/.tenant-metadata');
-    this.compensateTenantFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['iam:DeleteRolePolicy', 'iam:DeleteRole'],
-      resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
-    }));
-    this.compensateTenantFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['cognito-idp:DeleteGroup'],
-      resources: [props.userPool.userPoolArn],
-    }));
-    this.compensateTenantFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['verifiedpermissions:DeletePolicy'],
-      resources: [this.cedarPolicy.policyStore.attrArn],
-    }));
+    this.compensateTenantFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['iam:DeleteRolePolicy', 'iam:DeleteRole'],
+        resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
+      })
+    );
+    this.compensateTenantFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cognito-idp:DeleteGroup'],
+        resources: [props.userPool.userPoolArn],
+      })
+    );
+    this.compensateTenantFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['verifiedpermissions:DeletePolicy'],
+        resources: [this.cedarPolicy.policyStore.attrArn],
+      })
+    );
 
     // ======================================================================
     // Step Functions: Onboarding Workflow
@@ -1057,10 +1090,12 @@ forbid(
       memorySize: 256,
       logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
     });
-    this.cleanupIamRoleFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['iam:ListRolePolicies', 'iam:DeleteRolePolicy', 'iam:DeleteRole'],
-      resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
-    }));
+    this.cleanupIamRoleFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['iam:ListRolePolicies', 'iam:DeleteRolePolicy', 'iam:DeleteRole'],
+        resources: [`arn:aws:iam::${this.account}:role/chimera-tenant-*-${envName}`],
+      })
+    );
 
     // ======================================================================
     // Lambda: Cleanup Cognito Group
@@ -1125,10 +1160,16 @@ forbid(
       memorySize: 256,
       logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
     });
-    this.cleanupCognitoGroupFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['cognito-idp:ListUsersInGroup', 'cognito-idp:AdminRemoveUserFromGroup', 'cognito-idp:DeleteGroup'],
-      resources: [props.userPool.userPoolArn],
-    }));
+    this.cleanupCognitoGroupFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'cognito-idp:ListUsersInGroup',
+          'cognito-idp:AdminRemoveUserFromGroup',
+          'cognito-idp:DeleteGroup',
+        ],
+        resources: [props.userPool.userPoolArn],
+      })
+    );
 
     // ======================================================================
     // Lambda: Cleanup S3 Prefix
@@ -1241,10 +1282,12 @@ forbid(
       memorySize: 256,
       logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
     });
-    this.cleanupCedarPoliciesFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['verifiedpermissions:ListPolicies', 'verifiedpermissions:DeletePolicy'],
-      resources: [this.cedarPolicy.policyStore.attrArn],
-    }));
+    this.cleanupCedarPoliciesFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['verifiedpermissions:ListPolicies', 'verifiedpermissions:DeletePolicy'],
+        resources: [this.cedarPolicy.policyStore.attrArn],
+      })
+    );
 
     // ======================================================================
     // Lambda: Cleanup DDB Items
@@ -1333,11 +1376,14 @@ forbid(
     // Writes a CHURNED tombstone PROFILE record (PutItem: upsert) to preserve
     // the audit trail. All other items were deleted by cleanupDdbItems.
     // ======================================================================
-    this.finalizeTenantOffboardingFunction = new lambda.Function(this, 'FinalizeTenantOffboarding', {
-      functionName: `chimera-offboard-finalize-${envName}`,
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(`
+    this.finalizeTenantOffboardingFunction = new lambda.Function(
+      this,
+      'FinalizeTenantOffboarding',
+      {
+        functionName: `chimera-offboard-finalize-${envName}`,
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: 'index.handler',
+        code: lambda.Code.fromInline(`
         const { DynamoDBClient, PutItemCommand } = require('@aws-sdk/client-dynamodb');
         const client = new DynamoDBClient({});
 
@@ -1366,13 +1412,14 @@ forbid(
           return { success: true, tenantId, status: 'CHURNED', offboardedAt: now };
         };
       `),
-      environment: {
-        TENANTS_TABLE_NAME: props.tenantsTable.tableName,
-      },
-      timeout: cdk.Duration.seconds(30),
-      memorySize: 256,
-      logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
-    });
+        environment: {
+          TENANTS_TABLE_NAME: props.tenantsTable.tableName,
+        },
+        timeout: cdk.Duration.seconds(30),
+        memorySize: 256,
+        logRetention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+      }
+    );
     props.tenantsTable.grantWriteData(this.finalizeTenantOffboardingFunction);
 
     // ======================================================================
@@ -1397,7 +1444,12 @@ forbid(
       lambdaFunction: this.offboardTenantFunction,
       resultPath: '$.offboardResult',
     });
-    offboardTenantTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    offboardTenantTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
     offboardTenantTask.addCatch(offboardingFailState, { resultPath: '$.error' });
 
     // Step 2 (parallel branches): IAM, Cognito, S3, Cedar cleanup
@@ -1405,25 +1457,45 @@ forbid(
       lambdaFunction: this.cleanupIamRoleFunction,
       resultPath: '$.cleanupIamResult',
     });
-    cleanupIamRoleTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    cleanupIamRoleTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const cleanupCognitoGroupTask = new tasks.LambdaInvoke(this, 'CleanupCognitoGroupTask', {
       lambdaFunction: this.cleanupCognitoGroupFunction,
       resultPath: '$.cleanupCognitoResult',
     });
-    cleanupCognitoGroupTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    cleanupCognitoGroupTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const cleanupS3PrefixTask = new tasks.LambdaInvoke(this, 'CleanupS3PrefixTask', {
       lambdaFunction: this.cleanupS3PrefixFunction,
       resultPath: '$.cleanupS3Result',
     });
-    cleanupS3PrefixTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    cleanupS3PrefixTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     const cleanupCedarPoliciesTask = new tasks.LambdaInvoke(this, 'CleanupCedarPoliciesTask', {
       lambdaFunction: this.cleanupCedarPoliciesFunction,
       resultPath: '$.cleanupCedarResult',
     });
-    cleanupCedarPoliciesTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    cleanupCedarPoliciesTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
 
     // resultPath preserves $.tenantId / $.offboardResult for downstream steps
     const parallelCleanup = new sfn.Parallel(this, 'ParallelCleanup', {
@@ -1440,15 +1512,29 @@ forbid(
       lambdaFunction: this.cleanupDdbItemsFunction,
       resultPath: '$.cleanupDdbResult',
     });
-    cleanupDdbItemsTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
+    cleanupDdbItemsTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
+    });
     cleanupDdbItemsTask.addCatch(offboardingFailState, { resultPath: '$.error' });
 
     // Step 4: Write CHURNED tombstone record
-    const finalizeTenantOffboardingTask = new tasks.LambdaInvoke(this, 'FinalizeTenantOffboardingTask', {
-      lambdaFunction: this.finalizeTenantOffboardingFunction,
-      resultPath: '$.finalizeResult',
+    const finalizeTenantOffboardingTask = new tasks.LambdaInvoke(
+      this,
+      'FinalizeTenantOffboardingTask',
+      {
+        lambdaFunction: this.finalizeTenantOffboardingFunction,
+        resultPath: '$.finalizeResult',
+      }
+    );
+    finalizeTenantOffboardingTask.addRetry({
+      errors: ['States.ALL'],
+      maxAttempts: 3,
+      backoffRate: 2,
+      interval: cdk.Duration.seconds(1),
     });
-    finalizeTenantOffboardingTask.addRetry({ errors: ['States.ALL'], maxAttempts: 3, backoffRate: 2, interval: cdk.Duration.seconds(1) });
     finalizeTenantOffboardingTask.addCatch(offboardingFailState, { resultPath: '$.error' });
 
     const offboardingSuccessState = new sfn.Succeed(this, 'OffboardingComplete', {

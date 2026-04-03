@@ -82,28 +82,70 @@ export function streamChatResponse(
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
+          const data = line.slice(6).trim();
 
-          const colonIndex = data.indexOf(':');
-          if (colonIndex === -1) continue;
+          // Stream terminator
+          if (data === '[DONE]') {
+            reading = false;
+            break;
+          }
 
-          const eventType = data.substring(0, colonIndex);
-          const payload = data.substring(colonIndex + 1);
-
+          // The server emits Vercel DSP parts as full JSON objects:
+          //   data: {"type":"text-delta","id":"...","delta":"hello"}
           try {
-            const parsed = payload ? JSON.parse(payload) : null;
+            const part = JSON.parse(data) as {
+              type: string;
+              [key: string]: unknown;
+            };
 
-            if (eventType === 'text' && typeof parsed === 'string') {
-              accumulated += parsed;
-              callbacks.onToken(parsed);
-            } else if (eventType === 'message_start' && parsed?.sessionId) {
-              callbacks.onSessionId?.(parsed.sessionId as string);
-            } else if (eventType === 'error') {
-              throw new Error((parsed as { message?: string })?.message ?? 'Stream error');
+            switch (part.type) {
+              case 'text-delta': {
+                const delta = part.delta as string;
+                accumulated += delta;
+                callbacks.onToken(delta);
+                break;
+              }
+              case 'start': {
+                // Message start — may carry a sessionId from the server
+                if (part.sessionId) {
+                  callbacks.onSessionId?.(part.sessionId as string);
+                }
+                break;
+              }
+              case 'finish': {
+                // Finish part — stream may still have trailing events,
+                // but we treat this as the logical end.
+                break;
+              }
+              case 'error': {
+                const msg = (part as { message?: string }).message ?? 'Stream error';
+                throw new Error(msg);
+              }
+              // Events the UI doesn't need to act on but should not warn about
+              case 'text-start':
+              case 'text-end':
+              case 'tool-input-start':
+              case 'tool-input-delta':
+              case 'tool-result':
+              case 'step-start':
+              case 'reasoning-start':
+              case 'reasoning-delta':
+              case 'reasoning-end':
+              case 'source':
+              case 'abort':
+                break;
+              default:
+                // Unknown event type — ignore gracefully
+                break;
             }
           } catch (parseErr) {
-            // Skip malformed events
-            console.warn('Failed to parse SSE event:', parseErr);
+            if (parseErr instanceof SyntaxError) {
+              // Malformed JSON — skip
+              console.warn('Failed to parse SSE event:', data);
+            } else {
+              // Re-throw application errors (e.g. from the 'error' case above)
+              throw parseErr;
+            }
           }
         }
       }

@@ -43,6 +43,10 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
   const { messageId, sessionId, tenantId, userId, userContent } = opts;
   const pk = `TENANT#${tenantId}#SESSION#${sessionId}`;
   let textAccumulator = '';
+  let lastCheckpointChars = 0;
+  let lastCheckpointTime = Date.now();
+  const CHECKPOINT_CHARS = 500;
+  const CHECKPOINT_MS = 30_000;
   let finishReason: string | undefined;
   let usage: Record<string, number> | undefined;
   let toolCalls: Array<{ id: string; name: string; input: string; result?: string }> = [];
@@ -102,6 +106,26 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
       if (part.type === 'text-delta') {
         if (part.delta) textAccumulator += part.delta;
         else if (part.textDelta) textAccumulator += part.textDelta;
+
+        // Periodic checkpoint: write partial content to DynamoDB so crash-recovery
+        // doesn't lose everything. Fire-and-forget to avoid blocking the stream.
+        if (
+          textAccumulator.length - lastCheckpointChars >= CHECKPOINT_CHARS ||
+          Date.now() - lastCheckpointTime >= CHECKPOINT_MS
+        ) {
+          void client
+            .send(
+              new UpdateCommand({
+                TableName: TABLE,
+                Key: { PK: pk, SK: assistantMsgSk },
+                UpdateExpression: 'SET content = :content',
+                ExpressionAttributeValues: { ':content': textAccumulator },
+              })
+            )
+            .catch((err) => console.error('Checkpoint write failed:', err.message));
+          lastCheckpointChars = textAccumulator.length;
+          lastCheckpointTime = Date.now();
+        }
       }
 
       // Capture finish reason from the terminal 'finish' event

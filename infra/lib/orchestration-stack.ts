@@ -96,8 +96,10 @@ export class OrchestrationStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.minutes(5),
     });
     // Enable content-based deduplication (SHA-256 of message body)
-    (agentMessageChimeraQueue.queue.node.defaultChild as sqs.CfnQueue)
-      .addPropertyOverride('ContentBasedDeduplication', true);
+    (agentMessageChimeraQueue.queue.node.defaultChild as sqs.CfnQueue).addPropertyOverride(
+      'ContentBasedDeduplication',
+      true
+    );
     this.agentMessageQueue = agentMessageChimeraQueue.queue;
 
     // ======================================================================
@@ -169,9 +171,11 @@ export class OrchestrationStack extends cdk.Stack {
         detailType: ['Agent Message'],
       },
     });
-    a2aMessageRule.addTarget(new targets.SqsQueue(this.agentMessageQueue, {
-      messageGroupId: events.EventField.fromPath('$.detail.sessionId'),
-    }));
+    a2aMessageRule.addTarget(
+      new targets.SqsQueue(this.agentMessageQueue, {
+        messageGroupId: events.EventField.fromPath('$.detail.sessionId'),
+      })
+    );
 
     // ======================================================================
     // IAM Role: EventBridge Event Publisher
@@ -182,18 +186,20 @@ export class OrchestrationStack extends cdk.Stack {
       assumedBy: new iam.CompositePrincipal(
         new iam.ServicePrincipal('lambda.amazonaws.com'),
         new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
-        new iam.ServicePrincipal('bedrock.amazonaws.com'),
+        new iam.ServicePrincipal('bedrock.amazonaws.com')
       ),
       description: 'Allows agent runtime to publish events to EventBridge',
     });
 
-    eventPublisherRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['events:PutEvents'],
-      resources: [this.eventBus.eventBusArn],
-    }));
+    eventPublisherRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['events:PutEvents'],
+        resources: [this.eventBus.eventBusArn],
+      })
+    );
 
     eventPublisherRole.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')
     );
 
     // ======================================================================
@@ -210,10 +216,12 @@ export class OrchestrationStack extends cdk.Stack {
       description: 'Allows EventBridge Scheduler to publish agent task events',
     });
 
-    schedulerRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['events:PutEvents'],
-      resources: [this.eventBus.eventBusArn],
-    }));
+    schedulerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['events:PutEvents'],
+        resources: [this.eventBus.eventBusArn],
+      })
+    );
 
     // ======================================================================
     // Per-Tenant FIFO Queues (Dynamic Creation Pattern)
@@ -225,24 +233,30 @@ export class OrchestrationStack extends cdk.Stack {
       description: 'Allows Lambda to create per-tenant SQS FIFO queues on demand',
     });
 
-    queueProvisionerRole.addToPolicy(new iam.PolicyStatement({
-      actions: [
-        'sqs:CreateQueue',
-        'sqs:SetQueueAttributes',
-        'sqs:TagQueue',
-        'sqs:GetQueueAttributes',
-        'sqs:GetQueueUrl',
-      ],
-      resources: [`arn:aws:sqs:${this.region}:${this.account}:chimera-tenant-*-tasks-${props.envName}.fifo`],
-    }));
+    queueProvisionerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'sqs:CreateQueue',
+          'sqs:SetQueueAttributes',
+          'sqs:TagQueue',
+          'sqs:GetQueueAttributes',
+          'sqs:GetQueueUrl',
+        ],
+        resources: [
+          `arn:aws:sqs:${this.region}:${this.account}:chimera-tenant-*-tasks-${props.envName}.fifo`,
+        ],
+      })
+    );
 
-    queueProvisionerRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['kms:Decrypt', 'kms:GenerateDataKey'],
-      resources: [props.platformKey.keyArn],
-    }));
+    queueProvisionerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Decrypt', 'kms:GenerateDataKey'],
+        resources: [props.platformKey.keyArn],
+      })
+    );
 
     queueProvisionerRole.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')
     );
 
     // ======================================================================
@@ -255,39 +269,49 @@ export class OrchestrationStack extends cdk.Stack {
       description: 'Allows Lambda to create SNS topics and SQS subscriptions for agent groupchat',
     });
 
-    groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
-      actions: [
-        'sns:CreateTopic',
-        'sns:SetTopicAttributes',
-        'sns:TagResource',
-        'sns:GetTopicAttributes',
-        'sns:Subscribe',
-        'sns:ListSubscriptionsByTopic',
-        'sns:Unsubscribe',
-        'sns:DeleteTopic',
-      ],
-      resources: [`arn:aws:sns:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`],
-    }));
+    groupChatProvisionerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'sns:CreateTopic',
+          'sns:SetTopicAttributes',
+          'sns:TagResource',
+          'sns:GetTopicAttributes',
+          'sns:Subscribe',
+          'sns:ListSubscriptionsByTopic',
+          'sns:Unsubscribe',
+          'sns:DeleteTopic',
+        ],
+        resources: [
+          `arn:aws:sns:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`,
+        ],
+      })
+    );
 
-    groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
-      actions: [
-        'sqs:CreateQueue',
-        'sqs:SetQueueAttributes',
-        'sqs:TagQueue',
-        'sqs:GetQueueAttributes',
-        'sqs:GetQueueUrl',
-        'sqs:DeleteQueue',
-      ],
-      resources: [`arn:aws:sqs:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`],
-    }));
+    groupChatProvisionerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'sqs:CreateQueue',
+          'sqs:SetQueueAttributes',
+          'sqs:TagQueue',
+          'sqs:GetQueueAttributes',
+          'sqs:GetQueueUrl',
+          'sqs:DeleteQueue',
+        ],
+        resources: [
+          `arn:aws:sqs:${this.region}:${this.account}:chimera-groupchat-*-${props.envName}`,
+        ],
+      })
+    );
 
-    groupChatProvisionerRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:DescribeKey'],
-      resources: [props.platformKey.keyArn],
-    }));
+    groupChatProvisionerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:DescribeKey'],
+        resources: [props.platformKey.keyArn],
+      })
+    );
 
     groupChatProvisionerRole.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')
     );
 
     // ======================================================================
@@ -324,10 +348,12 @@ def handler(event, context):
         CODEBUILD_PROJECT: `chimera-build-${props.envName}`,
       },
     });
-    startBuildChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['codebuild:StartBuild'],
-      resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
-    }));
+    startBuildChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['codebuild:StartBuild'],
+        resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
+      })
+    );
 
     // Pipeline Build: Check build status
     const checkBuildStatusChimera = new ChimeraLambda(this, 'CheckBuildStatusFunction', {
@@ -354,10 +380,12 @@ def handler(event, context):
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
     });
-    checkBuildStatusChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['codebuild:BatchGetBuilds'],
-      resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
-    }));
+    checkBuildStatusChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['codebuild:BatchGetBuilds'],
+        resources: [`arn:aws:codebuild:${this.region}:${this.account}:project/chimera-*`],
+      })
+    );
 
     // Data Analysis: Run query
     const runDataQueryChimera = new ChimeraLambda(this, 'RunDataQueryFunction', {
@@ -389,21 +417,27 @@ def handler(event, context):
         ATHENA_OUTPUT: `s3://chimera-artifacts-${props.envName}/athena-results/`,
       },
     });
-    runDataQueryChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['athena:StartQueryExecution', 'athena:GetQueryExecution'],
-      resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
-    }));
-    runDataQueryChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['s3:GetBucketLocation', 's3:GetObject', 's3:ListBucket', 's3:PutObject'],
-      resources: [
-        `arn:aws:s3:::chimera-artifacts-${props.envName}`,
-        `arn:aws:s3:::chimera-artifacts-${props.envName}/*`,
-      ],
-    }));
-    runDataQueryChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['glue:GetTable', 'glue:GetPartitions', 'glue:GetDatabase'],
-      resources: ['*'],
-    }));
+    runDataQueryChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['athena:StartQueryExecution', 'athena:GetQueryExecution'],
+        resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
+      })
+    );
+    runDataQueryChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetBucketLocation', 's3:GetObject', 's3:ListBucket', 's3:PutObject'],
+        resources: [
+          `arn:aws:s3:::chimera-artifacts-${props.envName}`,
+          `arn:aws:s3:::chimera-artifacts-${props.envName}/*`,
+        ],
+      })
+    );
+    runDataQueryChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['glue:GetTable', 'glue:GetPartitions', 'glue:GetDatabase'],
+        resources: ['*'],
+      })
+    );
 
     // Data Analysis: Check query status
     const checkQueryStatusChimera = new ChimeraLambda(this, 'CheckQueryStatusFunction', {
@@ -428,10 +462,12 @@ def handler(event, context):
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
     });
-    checkQueryStatusChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['athena:GetQueryExecution', 'athena:GetQueryResults'],
-      resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
-    }));
+    checkQueryStatusChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['athena:GetQueryExecution', 'athena:GetQueryResults'],
+        resources: [`arn:aws:athena:${this.region}:${this.account}:workgroup/*`],
+      })
+    );
 
     // Background Task: Execute generic background task
     const executeBackgroundTaskChimera = new ChimeraLambda(this, 'ExecuteBackgroundTaskFunction', {
@@ -473,21 +509,30 @@ def handler(event, context):
         ENV_NAME: props.envName,
       },
     });
-    executeBackgroundTaskChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
-      resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`],
-    }));
-    executeBackgroundTaskChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['events:PutEvents'],
-      resources: [this.eventBus.eventBusArn],
-    }));
+    executeBackgroundTaskChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
+        resources: [
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`,
+        ],
+      })
+    );
+    executeBackgroundTaskChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['events:PutEvents'],
+        resources: [this.eventBus.eventBusArn],
+      })
+    );
 
     // Background Task: Check task status
-    const checkBackgroundTaskStatusChimera = new ChimeraLambda(this, 'CheckBackgroundTaskStatusFunction', {
-      functionName: `chimera-workflow-check-bg-task-${props.envName}`,
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(`
+    const checkBackgroundTaskStatusChimera = new ChimeraLambda(
+      this,
+      'CheckBackgroundTaskStatusFunction',
+      {
+        functionName: `chimera-workflow-check-bg-task-${props.envName}`,
+        runtime: lambda.Runtime.PYTHON_3_12,
+        handler: 'index.handler',
+        code: lambda.Code.fromInline(`
 import boto3, os, json
 ddb = boto3.resource('dynamodb')
 def handler(event, context):
@@ -502,16 +547,21 @@ def handler(event, context):
         result = json.loads(result)
     return {'task_id': task_id, 'status': item.get('status', 'RUNNING'), 'result': result}
 `),
-      timeout: cdk.Duration.seconds(30),
-      memorySize: 256,
-      environment: {
-        SESSIONS_TABLE: `chimera-sessions-${props.envName}`,
-      },
-    });
-    checkBackgroundTaskStatusChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['dynamodb:GetItem'],
-      resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`],
-    }));
+        timeout: cdk.Duration.seconds(30),
+        memorySize: 256,
+        environment: {
+          SESSIONS_TABLE: `chimera-sessions-${props.envName}`,
+        },
+      }
+    );
+    checkBackgroundTaskStatusChimera.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:GetItem'],
+        resources: [
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`,
+        ],
+      })
+    );
 
     // ======================================================================
     // Step Functions: Pipeline Build Workflow
@@ -562,19 +612,23 @@ def handler(event, context):
 
     const pipelineBuildDefinition = startBuildTask.next(buildWait);
 
-    this.pipelineBuildStateMachine = new stepfunctions.StateMachine(this, 'PipelineBuildStateMachine', {
-      stateMachineName: `chimera-pipeline-build-${props.envName}`,
-      definitionBody: stepfunctions.DefinitionBody.fromChainable(pipelineBuildDefinition),
-      timeout: cdk.Duration.minutes(30),
-      logs: {
-        destination: new logs.LogGroup(this, 'PipelineBuildLogGroup', {
-          logGroupName: `/aws/vendedlogs/states/chimera-pipeline-build-${props.envName}`,
-          retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
-          removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-        }),
-        level: stepfunctions.LogLevel.ALL,
-      },
-    });
+    this.pipelineBuildStateMachine = new stepfunctions.StateMachine(
+      this,
+      'PipelineBuildStateMachine',
+      {
+        stateMachineName: `chimera-pipeline-build-${props.envName}`,
+        definitionBody: stepfunctions.DefinitionBody.fromChainable(pipelineBuildDefinition),
+        timeout: cdk.Duration.minutes(30),
+        logs: {
+          destination: new logs.LogGroup(this, 'PipelineBuildLogGroup', {
+            logGroupName: `/aws/vendedlogs/states/chimera-pipeline-build-${props.envName}`,
+            retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+            removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+          }),
+          level: stepfunctions.LogLevel.ALL,
+        },
+      }
+    );
 
     // ======================================================================
     // Step Functions: Data Analysis Workflow
@@ -625,19 +679,23 @@ def handler(event, context):
 
     const dataAnalysisDefinition = runQueryTask.next(queryWait);
 
-    this.dataAnalysisStateMachine = new stepfunctions.StateMachine(this, 'DataAnalysisStateMachine', {
-      stateMachineName: `chimera-data-analysis-${props.envName}`,
-      definitionBody: stepfunctions.DefinitionBody.fromChainable(dataAnalysisDefinition),
-      timeout: cdk.Duration.minutes(15),
-      logs: {
-        destination: new logs.LogGroup(this, 'DataAnalysisLogGroup', {
-          logGroupName: `/aws/vendedlogs/states/chimera-data-analysis-${props.envName}`,
-          retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
-          removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-        }),
-        level: stepfunctions.LogLevel.ALL,
-      },
-    });
+    this.dataAnalysisStateMachine = new stepfunctions.StateMachine(
+      this,
+      'DataAnalysisStateMachine',
+      {
+        stateMachineName: `chimera-data-analysis-${props.envName}`,
+        definitionBody: stepfunctions.DefinitionBody.fromChainable(dataAnalysisDefinition),
+        timeout: cdk.Duration.minutes(15),
+        logs: {
+          destination: new logs.LogGroup(this, 'DataAnalysisLogGroup', {
+            logGroupName: `/aws/vendedlogs/states/chimera-data-analysis-${props.envName}`,
+            retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+            removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+          }),
+          level: stepfunctions.LogLevel.ALL,
+        },
+      }
+    );
 
     // ======================================================================
     // Step Functions: Background Task Workflow
@@ -688,19 +746,23 @@ def handler(event, context):
 
     const backgroundTaskDefinition = executeTaskStep.next(taskWait);
 
-    this.backgroundTaskStateMachine = new stepfunctions.StateMachine(this, 'BackgroundTaskStateMachine', {
-      stateMachineName: `chimera-background-task-${props.envName}`,
-      definitionBody: stepfunctions.DefinitionBody.fromChainable(backgroundTaskDefinition),
-      timeout: cdk.Duration.minutes(10),
-      logs: {
-        destination: new logs.LogGroup(this, 'BackgroundTaskLogGroup', {
-          logGroupName: `/aws/vendedlogs/states/chimera-background-task-${props.envName}`,
-          retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
-          removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-        }),
-        level: stepfunctions.LogLevel.ALL,
-      },
-    });
+    this.backgroundTaskStateMachine = new stepfunctions.StateMachine(
+      this,
+      'BackgroundTaskStateMachine',
+      {
+        stateMachineName: `chimera-background-task-${props.envName}`,
+        definitionBody: stepfunctions.DefinitionBody.fromChainable(backgroundTaskDefinition),
+        timeout: cdk.Duration.minutes(10),
+        logs: {
+          destination: new logs.LogGroup(this, 'BackgroundTaskLogGroup', {
+            logGroupName: `/aws/vendedlogs/states/chimera-background-task-${props.envName}`,
+            retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+            removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+          }),
+          level: stepfunctions.LogLevel.ALL,
+        },
+      }
+    );
 
     this.pipelineBuildStateMachine.grantStartExecution(eventPublisherRole);
     this.dataAnalysisStateMachine.grantStartExecution(eventPublisherRole);
@@ -728,10 +790,35 @@ def handler(event, context):
 
     this.backgroundTaskStateMachine.grantStartExecution(stepFunctionsInvokeRole);
 
-    backgroundTaskRule.addTarget(new targets.SfnStateMachine(this.backgroundTaskStateMachine, {
-      role: stepFunctionsInvokeRole,
-      input: events.RuleTargetInput.fromEventPath('$.detail'),
-    }));
+    backgroundTaskRule.addTarget(
+      new targets.SfnStateMachine(this.backgroundTaskStateMachine, {
+        role: stepFunctionsInvokeRole,
+        input: events.RuleTargetInput.fromEventPath('$.detail'),
+      })
+    );
+
+    // ======================================================================
+    // EventBridge Rule: Swarm Execution Started → Step Functions + CloudWatch
+    // Routes swarm execution requests to the background task state machine
+    // for DynamoDB tracking, and logs to CloudWatch for debugging.
+    // ======================================================================
+
+    const swarmExecutionRule = new events.Rule(this, 'SwarmExecutionStartedRule', {
+      ruleName: `chimera-swarm-execution-${props.envName}`,
+      eventBus: this.eventBus,
+      description: 'Routes swarm execution requests to the background task state machine',
+      eventPattern: {
+        source: ['chimera.agents'],
+        detailType: ['Swarm Execution Started'],
+      },
+    });
+    swarmExecutionRule.addTarget(
+      new targets.SfnStateMachine(this.backgroundTaskStateMachine, {
+        role: stepFunctionsInvokeRole,
+        input: events.RuleTargetInput.fromEventPath('$.detail'),
+      })
+    );
+    swarmExecutionRule.addTarget(new targets.CloudWatchLogGroup(eventLogGroup));
 
     // ======================================================================
     // Stack Outputs
@@ -812,7 +899,8 @@ def handler(event, context):
     new cdk.CfnOutput(this, 'GroupChatProvisionerRoleArn', {
       value: groupChatProvisionerRole.roleArn,
       exportName: `${this.stackName}-GroupChatProvisionerRoleArn`,
-      description: 'IAM role ARN for provisioning SNS topics and SQS subscriptions for agent groupchat',
+      description:
+        'IAM role ARN for provisioning SNS topics and SQS subscriptions for agent groupchat',
     });
   }
 }
