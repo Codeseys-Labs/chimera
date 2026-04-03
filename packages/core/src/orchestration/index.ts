@@ -29,7 +29,7 @@ export {
   type AgentRuntimeMetadata,
   type TaskDelegation,
   type AgentEvent,
-  type OrchestratorConfig
+  type OrchestratorConfig,
 } from './orchestrator';
 
 // Swarm
@@ -40,7 +40,7 @@ export {
   type ScalingStrategy,
   type SwarmConfig,
   type SwarmMetrics,
-  type SwarmState
+  type SwarmState,
 } from './swarm';
 
 // Workflow
@@ -55,7 +55,7 @@ export {
   type RetryConfig,
   type WorkflowDefinition,
   type WorkflowExecution,
-  type StepExecutionResult
+  type StepExecutionResult,
 } from './workflow';
 
 // Cron Scheduler
@@ -69,7 +69,7 @@ export {
   type CronExecutionStatus,
   type CronJob,
   type CronExecution,
-  type CronSchedulerConfig
+  type CronSchedulerConfig,
 } from './cron-scheduler';
 
 // Background Tasks
@@ -80,7 +80,7 @@ export {
   checkBackgroundTaskTool,
   type BackgroundTaskStatus,
   type BackgroundTask,
-  type TaskSubmissionResult
+  type TaskSubmissionResult,
 } from './background-task';
 
 // A2A Protocol
@@ -98,8 +98,18 @@ export {
   type QueryResponse,
   type EventNotification,
   type BroadcastMessage,
-  type RoutingConfig
+  type RoutingConfig,
 } from './a2a-protocol';
+
+// SwarmExecutor
+export {
+  SwarmExecutor,
+  createSwarmExecutor,
+  type SwarmExecutorConfig,
+  type SwarmProgressEvent,
+  type TaskResult,
+  type SwarmExecutionResult,
+} from './swarm-executor';
 
 // GroupChat
 export {
@@ -109,5 +119,5 @@ export {
   type GroupChatMessage,
   type GroupChatConfig,
   type AgentSubscription,
-  type GroupChatMetrics
+  type GroupChatMetrics,
 } from './groupchat';

@@ -10,25 +10,22 @@
  * Complements MCP protocol: A2A for agent coordination, MCP for tool/data access
  */
 
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import type { ISOTimestamp } from './types';
 
 /**
  * A2A message types
  */
 export type A2AMessageType =
-  | 'request'      // Request-response pattern
-  | 'response'     // Response to a request
-  | 'broadcast'    // One-to-many notification
-  | 'event';       // Event notification
+  | 'request' // Request-response pattern
+  | 'response' // Response to a request
+  | 'broadcast' // One-to-many notification
+  | 'event'; // Event notification
 
 /**
  * Message priority levels
  */
-export type MessagePriority =
-  | 'low'
-  | 'normal'
-  | 'high'
-  | 'urgent';
+export type MessagePriority = 'low' | 'normal' | 'high' | 'urgent';
 
 /**
  * A2A message envelope
@@ -37,14 +34,14 @@ export interface A2AMessage {
   messageId: string;
   type: A2AMessageType;
   sourceAgentId: string;
-  targetAgentId?: string;      // Single recipient (undefined for broadcast)
-  targetGroup?: string;         // Group name for broadcast
+  targetAgentId?: string; // Single recipient (undefined for broadcast)
+  targetGroup?: string; // Group name for broadcast
   tenantId: string;
-  correlationId?: string;       // For request-response correlation
-  replyTo?: string;            // Queue URL for async response
+  correlationId?: string; // For request-response correlation
+  replyTo?: string; // Queue URL for async response
   priority: MessagePriority;
   timestamp: ISOTimestamp;
-  expiresAt?: ISOTimestamp;    // Message TTL
+  expiresAt?: ISOTimestamp; // Message TTL
   payload: A2APayload;
   metadata?: Record<string, unknown>;
 }
@@ -136,6 +133,20 @@ export interface RoutingConfig {
   groups: Map<string, string[]>; // Group name -> agent IDs
 }
 
+// ---------------------------------------------------------------------------
+// Module-level SQS singleton (keyed by region, reuses connections)
+// ---------------------------------------------------------------------------
+
+const sqsClientCache = new Map<string, SQSClient>();
+
+function getSQSClient(region?: string): SQSClient {
+  const r = region || process.env.AWS_REGION || 'us-east-1';
+  if (!sqsClientCache.has(r)) {
+    sqsClientCache.set(r, new SQSClient({ region: r }));
+  }
+  return sqsClientCache.get(r)!;
+}
+
 /**
  * A2A Protocol Handler
  *
@@ -147,14 +158,19 @@ export interface RoutingConfig {
  */
 export class A2AProtocol {
   private routingConfig: RoutingConfig;
-  private pendingRequests: Map<string, {
-    messageId: string;
-    timestamp: ISOTimestamp;
-    timeoutMs: number;
-  }>;
+  private sqs: SQSClient;
+  private pendingRequests: Map<
+    string,
+    {
+      messageId: string;
+      timestamp: ISOTimestamp;
+      timeoutMs: number;
+    }
+  >;
 
   constructor(config: RoutingConfig) {
     this.routingConfig = config;
+    this.sqs = getSQSClient();
     this.pendingRequests = new Map();
   }
 
@@ -190,14 +206,14 @@ export class A2AProtocol {
       replyTo: options?.replyTo,
       priority: options?.priority || 'normal',
       timestamp: new Date().toISOString(),
-      payload
+      payload,
     };
 
     // Track pending request for correlation
     this.pendingRequests.set(correlationId, {
       messageId,
       timestamp: message.timestamp,
-      timeoutMs: options?.timeoutMs || 30000
+      timeoutMs: options?.timeoutMs || 30000,
     });
 
     // Send message (placeholder - will use SQS)
@@ -233,7 +249,7 @@ export class A2AProtocol {
       correlationId,
       priority: 'normal',
       timestamp: new Date().toISOString(),
-      payload
+      payload,
     };
 
     // Remove from pending requests
@@ -271,7 +287,7 @@ export class A2AProtocol {
       tenantId: this.routingConfig.tenantId,
       priority: 'normal',
       timestamp: new Date().toISOString(),
-      payload
+      payload,
     };
 
     // Send to all agents in group
@@ -280,7 +296,9 @@ export class A2AProtocol {
       await this.sendMessage(targetMessage);
     }
 
-    console.log(`[A2A] Broadcast sent: ${messageId} (group: ${groupName}, ${agentIds.length} recipients)`);
+    console.log(
+      `[A2A] Broadcast sent: ${messageId} (group: ${groupName}, ${agentIds.length} recipients)`
+    );
   }
 
   /**
@@ -305,7 +323,7 @@ export class A2AProtocol {
       tenantId: this.routingConfig.tenantId,
       priority: 'low',
       timestamp: new Date().toISOString(),
-      payload
+      payload,
     };
 
     await this.sendMessage(message);
@@ -338,7 +356,9 @@ export class A2AProtocol {
 
       return message;
     } catch (error) {
-      throw new Error(`Failed to parse A2A message: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to parse A2A message: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -397,32 +417,47 @@ export class A2AProtocol {
   }
 
   /**
-   * Send message via SQS
-   * (Placeholder - will use SQS SDK)
+   * Send message via SQS.
+   *
+   * Uses the FIFO queue URL from RoutingConfig:
+   * - MessageGroupId  = targetAgentId (or correlationId for broadcasts)
+   *   → guarantees per-agent ordering
+   * - MessageDeduplicationId = messageId
+   *   → prevents duplicate delivery within 5-min dedup window
    */
   private async sendMessage(message: A2AMessage): Promise<void> {
-    // TODO: Send to SQS queue
-    // const queueUrl = this.routingConfig.queueUrl;
-    // await sqs.sendMessage({
-    //   QueueUrl: queueUrl,
-    //   MessageBody: JSON.stringify(message),
-    //   MessageAttributes: {
-    //     priority: {
-    //       DataType: 'String',
-    //       StringValue: message.priority
-    //     },
-    //     tenantId: {
-    //       DataType: 'String',
-    //       StringValue: message.tenantId
-    //     },
-    //     targetAgentId: {
-    //       DataType: 'String',
-    //       StringValue: message.targetAgentId || ''
-    //     }
-    //   }
-    // });
+    const queueUrl = this.routingConfig.queueUrl;
+    const isFifo = queueUrl.endsWith('.fifo');
 
-    console.log(`[A2A] Message sent: ${message.messageId}`);
+    await this.sqs.send(
+      new SendMessageCommand({
+        QueueUrl: queueUrl,
+        MessageBody: JSON.stringify(message),
+        MessageAttributes: {
+          priority: {
+            DataType: 'String',
+            StringValue: message.priority,
+          },
+          tenantId: {
+            DataType: 'String',
+            StringValue: message.tenantId,
+          },
+          targetAgentId: {
+            DataType: 'String',
+            StringValue: message.targetAgentId || '',
+          },
+        },
+        // FIFO-specific attributes (ignored for standard queues)
+        ...(isFifo
+          ? {
+              MessageGroupId: message.targetAgentId || message.correlationId || message.tenantId,
+              MessageDeduplicationId: message.messageId,
+            }
+          : {}),
+      })
+    );
+
+    console.log(`[A2A] Message sent via SQS: ${message.messageId}`);
   }
 }
 
@@ -448,7 +483,7 @@ export const A2AMessageBuilder = {
     type: 'task_request',
     taskId,
     instruction,
-    context
+    context,
   }),
 
   /**
@@ -464,7 +499,7 @@ export const A2AMessageBuilder = {
     taskId,
     status,
     result,
-    error
+    error,
   }),
 
   /**
@@ -478,7 +513,7 @@ export const A2AMessageBuilder = {
     type: 'query_request',
     queryId,
     query,
-    parameters
+    parameters,
   }),
 
   /**
@@ -492,19 +527,16 @@ export const A2AMessageBuilder = {
     type: 'query_response',
     queryId,
     result,
-    error
+    error,
   }),
 
   /**
    * Build event notification
    */
-  event: (
-    eventType: string,
-    eventData: Record<string, unknown>
-  ): EventNotification => ({
+  event: (eventType: string, eventData: Record<string, unknown>): EventNotification => ({
     type: 'event',
     eventType,
-    eventData
+    eventData,
   }),
 
   /**
@@ -518,6 +550,6 @@ export const A2AMessageBuilder = {
     type: 'broadcast',
     topic,
     message,
-    data
-  })
+    data,
+  }),
 };

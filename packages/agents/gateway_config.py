@@ -278,6 +278,16 @@ _TOOL_TIER_REGISTRY: Dict[str, tuple] = {
             "validate_cdk_in_sandbox",
         ],
     ),
+    # Tier 2: Multi-Agent Swarm Orchestration
+    "tools.swarm_tools": (
+        2,
+        [
+            "decompose_and_execute",
+            "check_swarm_status",
+            "wait_for_swarm",
+            "delegate_subtask",
+        ],
+    ),
 }
 
 # Per-tool tier overrides for modules that contain tools at different tiers.
@@ -423,6 +433,11 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "fetch_url_content": "Fetch and extract text content from a URL in a sandboxed Code Interpreter environment",
     "execute_in_sandbox": "Execute Python/JS/TS code in a sandboxed Code Interpreter microVM with 200+ packages pre-installed",
     "validate_cdk_in_sandbox": "Validate CDK TypeScript code by running cdk synth in a sandbox before committing to CodeCommit",
+    # Tier 2: Multi-Agent Swarm
+    "decompose_and_execute": "Decompose a complex task into subtasks and execute them in parallel via specialist agents",
+    "check_swarm_status": "Check progress of a multi-agent swarm execution with per-task status breakdown",
+    "wait_for_swarm": "Poll and wait for a swarm execution to complete (default: 10 min timeout, 15s interval)",
+    "delegate_subtask": "Delegate a single subtask to a specialist agent (planner, researcher, builder, validator, coordinator)",
 }
 
 # Maps tool tier number to the SSM key for that tier's Lambda ARN.
