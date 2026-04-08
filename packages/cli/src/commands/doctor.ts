@@ -188,7 +188,11 @@ export async function checkCdkBootstrap(region?: string): Promise<CheckResult> {
     ];
     if (region) args.push('--region', region);
 
-    const result = execFileSync('aws', args, { encoding: 'utf-8', timeout: 10_000 });
+    const result = execFileSync('aws', args, {
+      encoding: 'utf-8',
+      timeout: 10_000,
+      env: { ...process.env },
+    });
     const stacks = JSON.parse(result);
     const stack = stacks?.Stacks?.[0];
     if (!stack)
@@ -373,6 +377,11 @@ Examples:
       const config = loadWorkspaceConfig();
       const region = options.region ?? config.aws?.region;
       const env = config.workspace?.environment;
+
+      // Set AWS_PROFILE so SDK clients (CloudFormation, STS) resolve credentials
+      if (config.aws?.profile) {
+        process.env.AWS_PROFILE = config.aws.profile;
+      }
       const baseUrl = config.endpoints?.api_url ?? '';
       const chatUrl = config.endpoints?.chat_url;
 
