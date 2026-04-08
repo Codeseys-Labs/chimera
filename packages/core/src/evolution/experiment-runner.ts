@@ -21,11 +21,8 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
-// Module-level singleton clients
-const sfnClient = new SFNClient({});
-const ddbClient = new DynamoDBClient({});
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
-const s3Client = new S3Client({});
+// Clients are created lazily in the constructor to avoid module-scope
+// credential resolution that breaks in test/CI environments.
 
 /**
  * Experiment configuration
@@ -33,7 +30,11 @@ const s3Client = new S3Client({});
 export interface ExperimentConfig {
   experimentId: string;
   tenantId: string;
-  experimentType: 'prompt_tuning' | 'model_selection' | 'hyperparameter_search' | 'architecture_search';
+  experimentType:
+    | 'prompt_tuning'
+    | 'model_selection'
+    | 'hyperparameter_search'
+    | 'architecture_search';
   parameters: Record<string, unknown>;
   searchSpace?: Record<string, { min: number; max: number } | string[]>;
   maxTrials?: number;
@@ -87,9 +88,9 @@ export class ExperimentRunner {
     this.evolutionTable = params.evolutionTable;
     this.artifactsBucket = params.artifactsBucket;
     this.stateMachineArn = params.stateMachineArn;
-    this.sfn = sfnClient;
-    this.ddb = ddbDocClient;
-    this.s3 = s3Client;
+    this.sfn = new SFNClient({});
+    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    this.s3 = new S3Client({});
   }
 
   /**
@@ -328,13 +329,14 @@ export class ExperimentRunner {
   }): Promise<Record<string, unknown>> {
     // Get all previous trials
     const trials = await this.listTrials(params.experimentId);
-    const completedTrials = trials.filter(t => t.status === 'completed');
+    const completedTrials = trials.filter((t) => t.status === 'completed');
 
     const nextParams: Record<string, unknown> = {};
 
     // Exploration phase: first 30% of trials use random sampling
     const explorationThreshold = 0.3;
-    const shouldExplore = completedTrials.length < Math.max(3, trials.length * explorationThreshold);
+    const shouldExplore =
+      completedTrials.length < Math.max(3, trials.length * explorationThreshold);
 
     if (shouldExplore || completedTrials.length === 0) {
       // Pure random exploration

@@ -12,7 +12,6 @@ permissions:
   contents: write
 
 jobs:
-  # Create the GitHub release first
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -33,10 +32,7 @@ jobs:
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          # Get the tag annotation (which contains our release notes)
           git tag -l --format='%(contents)' "$VERSION" > release_notes.txt
-
-          # If no annotation, generate from commits since last tag
           if [ ! -s release_notes.txt ]; then
             PREV_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
             if [ -n "$PREV_TAG" ]; then
@@ -48,10 +44,7 @@ jobs:
           fi
 
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.get_version.outputs.version }}
           name: Chimera ${{ steps.get_version.outputs.version }}
@@ -59,35 +52,35 @@ jobs:
           draft: false
           prerelease: false
 
-  # Build binaries for each platform in parallel
   build-binaries:
     name: Build ${{ matrix.platform }}
     needs: create-release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: linux-x64
             os: ubuntu-latest
             target: bun-linux-x64
             binary_name: chimera-linux-x64
+            can_test: true
           - platform: linux-arm64
             os: ubuntu-latest
             target: bun-linux-arm64
             binary_name: chimera-linux-arm64
-          - platform: darwin-x64
-            os: macos-13
-            target: bun-darwin-x64
-            binary_name: chimera-darwin-x64
+            can_test: false # arm64 binary on x64 runner
           - platform: darwin-arm64
             os: macos-14
             target: bun-darwin-arm64
             binary_name: chimera-darwin-arm64
-          - platform: windows-x64
-            os: windows-latest
-            target: bun-windows-x64
-            binary_name: chimera-windows-x64.exe
+            can_test: true
+          - platform: darwin-x64
+            os: macos-14
+            target: bun-darwin-x64
+            binary_name: chimera-darwin-x64
+            can_test: false # x64 binary on arm64 runner
 
     steps:
       - name: Checkout code
@@ -113,60 +106,25 @@ jobs:
           BINARY: ${{ matrix.binary_name }}
         run: bun build src/cli.ts --compile --target="$TARGET" --outfile "$BINARY"
 
-      - name: Make binary executable (Unix)
-        if: runner.os != 'Windows'
+      - name: Make binary executable
         working-directory: packages/cli
-        env:
-          BINARY: ${{ matrix.binary_name }}
-        run: chmod +x "$BINARY"
+        run: chmod +x "${{ matrix.binary_name }}"
 
-      - name: Test binary (Unix)
-        if: runner.os != 'Windows' && !contains(matrix.target, 'arm64') || runner.arch == 'ARM64'
+      - name: Test binary
+        if: matrix.can_test
         working-directory: packages/cli
-        env:
-          BINARY: ${{ matrix.binary_name }}
-        run: ./"$BINARY" --version
+        run: ./"${{ matrix.binary_name }}" --version
 
-      - name: Test binary (Windows)
-        if: runner.os == 'Windows'
+      - name: Create tarball
         working-directory: packages/cli
-        env:
-          BINARY: ${{ matrix.binary_name }}
-        run: .\$env:BINARY --version
+        run: tar -czf "${{ matrix.binary_name }}.tar.gz" "${{ matrix.binary_name }}"
 
-      - name: Create tarball (Unix)
-        if: runner.os != 'Windows'
-        working-directory: packages/cli
-        env:
-          BINARY: ${{ matrix.binary_name }}
-        run: tar -czf "$BINARY.tar.gz" "$BINARY"
-
-      - name: Create zip (Windows)
-        if: runner.os == 'Windows'
-        working-directory: packages/cli
-        env:
-          BINARY: ${{ matrix.binary_name }}
-        run: Compress-Archive -Path $env:BINARY -DestinationPath "$env:BINARY.zip"
-
-      - name: Upload binary to release (Unix)
-        if: runner.os != 'Windows'
+      - name: Upload binary to release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ needs.create-release.outputs.version }}
           files: packages/cli/${{ matrix.binary_name }}.tar.gz
 
-      - name: Upload binary to release (Windows)
-        if: runner.os == 'Windows'
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ needs.create-release.outputs.version }}
-          files: packages/cli/${{ matrix.binary_name }}.zip
-
-  # Build agent source archive for deployment
   build-agent-archive:
     name: Build Agent Archive
     needs: create-release
@@ -181,7 +139,6 @@ jobs:
         env:
           VERSION: ${{ needs.create-release.outputs.version }}
         run: |
-          # Create archive with deployable source files
           tar -czf chimera-agent-${VERSION}.tar.gz \
             --exclude='node_modules' \
             --exclude='.git' \
@@ -196,27 +153,20 @@ jobs:
             infra/ \
             scripts/ \
             docs/ \
-            buildspec.yml \
-            buildspec-docker.yml \
-            SOUL.md \
-            AGENTS.md \
-            CLAUDE.md \
             package.json \
             bun.lock \
             tsconfig.json
 
       - name: Upload agent archive to release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ needs.create-release.outputs.version }}
           files: chimera-agent-${{ needs.create-release.outputs.version }}.tar.gz
 
-  # Update release with installation instructions after all binaries are uploaded
   finalize-release:
     name: Finalize Release
     needs: [create-release, build-binaries, build-agent-archive]
+    if: always() && needs.create-release.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Update release description
@@ -224,71 +174,17 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.create-release.outputs.version }}
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = process.env.RELEASE_VERSION;
-
             const release = await github.rest.repos.getReleaseByTag({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag: version
             });
-
-            const installInstructions = `
-            ## Installation
-
-            Download the appropriate binary for your platform:
-
-            ### Linux (x64)
-            \`\`\`bash
-            wget https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${version}/chimera-${version}-linux-x64.tar.gz
-            tar -xzf chimera-${version}-linux-x64.tar.gz
-            chmod +x chimera-linux-x64
-            sudo mv chimera-linux-x64 /usr/local/bin/chimera
-            \`\`\`
-
-            ### Linux (ARM64)
-            \`\`\`bash
-            wget https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${version}/chimera-${version}-linux-arm64.tar.gz
-            tar -xzf chimera-${version}-linux-arm64.tar.gz
-            chmod +x chimera-linux-arm64
-            sudo mv chimera-linux-arm64 /usr/local/bin/chimera
-            \`\`\`
-
-            ### macOS (Intel)
-            \`\`\`bash
-            wget https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${version}/chimera-${version}-darwin-x64.tar.gz
-            tar -xzf chimera-${version}-darwin-x64.tar.gz
-            chmod +x chimera-darwin-x64
-            sudo mv chimera-darwin-x64 /usr/local/bin/chimera
-            \`\`\`
-
-            ### macOS (Apple Silicon)
-            \`\`\`bash
-            wget https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${version}/chimera-${version}-darwin-arm64.tar.gz
-            tar -xzf chimera-${version}-darwin-arm64.tar.gz
-            chmod +x chimera-darwin-arm64
-            sudo mv chimera-darwin-arm64 /usr/local/bin/chimera
-            \`\`\`
-
-            ### Windows (x64)
-            Download and extract \`chimera-${version}-windows-x64.zip\`, then add the directory to your PATH.
-
-            ### Agent Archive (for chimera deploy)
-            \`\`\`bash
-            wget https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${version}/chimera-agent-${version}.tar.gz
-            tar -xzf chimera-agent-${version}.tar.gz
-            \`\`\`
-
-            ## Verify Installation
-            \`\`\`bash
-            chimera --version
-            \`\`\`
-            `;
-
+            const footer = `\n\n## Installation\n\nDownload the binary for your platform, extract, and move to your PATH:\n\n\`\`\`bash\ntar -xzf chimera-<platform>.tar.gz\nchmod +x chimera-<platform>\nsudo mv chimera-<platform> /usr/local/bin/chimera\nchimera --version\n\`\`\``;
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.data.id,
-              body: release.data.body + '\n' + installInstructions
+              body: release.data.body + footer
             });
