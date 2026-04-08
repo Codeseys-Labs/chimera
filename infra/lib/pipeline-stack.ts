@@ -19,16 +19,16 @@ import { ChimeraBucket } from '../constructs/chimera-bucket';
 
 export interface PipelineStackProps extends cdk.StackProps {
   envName: string;
-  repositoryName: string;  // CodeCommit repository name
-  branch: string;          // Branch to track (default: 'main')
+  repositoryName: string; // CodeCommit repository name
+  branch: string; // Branch to track (default: 'main')
 
   // Optional: ALB canary wiring — supplied once ChatStack is deployed alongside.
   // Lambda functions use these at runtime; omit to defer wiring until a later deploy.
-  albListenerArn?: string;         // HTTP listener on the chat-gateway ALB
-  stableTargetGroupArn?: string;   // Stable (production) ECS target group
-  canaryTargetGroupArn?: string;   // Canary ECS target group
-  ecsClusterName?: string;         // ECS cluster name
-  ecsCanaryServiceName?: string;   // ECS canary service name
+  albListenerArn?: string; // HTTP listener on the chat-gateway ALB
+  stableTargetGroupArn?: string; // Stable (production) ECS target group
+  canaryTargetGroupArn?: string; // Canary ECS target group
+  ecsClusterName?: string; // ECS cluster name
+  ecsCanaryServiceName?: string; // ECS canary service name
 
   // Optional: Docker Hub credentials for rate limit avoidance.
   // Secret must contain JSON keys: username, token
@@ -63,8 +63,8 @@ export interface PipelineStackProps extends cdk.StackProps {
 export class PipelineStack extends cdk.Stack {
   public readonly pipeline: codepipeline.Pipeline;
   public readonly artifactBucket: s3.IBucket;
-  public readonly ecrRepository: ecr.Repository;  // Agent runtime ECR
-  public readonly chatGatewayEcrRepository: ecr.Repository;  // Chat gateway ECR
+  public readonly ecrRepository: ecr.Repository; // Agent runtime ECR
+  public readonly chatGatewayEcrRepository: ecr.Repository; // Chat gateway ECR
 
   constructor(scope: Construct, id: string, props: PipelineStackProps) {
     super(scope, id, props);
@@ -259,9 +259,7 @@ export class PipelineStack extends cdk.Stack {
           'ecr:UploadLayerPart',
           'ecr:CompleteLayerUpload',
         ],
-        resources: [
-          `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
-        ],
+        resources: [`arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`],
       })
     );
 
@@ -269,7 +267,9 @@ export class PipelineStack extends cdk.Stack {
     // can docker login and avoid rate limits.
     if (props.dockerHubSecretArn) {
       const dockerHubSecret = secretsmanager.Secret.fromSecretCompleteArn(
-        this, 'DockerHubSecret', props.dockerHubSecretArn
+        this,
+        'DockerHubSecret',
+        props.dockerHubSecretArn
       );
       dockerBuildProject.addEnvironmentVariable('DOCKER_HUB_USERNAME', {
         value: `${props.dockerHubSecretArn}:username`,
@@ -306,10 +306,7 @@ export class PipelineStack extends cdk.Stack {
             ],
           },
           pre_build: {
-            commands: [
-              'export PATH="$HOME/.bun/bin:$PATH"',
-              'bun install --frozen-lockfile',
-            ],
+            commands: ['export PATH="$HOME/.bun/bin:$PATH"', 'bun install --frozen-lockfile'],
           },
           build: {
             commands: [
@@ -339,9 +336,7 @@ export class PipelineStack extends cdk.Stack {
     deployProject.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['sts:AssumeRole'],
-        resources: [
-          `arn:aws:iam::${this.account}:role/cdk-*`,
-        ],
+        resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
       })
     );
 
@@ -372,10 +367,15 @@ export class PipelineStack extends cdk.Stack {
               'BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\'FrontendBucketName\'].OutputValue" --output text)',
               'DIST_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\'FrontendDistributionId\'].OutputValue" --output text)',
               'echo "Deploying to bucket: $BUCKET_NAME  distribution: $DIST_ID"',
+              // Resolve the bucket's default KMS key ID so uploads use the FrontendStack key
+              // (not the CodePipeline artifact key). CloudFront only has kms:Decrypt on the
+              // FrontendStack key, so objects MUST be encrypted with it.
+              'KMS_KEY_ID=$(aws s3api get-bucket-encryption --bucket "$BUCKET_NAME" --query "ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID" --output text)',
+              'echo "Using KMS key: $KMS_KEY_ID"',
               // HTML files: no-cache so browsers always fetch the latest index.html
-              'aws s3 sync packages/web/dist/ "s3://$BUCKET_NAME/" --delete --exclude "assets/*" --cache-control "no-cache, no-store, must-revalidate" --sse aws:kms',
+              'aws s3 sync packages/web/dist/ "s3://$BUCKET_NAME/" --delete --exclude "assets/*" --cache-control "no-cache, no-store, must-revalidate" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"',
               // Hashed assets: 1-year immutable cache (Vite content-hashes filenames)
-              'aws s3 sync packages/web/dist/assets/ "s3://$BUCKET_NAME/assets/" --delete --cache-control "public, max-age=31536000, immutable" --sse aws:kms',
+              'aws s3 sync packages/web/dist/assets/ "s3://$BUCKET_NAME/assets/" --delete --cache-control "public, max-age=31536000, immutable" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"',
               // Invalidate CloudFront so edge caches serve the new index.html immediately
               'aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"',
             ],
@@ -416,6 +416,7 @@ export class PipelineStack extends cdk.Stack {
           's3:DeleteObject',
           's3:ListBucket',
           's3:GetBucketLocation',
+          's3:GetEncryptionConfiguration',
         ],
         resources: [
           `arn:aws:s3:::chimera-frontend-${props.envName}-${this.account}`,
@@ -527,9 +528,7 @@ export class PipelineStack extends cdk.Stack {
           'ecr:GetDownloadUrlForLayer',
           'ecr:BatchGetImage',
         ],
-        resources: [
-          `arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`,
-        ],
+        resources: [`arn:aws:ecr:${this.region}:${this.account}:repository/chimera-*`],
       })
     );
 
@@ -656,11 +655,7 @@ def _update_service(cluster, service_name, new_image):
 
     deployCanaryFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: [
-          'elbv2:ModifyListener',
-          'elbv2:DescribeListeners',
-          'elbv2:DescribeTargetGroups',
-        ],
+        actions: ['elbv2:ModifyListener', 'elbv2:DescribeListeners', 'elbv2:DescribeTargetGroups'],
         // ELBv2 listener/target-group actions require resources: ['*']
         resources: ['*'],
       })
@@ -883,11 +878,7 @@ def handler(event, context):
 
     progressiveRolloutFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: [
-          'elbv2:ModifyListener',
-          'elbv2:DescribeListeners',
-          'elbv2:DescribeTargetGroups',
-        ],
+        actions: ['elbv2:ModifyListener', 'elbv2:DescribeListeners', 'elbv2:DescribeTargetGroups'],
         resources: ['*'],
       })
     );
@@ -1011,11 +1002,7 @@ def handler(event, context):
 
     rollbackFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: [
-          'elbv2:ModifyListener',
-          'elbv2:DescribeListeners',
-          'elbv2:DescribeTargetGroups',
-        ],
+        actions: ['elbv2:ModifyListener', 'elbv2:DescribeListeners', 'elbv2:DescribeTargetGroups'],
         resources: ['*'],
       })
     );
@@ -1046,8 +1033,8 @@ def handler(event, context):
     const bakeDuration = isProd
       ? cdk.Duration.minutes(30)
       : isStaging
-      ? cdk.Duration.minutes(10)
-      : cdk.Duration.minutes(2);
+        ? cdk.Duration.minutes(10)
+        : cdk.Duration.minutes(2);
 
     const waitCanaryBake = new stepfunctions.Wait(this, 'WaitCanaryBake', {
       time: stepfunctions.WaitTime.duration(bakeDuration),
@@ -1091,7 +1078,10 @@ def handler(event, context):
     if (isProd) {
       const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
         lambdaFunction: progressiveRolloutFunction,
-        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 25, 'imageUri.$': '$.imageUri' }),
+        payload: stepfunctions.TaskInput.fromObject({
+          targetPercentage: 25,
+          'imageUri.$': '$.imageUri',
+        }),
         outputPath: '$.Payload',
       });
       rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
@@ -1103,7 +1093,10 @@ def handler(event, context):
 
       const rollout50Task = new tasks.LambdaInvoke(this, 'Rollout50Percent', {
         lambdaFunction: progressiveRolloutFunction,
-        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 50, 'imageUri.$': '$.imageUri' }),
+        payload: stepfunctions.TaskInput.fromObject({
+          targetPercentage: 50,
+          'imageUri.$': '$.imageUri',
+        }),
         outputPath: '$.Payload',
       });
       rollout50Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
@@ -1115,7 +1108,10 @@ def handler(event, context):
 
       const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
         lambdaFunction: progressiveRolloutFunction,
-        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        payload: stepfunctions.TaskInput.fromObject({
+          targetPercentage: 100,
+          'imageUri.$': '$.imageUri',
+        }),
         outputPath: '$.Payload',
       });
       rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
@@ -1125,11 +1121,13 @@ def handler(event, context):
       rollout25Task.next(wait25Percent).next(rollout50Task);
       rollout50Task.next(wait50Percent).next(rollout100Task);
       rolloutChain = rollout25Task;
-
     } else if (isStaging) {
       const rollout25Task = new tasks.LambdaInvoke(this, 'Rollout25Percent', {
         lambdaFunction: progressiveRolloutFunction,
-        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 25, 'imageUri.$': '$.imageUri' }),
+        payload: stepfunctions.TaskInput.fromObject({
+          targetPercentage: 25,
+          'imageUri.$': '$.imageUri',
+        }),
         outputPath: '$.Payload',
       });
       rollout25Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
@@ -1141,7 +1139,10 @@ def handler(event, context):
 
       const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
         lambdaFunction: progressiveRolloutFunction,
-        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        payload: stepfunctions.TaskInput.fromObject({
+          targetPercentage: 100,
+          'imageUri.$': '$.imageUri',
+        }),
         outputPath: '$.Payload',
       });
       rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
@@ -1150,12 +1151,14 @@ def handler(event, context):
 
       rollout25Task.next(wait25Percent).next(rollout100Task);
       rolloutChain = rollout25Task;
-
     } else {
       // Dev: deploy 100% immediately after bake — no gradual ramp
       const rollout100Task = new tasks.LambdaInvoke(this, 'Rollout100Percent', {
         lambdaFunction: progressiveRolloutFunction,
-        payload: stepfunctions.TaskInput.fromObject({ 'targetPercentage': 100, 'imageUri.$': '$.imageUri' }),
+        payload: stepfunctions.TaskInput.fromObject({
+          targetPercentage: 100,
+          'imageUri.$': '$.imageUri',
+        }),
         outputPath: '$.Payload',
       });
       rollout100Task.addRetry({ errors: ['States.ALL'], maxAttempts: 2, backoffRate: 2 });
