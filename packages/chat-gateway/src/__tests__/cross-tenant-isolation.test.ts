@@ -7,9 +7,21 @@
 
 import request from 'supertest';
 import { createAdaptorServer } from '@hono/node-server';
-import { app as honoApp } from '../server';
 
-const app = createAdaptorServer({ fetch: honoApp.fetch });
+let app: ReturnType<typeof createAdaptorServer>;
+
+beforeAll(async () => {
+  const { app: honoApp } = await import('../server');
+  app = createAdaptorServer({ fetch: honoApp.fetch });
+});
+
+afterAll(() => {
+  if (app && typeof app.close === 'function') app.close();
+});
+
+afterAll(() => {
+  if (app && typeof app.close === 'function') app.close();
+});
 
 describe('Cross-Tenant Isolation', () => {
   const tenantA = 'tenant-alpha';
@@ -311,15 +323,17 @@ describe('Cross-Tenant Isolation', () => {
     });
 
     it('should reject Slack events without tenant context', async () => {
-      const response = await request(app).post('/slack/events').send({
-        type: 'event_callback',
-        team_id: 'T123456',
-        event: {
-          type: 'message',
-          text: 'Hello bot',
-          user: 'U123456',
-        },
-      });
+      const response = await request(app)
+        .post('/slack/events')
+        .send({
+          type: 'event_callback',
+          team_id: 'T123456',
+          event: {
+            type: 'message',
+            text: 'Hello bot',
+            user: 'U123456',
+          },
+        });
 
       expect(response.status).toBe(401);
       expect(response.body.error.code).toBe('MISSING_TENANT_ID');

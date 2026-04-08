@@ -4,9 +4,21 @@
 
 import request from 'supertest';
 import { createAdaptorServer } from '@hono/node-server';
-import { app as honoApp } from '../server';
 
-const app = createAdaptorServer({ fetch: honoApp.fetch });
+let app: ReturnType<typeof createAdaptorServer>;
+
+beforeAll(async () => {
+  const { app: honoApp } = await import('../server');
+  app = createAdaptorServer({ fetch: honoApp.fetch });
+});
+
+afterAll(() => {
+  if (app && typeof app.close === 'function') app.close();
+});
+
+afterAll(() => {
+  if (app && typeof app.close === 'function') app.close();
+});
 
 describe('Chat Gateway Server', () => {
   describe('Server Initialization', () => {
@@ -146,13 +158,11 @@ describe('Chat Gateway Server', () => {
 
   describe('POST /slack/events', () => {
     it('should handle URL verification challenge', async () => {
-      const response = await request(app)
-        .post('/slack/events')
-        .send({
-          type: 'url_verification',
-          challenge: 'test-challenge-token',
-          token: 'verification-token',
-        });
+      const response = await request(app).post('/slack/events').send({
+        type: 'url_verification',
+        challenge: 'test-challenge-token',
+        token: 'verification-token',
+      });
 
       expect(response.status).toBe(200);
       expect(response.body).toEqual({
@@ -216,13 +226,11 @@ describe('Chat Gateway Server', () => {
 
   describe('POST /slack/slash', () => {
     it('should return 401 without tenant context', async () => {
-      const response = await request(app)
-        .post('/slack/slash')
-        .send({
-          command: '/ai',
-          text: 'test query',
-          user_id: 'U123456',
-        });
+      const response = await request(app).post('/slack/slash').send({
+        command: '/ai',
+        text: 'test query',
+        user_id: 'U123456',
+      });
 
       expect(response.status).toBe(401);
     });
@@ -271,23 +279,25 @@ describe('Chat Gateway Server', () => {
 
   describe('Platform integration routes are mounted', () => {
     it('POST /discord/interactions should not return 404', async () => {
-      const response = await request(app)
-        .post('/discord/interactions')
-        .send({ type: 1 });
+      const response = await request(app).post('/discord/interactions').send({ type: 1 });
       expect(response.status).not.toBe(404);
     });
 
     it('POST /teams/messages should not return 404', async () => {
       const response = await request(app)
         .post('/teams/messages')
-        .send({ type: 'message', channelId: 'msteams', from: { id: 'u1' }, conversation: { id: 'c1' }, recipient: { id: 'b1' } });
+        .send({
+          type: 'message',
+          channelId: 'msteams',
+          from: { id: 'u1' },
+          conversation: { id: 'c1' },
+          recipient: { id: 'b1' },
+        });
       expect(response.status).not.toBe(404);
     });
 
     it('POST /telegram/webhook should not return 404', async () => {
-      const response = await request(app)
-        .post('/telegram/webhook')
-        .send({ update_id: 1 });
+      const response = await request(app).post('/telegram/webhook').send({ update_id: 1 });
       expect(response.status).not.toBe(404);
     });
 

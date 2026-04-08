@@ -5,10 +5,7 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import {
-  CloudFormationClient,
-  DescribeStacksCommand,
-} from '@aws-sdk/client-cloudformation';
+import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 
@@ -17,7 +14,7 @@ import { color } from '../lib/color.js';
  */
 async function getStackOutputs(
   client: CloudFormationClient,
-  stackName: string,
+  stackName: string
 ): Promise<Record<string, string>> {
   try {
     const command = new DescribeStacksCommand({ StackName: stackName });
@@ -64,7 +61,9 @@ async function runEndpoints(options: {
       process.exit(1);
     }
     const env = options.env ?? wsConfig?.workspace?.environment ?? 'dev';
-    if (wsConfig?.aws?.profile) { process.env.AWS_PROFILE = wsConfig.aws.profile; }
+    if (wsConfig?.aws?.profile) {
+      process.env.AWS_PROFILE = wsConfig.aws.profile;
+    }
 
     const client = new CloudFormationClient({ region });
 
@@ -105,7 +104,8 @@ async function runEndpoints(options: {
       frontendUrl = frontendOutputs.FrontendUrl || frontendOutputs.FrontendDistributionDomainName;
       if (!options.json) spinner.succeed(color.green('Frontend URL retrieved'));
     } catch {
-      if (!options.json) spinner.warn(color.yellow('Frontend stack not found — frontend_url not set'));
+      if (!options.json)
+        spinner.warn(color.yellow('Frontend stack not found — frontend_url not set'));
     }
 
     if (!options.json) spinner.start('Fetching Cognito configuration...');
@@ -142,20 +142,21 @@ async function runEndpoints(options: {
     });
 
     if (options.json) {
-      console.log(JSON.stringify({
-        status: 'ok',
-        data: {
-          region,
-          api_url: apiUrl,
-          chat_url: chatUrl,
-          frontend_url: frontendUrl,
-          websocket_url: webSocketUrl,
-          cognito_user_pool_id: cognitoUserPoolId,
-          cognito_client_id: cognitoClientId,
-          cognito_domain: cognitoDomain,
-          frontend_url: frontendUrl,
-        },
-      }));
+      console.log(
+        JSON.stringify({
+          status: 'ok',
+          data: {
+            region,
+            api_url: apiUrl,
+            chat_url: chatUrl,
+            frontend_url: frontendUrl,
+            websocket_url: webSocketUrl,
+            cognito_user_pool_id: cognitoUserPoolId,
+            cognito_client_id: cognitoClientId,
+            cognito_domain: cognitoDomain,
+          },
+        })
+      );
     } else {
       console.log(color.green('\n✓ Connected to Chimera deployment'));
       console.log(color.gray('\nEndpoints:'));
@@ -174,7 +175,9 @@ async function runEndpoints(options: {
         console.log(color.gray(`  Client ID:    ${cognitoClientId}`));
       }
       if (cognitoDomain) {
-        console.log(color.gray(`  Hosted UI:    https://${cognitoDomain}.auth.${region}.amazoncognito.com`));
+        console.log(
+          color.gray(`  Hosted UI:    https://${cognitoDomain}.auth.${region}.amazoncognito.com`)
+        );
       }
       if (frontendUrl) {
         console.log(color.gray(`  Frontend:     ${frontendUrl}`));
@@ -183,7 +186,9 @@ async function runEndpoints(options: {
     }
   } catch (error: any) {
     if (options.json) {
-      console.log(JSON.stringify({ status: 'error', error: error.message, code: 'CONNECTION_FAILED' }));
+      console.log(
+        JSON.stringify({ status: 'error', error: error.message, code: 'CONNECTION_FAILED' })
+      );
       process.exit(1);
     }
     spinner.fail(color.red('Connection failed'));
@@ -200,11 +205,14 @@ export function registerConnectCommand(program: Command): void {
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--json', 'Output result as JSON')
-    .addHelpText('after', `
+    .addHelpText(
+      'after',
+      `
 Examples:
   $ chimera endpoints
   $ chimera endpoints --region us-west-2 --env prod
-  $ chimera endpoints --json`)
+  $ chimera endpoints --json`
+    )
     .action((options) => runEndpoints(options));
 
   // Deprecated alias: chimera connect (hidden from help)
