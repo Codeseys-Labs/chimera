@@ -299,32 +299,38 @@ async function emptyS3Bucket(bucketName: string, s3Client: S3Client): Promise<vo
   let versionIdMarker: string | undefined;
 
   let isTruncated = true;
-  while (isTruncated) {
-    const resp = await s3Client.send(
-      new ListObjectVersionsCommand({
-        Bucket: bucketName,
-        KeyMarker: keyMarker,
-        VersionIdMarker: versionIdMarker,
-      })
-    );
-
-    const toDelete = [
-      ...(resp.Versions ?? []).map((v) => ({ Key: v.Key!, VersionId: v.VersionId })),
-      ...(resp.DeleteMarkers ?? []).map((m) => ({ Key: m.Key!, VersionId: m.VersionId })),
-    ].filter((o) => o.Key);
-
-    if (toDelete.length > 0) {
-      await s3Client.send(
-        new DeleteObjectsCommand({
+  try {
+    while (isTruncated) {
+      const resp = await s3Client.send(
+        new ListObjectVersionsCommand({
           Bucket: bucketName,
-          Delete: { Objects: toDelete, Quiet: true },
+          KeyMarker: keyMarker,
+          VersionIdMarker: versionIdMarker,
         })
       );
-    }
 
-    isTruncated = !!resp.IsTruncated;
-    keyMarker = resp.NextKeyMarker;
-    versionIdMarker = resp.NextVersionIdMarker;
+      const toDelete = [
+        ...(resp.Versions ?? []).map((v) => ({ Key: v.Key!, VersionId: v.VersionId })),
+        ...(resp.DeleteMarkers ?? []).map((m) => ({ Key: m.Key!, VersionId: m.VersionId })),
+      ].filter((o) => o.Key);
+
+      if (toDelete.length > 0) {
+        await s3Client.send(
+          new DeleteObjectsCommand({
+            Bucket: bucketName,
+            Delete: { Objects: toDelete, Quiet: true },
+          })
+        );
+      }
+
+      isTruncated = !!resp.IsTruncated;
+      keyMarker = resp.NextKeyMarker;
+      versionIdMarker = resp.NextVersionIdMarker;
+    }
+  } catch (err: any) {
+    // Bucket may already be deleted or not exist — skip silently
+    if (err.name === 'NoSuchBucket' || err.Code === 'NoSuchBucket') return;
+    throw err;
   }
 }
 
@@ -376,12 +382,16 @@ async function disableDdbDeletionProtection(
     .map((r) => r.PhysicalResourceId!);
 
   for (const table of tables) {
-    await ddbClient.send(
-      new UpdateTableCommand({
-        TableName: table,
-        DeletionProtectionEnabled: false,
-      })
-    );
+    try {
+      await ddbClient.send(
+        new UpdateTableCommand({
+          TableName: table,
+          DeletionProtectionEnabled: false,
+        })
+      );
+    } catch {
+      // Table may not exist or already have protection disabled — skip
+    }
   }
 }
 
@@ -550,19 +560,16 @@ Examples:
             continue;
           }
 
-          // Pre-delete: disable DDB deletion protection before Data stack teardown
-          if (stackSuffix === 'Data') {
-            if (!options.json && !options.monitor)
-              spinner.text = `Disabling DynamoDB deletion protection in ${stackName}...`;
-            await disableDdbDeletionProtection(stackName, cfClient, ddbClient);
-          }
-
-          // Pre-delete: empty S3 buckets so CloudFormation can delete them
-          if (S3_STACK_SUFFIXES.has(stackSuffix)) {
-            if (!options.json && !options.monitor)
-              spinner.text = `Emptying S3 buckets in ${stackName}...`;
-            await emptyStackS3Buckets(stackName, cfClient, s3Client);
-          }
+          // Pre-delete: disable DDB deletion protection and empty S3 buckets
+          // for ALL stacks (any stack may contain protected tables or non-empty buckets)
+          if (!options.json && !options.monitor)
+            spinner.text = `Pre-delete cleanup for ${stackName}...`;
+          if (!options.json && options.monitor)
+            console.log(
+              color.gray(`  Pre-delete cleanup: disabling DDB protection, emptying S3 buckets...`)
+            );
+          await disableDdbDeletionProtection(stackName, cfClient, ddbClient);
+          await emptyStackS3Buckets(stackName, cfClient, s3Client);
 
           if (!options.json && !options.monitor) spinner.text = `Destroying ${stackName}...`;
           if (!options.json && options.monitor)
