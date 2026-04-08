@@ -174,11 +174,16 @@ exports.handler = async (event) => {
       },
     });
 
-    // Grant Cognito admin permissions to update user attributes
+    // Grant Cognito admin permissions to update user attributes.
+    // Use account-scoped wildcard to break the CDK circular dependency:
+    //   UserPool → PostConfirmationTrigger → ServiceRolePolicy → UserPool
+    // The Lambda is ONLY invoked by this User Pool's trigger, and the action
+    // is narrowly scoped to AdminUpdateUserAttributes, so the broader
+    // resource scope is acceptable.
     postConfirmationFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['cognito-idp:AdminUpdateUserAttributes'],
-        resources: [this.userPool.userPoolArn],
+        resources: [`arn:aws:cognito-idp:${this.region}:${this.account}:userpool/*`],
       })
     );
 

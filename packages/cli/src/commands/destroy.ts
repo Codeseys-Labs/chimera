@@ -530,7 +530,12 @@ Examples:
                 '--context',
                 `environment=${safeEnv}`,
               ],
-              { cwd: `${repoRoot}/infra`, stdout: 'ignore', stderr: 'ignore' }
+              {
+                cwd: `${repoRoot}/infra`,
+                stdout: 'ignore',
+                stderr: 'ignore',
+                env: { ...process.env },
+              }
             );
             await proc.exited;
             stopSignal.done = true;

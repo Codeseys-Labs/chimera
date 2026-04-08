@@ -135,24 +135,24 @@ export const diffCommand = new Command('diff')
         const localFiles = getLocalFiles(projectRoot, subPath);
 
         // Files only in remote (agent added)
-        for (const [path] of remoteFiles) {
-          if (!localFiles.has(path)) {
-            allDiffs.push({ path, status: 'added_remote' });
+        for (const [filePath] of Array.from(remoteFiles.entries())) {
+          if (!localFiles.has(filePath)) {
+            allDiffs.push({ path: filePath, status: 'added_remote' });
           }
         }
 
         // Files only in local (not pushed)
-        for (const [path] of localFiles) {
-          if (!remoteFiles.has(path)) {
-            allDiffs.push({ path, status: 'added_local' });
+        for (const [filePath] of Array.from(localFiles.entries())) {
+          if (!remoteFiles.has(filePath)) {
+            allDiffs.push({ path: filePath, status: 'added_local' });
           }
         }
 
         // Files in both but different content
-        for (const [path, remoteHash] of remoteFiles) {
-          const localHash = localFiles.get(path);
+        for (const [filePath, remoteHash] of Array.from(remoteFiles.entries())) {
+          const localHash = localFiles.get(filePath);
           if (localHash && localHash !== remoteHash) {
-            allDiffs.push({ path, status: 'modified' });
+            allDiffs.push({ path: filePath, status: 'modified' });
           }
         }
       }

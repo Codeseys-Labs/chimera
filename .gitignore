@@ -82,6 +82,11 @@ packages/cli/chimera
 docs/analysis/session-*-conversation.json
 
 # ============================================
+# Kilo Code session exports
+# ============================================
+.kilo-exports/
+
+# ============================================
 # Project-specific
 # ============================================
 chimera.toml

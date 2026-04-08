@@ -7,21 +7,39 @@ import {
   A2AProtocol,
   createA2AProtocol,
   A2AMessageBuilder,
-  type RoutingConfig
+  type RoutingConfig,
 } from '../../../packages/core/src/orchestration/a2a-protocol';
+
+/**
+ * Minimal mock SQS client that satisfies the SQSClient interface for testing.
+ * Records all sent messages for assertion, always resolves successfully.
+ */
+function createMockSQSClient() {
+  const sentMessages: unknown[] = [];
+  return {
+    send: async (command: unknown) => {
+      sentMessages.push(command);
+      return { MessageId: `mock-${Date.now()}` };
+    },
+    sentMessages,
+  };
+}
 
 describe('A2AProtocol', () => {
   let protocol: A2AProtocol;
   let config: RoutingConfig;
 
   beforeEach(() => {
+    const mockSqs = createMockSQSClient();
+
     config = {
       tenantId: 'tenant-123',
       queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/test-queue',
       groups: new Map([
         ['research-team', ['agent-001', 'agent-002', 'agent-003']],
-        ['monitoring-team', ['monitor-001', 'monitor-002']]
-      ])
+        ['monitoring-team', ['monitor-001', 'monitor-002']],
+      ]),
+      sqsClient: mockSqs as any,
     };
 
     protocol = createA2AProtocol(config);
@@ -29,17 +47,11 @@ describe('A2AProtocol', () => {
 
   describe('sendRequest', () => {
     it('should send request and return message ID', async () => {
-      const payload = A2AMessageBuilder.taskRequest(
-        'task-001',
-        'Analyze document',
-        { documentId: 'doc-123' }
-      );
+      const payload = A2AMessageBuilder.taskRequest('task-001', 'Analyze document', {
+        documentId: 'doc-123',
+      });
 
-      const messageId = await protocol.sendRequest(
-        'source-agent',
-        'target-agent',
-        payload
-      );
+      const messageId = await protocol.sendRequest('source-agent', 'target-agent', payload);
 
       expect(messageId).toBeTruthy();
       expect(messageId).toMatch(/^a2a-req-/);
@@ -58,11 +70,7 @@ describe('A2AProtocol', () => {
     it('should use default priority when not specified', async () => {
       const payload = A2AMessageBuilder.taskRequest('task-001', 'Test task');
 
-      const messageId = await protocol.sendRequest(
-        'source-agent',
-        'target-agent',
-        payload
-      );
+      const messageId = await protocol.sendRequest('source-agent', 'target-agent', payload);
 
       expect(messageId).toBeTruthy();
     });
@@ -70,29 +78,19 @@ describe('A2AProtocol', () => {
     it('should accept custom priority', async () => {
       const payload = A2AMessageBuilder.taskRequest('task-001', 'Urgent task');
 
-      const messageId = await protocol.sendRequest(
-        'source-agent',
-        'target-agent',
-        payload,
-        { priority: 'urgent' }
-      );
+      const messageId = await protocol.sendRequest('source-agent', 'target-agent', payload, {
+        priority: 'urgent',
+      });
 
       expect(messageId).toBeTruthy();
     });
 
     it('should accept custom timeout', async () => {
-      const payload = A2AMessageBuilder.queryRequest(
-        'query-001',
-        'SELECT * FROM logs',
-        { limit: 100 }
-      );
+      const payload = A2AMessageBuilder.queryRequest('query-001', 'SELECT * FROM logs', {
+        limit: 100,
+      });
 
-      await protocol.sendRequest(
-        'source-agent',
-        'target-agent',
-        payload,
-        { timeoutMs: 60000 }
-      );
+      await protocol.sendRequest('source-agent', 'target-agent', payload, { timeoutMs: 60000 });
 
       const pending = protocol.getPendingRequests();
       expect(pending[0].timeoutMs).toBe(60000);
@@ -106,11 +104,9 @@ describe('A2AProtocol', () => {
       const messageId = await protocol.sendRequest('agent-A', 'agent-B', requestPayload);
 
       // Send response
-      const responsePayload = A2AMessageBuilder.taskResponse(
-        'task-001',
-        'success',
-        { result: 'completed' }
-      );
+      const responsePayload = A2AMessageBuilder.taskResponse('task-001', 'success', {
+        result: 'completed',
+      });
 
       await protocol.sendResponse('agent-B', 'agent-A', messageId, responsePayload);
 
@@ -122,11 +118,9 @@ describe('A2AProtocol', () => {
 
   describe('broadcast', () => {
     it('should broadcast to all agents in group', async () => {
-      const payload = A2AMessageBuilder.broadcast(
-        'alerts',
-        'High CPU usage detected',
-        { cpuPercent: 95 }
-      );
+      const payload = A2AMessageBuilder.broadcast('alerts', 'High CPU usage detected', {
+        cpuPercent: 95,
+      });
 
       await protocol.broadcast('coordinator', 'research-team', payload);
     });
@@ -144,18 +138,18 @@ describe('A2AProtocol', () => {
 
       const payload = A2AMessageBuilder.broadcast('test', 'Test message');
 
-      await expect(
-        protocol.broadcast('coordinator', 'empty-group', payload)
-      ).rejects.toThrow('Group not found or empty: empty-group');
+      await expect(protocol.broadcast('coordinator', 'empty-group', payload)).rejects.toThrow(
+        'Group not found or empty: empty-group'
+      );
     });
   });
 
   describe('publishEvent', () => {
     it('should publish event notification', async () => {
-      const payload = A2AMessageBuilder.event(
-        'task.completed',
-        { taskId: 'task-001', duration: 1234 }
-      );
+      const payload = A2AMessageBuilder.event('task.completed', {
+        taskId: 'task-001',
+        duration: 1234,
+      });
 
       await protocol.publishEvent('worker-001', 'coordinator', payload);
     });
@@ -175,8 +169,8 @@ describe('A2AProtocol', () => {
           type: 'task_request',
           taskId: 'task-001',
           instruction: 'Test task',
-          context: {}
-        }
+          context: {},
+        },
       });
 
       const message = protocol.parseMessage(rawMessage);
@@ -199,7 +193,7 @@ describe('A2AProtocol', () => {
         tenantId: 'tenant-123',
         priority: 'normal',
         timestamp: new Date().toISOString(),
-        payload: {}
+        payload: {},
       });
 
       expect(() => {
@@ -216,7 +210,7 @@ describe('A2AProtocol', () => {
         priority: 'normal',
         timestamp: new Date().toISOString(),
         expiresAt: new Date(Date.now() - 1000).toISOString(), // Expired 1 second ago
-        payload: {}
+        payload: {},
       });
 
       expect(() => {
@@ -240,9 +234,7 @@ describe('A2AProtocol', () => {
 
       const payload = A2AMessageBuilder.broadcast('test', 'Test message');
 
-      expect(
-        protocol.broadcast('coordinator', 'research-team', payload)
-      );
+      expect(protocol.broadcast('coordinator', 'research-team', payload));
     });
   });
 
@@ -252,9 +244,9 @@ describe('A2AProtocol', () => {
 
       const payload = A2AMessageBuilder.broadcast('test', 'Test message');
 
-      expect(
-        protocol.broadcast('coordinator', 'research-team', payload)
-      ).rejects.toThrow('Group not found or empty');
+      expect(protocol.broadcast('coordinator', 'research-team', payload)).rejects.toThrow(
+        'Group not found or empty'
+      );
     });
   });
 
@@ -262,15 +254,10 @@ describe('A2AProtocol', () => {
     it('should detect timed-out requests', async () => {
       const payload = A2AMessageBuilder.taskRequest('task-001', 'Test task');
 
-      await protocol.sendRequest(
-        'agent-A',
-        'agent-B',
-        payload,
-        { timeoutMs: 100 }
-      );
+      await protocol.sendRequest('agent-A', 'agent-B', payload, { timeoutMs: 100 });
 
       // Wait for timeout
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       const timedOut = protocol.checkTimeouts();
       expect(timedOut.length).toBe(1);
@@ -294,14 +281,9 @@ describe('A2AProtocol', () => {
     it('should remove timed-out requests from pending', async () => {
       const payload = A2AMessageBuilder.taskRequest('task-001', 'Test task');
 
-      await protocol.sendRequest(
-        'agent-A',
-        'agent-B',
-        payload,
-        { timeoutMs: 50 }
-      );
+      await protocol.sendRequest('agent-A', 'agent-B', payload, { timeoutMs: 50 });
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       protocol.checkTimeouts();
 
@@ -312,11 +294,9 @@ describe('A2AProtocol', () => {
 
   describe('A2AMessageBuilder', () => {
     it('should build task request', () => {
-      const message = A2AMessageBuilder.taskRequest(
-        'task-001',
-        'Analyze logs',
-        { logFile: 'app.log' }
-      );
+      const message = A2AMessageBuilder.taskRequest('task-001', 'Analyze logs', {
+        logFile: 'app.log',
+      });
 
       expect(message.type).toBe('task_request');
       expect(message.taskId).toBe('task-001');
@@ -325,11 +305,9 @@ describe('A2AProtocol', () => {
     });
 
     it('should build task response', () => {
-      const message = A2AMessageBuilder.taskResponse(
-        'task-001',
-        'success',
-        { summary: 'No errors found' }
-      );
+      const message = A2AMessageBuilder.taskResponse('task-001', 'success', {
+        summary: 'No errors found',
+      });
 
       expect(message.type).toBe('task_response');
       expect(message.taskId).toBe('task-001');
@@ -338,26 +316,22 @@ describe('A2AProtocol', () => {
     });
 
     it('should build task failure response', () => {
-      const message = A2AMessageBuilder.taskResponse(
-        'task-001',
-        'failure',
-        undefined,
-        { code: 'FILE_NOT_FOUND', message: 'Log file not found' }
-      );
+      const message = A2AMessageBuilder.taskResponse('task-001', 'failure', undefined, {
+        code: 'FILE_NOT_FOUND',
+        message: 'Log file not found',
+      });
 
       expect(message.status).toBe('failure');
       expect(message.error).toEqual({
         code: 'FILE_NOT_FOUND',
-        message: 'Log file not found'
+        message: 'Log file not found',
       });
     });
 
     it('should build query request', () => {
-      const message = A2AMessageBuilder.queryRequest(
-        'query-001',
-        'SELECT * FROM metrics',
-        { timeRange: '1h' }
-      );
+      const message = A2AMessageBuilder.queryRequest('query-001', 'SELECT * FROM metrics', {
+        timeRange: '1h',
+      });
 
       expect(message.type).toBe('query_request');
       expect(message.queryId).toBe('query-001');
@@ -366,10 +340,9 @@ describe('A2AProtocol', () => {
     });
 
     it('should build query response', () => {
-      const message = A2AMessageBuilder.queryResponse(
-        'query-001',
-        { rows: [{ cpu: 45 }, { cpu: 67 }] }
-      );
+      const message = A2AMessageBuilder.queryResponse('query-001', {
+        rows: [{ cpu: 45 }, { cpu: 67 }],
+      });
 
       expect(message.type).toBe('query_response');
       expect(message.queryId).toBe('query-001');
@@ -377,10 +350,10 @@ describe('A2AProtocol', () => {
     });
 
     it('should build event notification', () => {
-      const message = A2AMessageBuilder.event(
-        'agent.spawned',
-        { agentId: 'worker-001', role: 'worker' }
-      );
+      const message = A2AMessageBuilder.event('agent.spawned', {
+        agentId: 'worker-001',
+        role: 'worker',
+      });
 
       expect(message.type).toBe('event');
       expect(message.eventType).toBe('agent.spawned');

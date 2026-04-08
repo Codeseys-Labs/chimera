@@ -68,8 +68,8 @@ describe('OrchestrationStack', () => {
   });
 
   describe('EventBridge Rules', () => {
-    it('should create 7 event rules', () => {
-      template.resourceCountIs('AWS::Events::Rule', 7);
+    it('should create 8 event rules', () => {
+      template.resourceCountIs('AWS::Events::Rule', 8);
     });
 
     it('should create TaskStarted rule routing to CloudWatch', () => {
@@ -204,7 +204,9 @@ describe('OrchestrationStack', () => {
       // All 10 queues should have KMS encryption (ChimeraQueue + ChimeraLambda DLQs)
       const queues = template.findResources('AWS::SQS::Queue');
       const encryptedCount = Object.values(queues).filter(
-        (queue) => (queue as { Properties: { KmsMasterKeyId?: string } }).Properties.KmsMasterKeyId !== undefined
+        (queue) =>
+          (queue as { Properties: { KmsMasterKeyId?: string } }).Properties.KmsMasterKeyId !==
+          undefined
       ).length;
       expect(encryptedCount).toBe(10);
     });
@@ -244,8 +246,8 @@ describe('OrchestrationStack', () => {
         };
       }
       const schedulerPolicy = Object.values(policies).find((policy) =>
-        (policy as PolicyResource).Properties.Roles.some((role) =>
-          role.Ref && role.Ref.includes('SchedulerRole')
+        (policy as PolicyResource).Properties.Roles.some(
+          (role) => role.Ref && role.Ref.includes('SchedulerRole')
         )
       );
       expect(schedulerPolicy).toBeDefined();
@@ -390,9 +392,7 @@ describe('OrchestrationStack', () => {
         };
       }
       const assumePolicy = (roles[roleKey] as RoleResource).Properties.AssumeRolePolicyDocument;
-      const services = assumePolicy.Statement.flatMap((stmt) =>
-        stmt.Principal?.Service || []
-      );
+      const services = assumePolicy.Statement.flatMap((stmt) => stmt.Principal?.Service || []);
       expect(services).toContain('lambda.amazonaws.com');
       expect(services).toContain('ecs-tasks.amazonaws.com');
       expect(services).toContain('bedrock.amazonaws.com');
@@ -447,9 +447,7 @@ describe('OrchestrationStack', () => {
       const publisherPolicy = Object.values(policies).find((policy) => {
         const p = policy as PolicyResource;
         return (
-          p.Properties.Roles.some((role) =>
-            role.Ref && role.Ref.includes('EventPublisherRole')
-          ) &&
+          p.Properties.Roles.some((role) => role.Ref && role.Ref.includes('EventPublisherRole')) &&
           p.Properties.PolicyDocument.Statement.some((stmt) => {
             const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
             return actions.includes('states:StartExecution');
@@ -547,8 +545,8 @@ describe('OrchestrationStack', () => {
       const groupChatPolicy = Object.values(policies).find((policy) => {
         const p = policy as PolicyResource;
         return (
-          p.Properties.Roles.some((role) =>
-            role.Ref && role.Ref.includes('GroupChatProvisionerRole')
+          p.Properties.Roles.some(
+            (role) => role.Ref && role.Ref.includes('GroupChatProvisionerRole')
           ) &&
           p.Properties.PolicyDocument.Statement.some((stmt) => {
             const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];

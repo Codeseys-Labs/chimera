@@ -131,6 +131,8 @@ export interface RoutingConfig {
   tenantId: string;
   queueUrl: string;
   groups: Map<string, string[]>; // Group name -> agent IDs
+  /** Optional SQS client for dependency injection (testing). */
+  sqsClient?: SQSClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +172,7 @@ export class A2AProtocol {
 
   constructor(config: RoutingConfig) {
     this.routingConfig = config;
-    this.sqs = getSQSClient();
+    this.sqs = config.sqsClient ?? getSQSClient();
     this.pendingRequests = new Map();
   }
 
