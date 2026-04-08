@@ -24,9 +24,15 @@ import type { PipelineStatus } from '../infra-builder/types';
 import type { EvolutionSafetyHarness } from './safety-harness';
 import type { IaCChangeType, EvolutionAuditEvent, EvolutionAction } from './types';
 
-// Module-level singleton DynamoDB client
-const ddbClient = new DynamoDBClient({});
-const ddbDoc = DynamoDBDocumentClient.from(ddbClient);
+// Lazy-initialized singleton DynamoDB client (avoids module-scope credential
+// resolution which breaks in test/CI environments without AWS credentials).
+let _ddbDoc: DynamoDBDocumentClient | undefined;
+function getDdbDoc(): DynamoDBDocumentClient {
+  if (!_ddbDoc) {
+    _ddbDoc = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  }
+  return _ddbDoc;
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -76,14 +82,14 @@ export interface EvolutionRequest {
 export interface EvolutionResult {
   /** Terminal status of this evolution attempt */
   status:
-    | 'authorized'        // Authorized but pipeline not yet started (async)
-    | 'pipeline_started'  // Pipeline execution triggered
+    | 'authorized' // Authorized but pipeline not yet started (async)
+    | 'pipeline_started' // Pipeline execution triggered
     | 'pipeline_succeeded' // Pipeline completed successfully
-    | 'pipeline_failed'   // Pipeline failed (check rollbackAvailable)
-    | 'denied'            // Cedar / rate-limit denial
+    | 'pipeline_failed' // Pipeline failed (check rollbackAvailable)
+    | 'denied' // Cedar / rate-limit denial
     | 'validation_failed' // CDK static validation rejected the code
-    | 'commit_failed'     // CodeCommit write error
-    | 'error';            // Unexpected internal error
+    | 'commit_failed' // CodeCommit write error
+    | 'error'; // Unexpected internal error
 
   /** CodePipeline execution ID, present when pipeline was triggered */
   executionId?: string;
@@ -117,12 +123,12 @@ export interface SelfEvolutionConfig {
  * These map to DangerousIaCOperation values and other risky constructs.
  */
 const BLOCKED_CDK_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
-  { regex: /RemovalPolicy\.DESTROY/i,          reason: 'DESTROY removal policy not allowed' },
-  { regex: /\.addToPolicy|grantAdmin/i,         reason: 'IAM policy mutations not allowed' },
-  { regex: /ec2\.Vpc|ec2\.CfnVPC/i,             reason: 'VPC modifications not allowed' },
+  { regex: /RemovalPolicy\.DESTROY/i, reason: 'DESTROY removal policy not allowed' },
+  { regex: /\.addToPolicy|grantAdmin/i, reason: 'IAM policy mutations not allowed' },
+  { regex: /ec2\.Vpc|ec2\.CfnVPC/i, reason: 'VPC modifications not allowed' },
   { regex: /ec2\.SecurityGroup|addIngressRule/i, reason: 'Security group mutations not allowed' },
-  { regex: /dynamodb.*delete|TableV2.*delete/i,  reason: 'DynamoDB table deletion not allowed' },
-  { regex: /s3.*deleteObjects|bucket.*delete/i,  reason: 'S3 bucket deletion not allowed' },
+  { regex: /dynamodb.*delete|TableV2.*delete/i, reason: 'DynamoDB table deletion not allowed' },
+  { regex: /s3.*deleteObjects|bucket.*delete/i, reason: 'S3 bucket deletion not allowed' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -146,7 +152,7 @@ export class SelfEvolutionOrchestrator {
     private readonly config: SelfEvolutionConfig,
     ddbOverride?: DynamoDBDocumentClient
   ) {
-    this.ddb = ddbOverride ?? ddbDoc;
+    this.ddb = ddbOverride ?? getDdbDoc();
   }
 
   // -------------------------------------------------------------------------
@@ -285,10 +291,7 @@ export class SelfEvolutionOrchestrator {
       const executionId = pipelineStart.data.executionId;
 
       // Step 6: Increment rate-limit counters (authorization already passed)
-      await this.safetyHarness.incrementRateLimitCounters(
-        request.tenantId,
-        'evolution_infra'
-      );
+      await this.safetyHarness.incrementRateLimitCounters(request.tenantId, 'evolution_infra');
 
       // Step 7: Register capability in Gateway (fire-and-forget DynamoDB write)
       await this.registerCapability({

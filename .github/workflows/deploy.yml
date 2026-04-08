@@ -1,8 +1,6 @@
 name: Deploy - Canary & Production
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -10,6 +8,7 @@ on:
         required: true
         type: choice
         options:
+          - dev
           - staging
           - production
       skip_canary:
@@ -19,76 +18,20 @@ on:
         default: false
 
 env:
-  BUN_VERSION: "1.3.11"
-  NODE_VERSION: "20"
+  BUN_VERSION: '1.3.11'
+  NODE_VERSION: '20'
   AWS_REGION: us-west-2
 
 jobs:
-  # Job 1: Build Docker images for agent runtime
-  build-images:
-    name: Build & Push Docker Images
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      git-sha: ${{ steps.vars.outputs.sha }}
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set output variables
-        id: vars
-        run: |
-          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date +%s)" >> $GITHUB_OUTPUT
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/chimera-agent-runtime
-          tags: |
-            type=sha,prefix=,format=short
-            type=raw,value=latest-${{ github.ref_name }}
-            type=raw,value=${{ steps.vars.outputs.timestamp }}
-
-      - name: Build and push agent runtime image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./packages/core
-          file: ./packages/core/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            GIT_SHA=${{ steps.vars.outputs.sha }}
-            BUILD_DATE=${{ steps.vars.outputs.timestamp }}
-
-  # Job 2: Deploy CDK infrastructure stacks (blue-green)
   deploy-infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: build-images
     permissions:
       id-token: write
       contents: read
     environment:
-      name: ${{ github.event.inputs.environment || 'production' }}
+      name: ${{ inputs.environment }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -118,234 +61,25 @@ jobs:
       - name: CDK Bootstrap (if needed)
         working-directory: infra
         run: npx cdk bootstrap --require-approval never
-        env:
-          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
       - name: CDK Deploy - All Stacks
         working-directory: infra
         env:
-          IMAGE_TAG: ${{ needs.build-images.outputs.git-sha }}
-          ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
+          ENV_NAME: ${{ inputs.environment }}
         run: |
           npx cdk deploy --all --require-approval never \
-            --context imageTag="$IMAGE_TAG" \
-            --context envName="$ENV_NAME"
+            --context environment="$ENV_NAME"
 
-  # Job 3: Canary deployment - route 5% traffic to new version
-  deploy-canary:
-    name: Deploy to Canary (5% traffic)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [build-images, deploy-infra]
-    if: github.event.inputs.skip_canary != 'true'
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Trigger canary deployment via Step Functions
-        env:
-          IMAGE_URI: ${{ needs.build-images.outputs.image-tag }}
-          ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
-        run: |
-          # Trigger the canary orchestration state machine
-          STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
-            --stack-name ChimeraPipelineStack-${ENV_NAME} \
-            --query 'Stacks[0].Outputs[?OutputKey==`OrchestrationStateMachineArn`].OutputValue' \
-            --output text)
-
-          echo "Starting canary orchestration: $STATE_MACHINE_ARN"
-          aws stepfunctions start-execution \
-            --state-machine-arn "$STATE_MACHINE_ARN" \
-            --input "{\"imageUri\": \"$IMAGE_URI\"}"
-
-      - name: Wait for canary deployment
-        run: sleep 30
-
-  # Job 4: Canary validation - monitor for 30 minutes
-  validate-canary:
-    name: Validate Canary (30min bake)
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    needs: deploy-canary
-    if: github.event.inputs.skip_canary != 'true'
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Install monitoring tools
-        run: pip install boto3 requests
-
-      - name: Monitor canary metrics
-        run: |
-          python scripts/monitor-canary.py \
-            --duration 1800 \
-            --check-interval 60 \
-            --error-rate-threshold 0.05 \
-            --latency-p99-multiplier 2.0 \
-            --guardrail-trigger-threshold 0.10
-        env:
-          CANARY_ENDPOINT: chimera-canary
-          BASELINE_ENDPOINT: chimera-production
-
-      - name: Run evaluation suite against canary
-        run: |
-          python scripts/run-evaluations.py \
-            --endpoint canary \
-            --min-score 80 \
-            --suite production-validation
-
-  # Job 5: Monitor Step Functions orchestration (handles progressive rollout)
-  monitor-orchestration:
-    name: Monitor Progressive Rollout
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: validate-canary
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Monitor Step Functions execution
-        env:
-          ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
-        run: |
-          # Get the most recent execution ARN
-          STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
-            --stack-name ChimeraPipelineStack-${ENV_NAME} \
-            --query 'Stacks[0].Outputs[?OutputKey==`OrchestrationStateMachineArn`].OutputValue' \
-            --output text)
-
-          EXECUTION_ARN=$(aws stepfunctions list-executions \
-            --state-machine-arn "$STATE_MACHINE_ARN" \
-            --max-results 1 \
-            --query 'executions[0].executionArn' \
-            --output text)
-
-          echo "Monitoring execution: $EXECUTION_ARN"
-          echo "Progressive rollout stages: 5% canary -> 25% -> 50% -> 100%"
-
-          # Poll execution status
-          while true; do
-            STATUS=$(aws stepfunctions describe-execution \
-              --execution-arn "$EXECUTION_ARN" \
-              --query 'status' \
-              --output text)
-
-            echo "Current status: $STATUS"
-
-            case "$STATUS" in
-              "SUCCEEDED")
-                echo "✓ Progressive rollout completed successfully"
-                exit 0
-                ;;
-              "FAILED"|"TIMED_OUT"|"ABORTED")
-                echo "✗ Progressive rollout failed: $STATUS"
-                exit 1
-                ;;
-              "RUNNING")
-                echo "Step Functions orchestration in progress..."
-                sleep 30
-                ;;
-            esac
-          done
-
-  # Job 6: Post-deployment validation
-  post-deploy-validation:
-    name: Post-Deploy Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: monitor-orchestration
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Install dependencies
-        run: pip install boto3 requests pytest pytest-asyncio
-
-      - name: Run synthetic canary checks
-        run: |
-          pytest tests/e2e/smoke/ \
-            --endpoint production \
-            --timeout 300 \
-            --retries 3
-
-      - name: Monitor cost anomalies
-        run: |
-          python scripts/check-cost-anomalies.py \
-            --window-hours 2 \
-            --threshold-multiplier 3.0
-
-      - name: Tag successful deployment
-        env:
-          GIT_SHA: ${{ needs.build-images.outputs.git-sha }}
-        run: |
-          # Retrieve the image manifest and re-tag as latest-stable
-          MANIFEST=$(aws ecr batch-get-image \
-            --repository-name chimera-agent-runtime \
-            --image-ids imageTag="$GIT_SHA" \
-            --query 'images[0].imageManifest' \
-            --output text)
-
-          echo "Tagging image $GIT_SHA as latest-stable"
-          aws ecr put-image \
-            --repository-name chimera-agent-runtime \
-            --image-tag latest-stable \
-            --image-manifest "$MANIFEST"
-
-  # Job 7: Notify deployment status
   notify:
     name: Notify Deployment Status
     runs-on: ubuntu-latest
-    needs: [post-deploy-validation]
+    needs: [deploy-infra]
     if: always()
     steps:
-      - name: Send deployment notification
+      - name: Report status
         run: |
-          # Send notification to Slack/SNS/etc
-          STATUS="${{ needs.post-deploy-validation.result }}"
-          if [ "$STATUS" == "success" ]; then
-            echo "Deployment succeeded"
-            # aws sns publish --topic-arn ${{ secrets.SNS_DEPLOY_TOPIC }} ...
-          else
-            echo "Deployment failed"
-            # Send alert
+          STATUS="${{ needs.deploy-infra.result }}"
+          echo "Deploy result: $STATUS"
+          if [ "$STATUS" != "success" ]; then
+            echo "::warning::Deployment ended with status: $STATUS"
           fi

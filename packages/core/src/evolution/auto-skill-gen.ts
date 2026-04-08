@@ -6,23 +6,12 @@
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import {
-  DynamoDBDocumentClient,
-  QueryCommand,
-  PutCommand,
-} from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import type {
-  ToolPattern,
-  PatternDetectionResult,
-  GeneratedSkill,
-  SkillTestResult,
-} from './types';
+import type { ToolPattern, PatternDetectionResult, GeneratedSkill, SkillTestResult } from './types';
 
-// Module-level singleton clients
-const ddbClient = new DynamoDBClient({});
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
-const s3Client = new S3Client({});
+// Clients are created lazily in the constructor to avoid module-scope
+// credential resolution that breaks in test/CI environments.
 
 /**
  * Auto-skill generator from repetitive patterns
@@ -34,16 +23,12 @@ export class AutoSkillGenerator {
   private evolutionTable: string;
   private artifactsBucket: string;
 
-  constructor(params: {
-    sessionsTable: string;
-    evolutionTable: string;
-    artifactsBucket: string;
-  }) {
+  constructor(params: { sessionsTable: string; evolutionTable: string; artifactsBucket: string }) {
     this.sessionsTable = params.sessionsTable;
     this.evolutionTable = params.evolutionTable;
     this.artifactsBucket = params.artifactsBucket;
-    this.ddb = ddbDocClient;
-    this.s3 = s3Client;
+    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    this.s3 = new S3Client({});
   }
 
   /**
@@ -157,10 +142,7 @@ export class AutoSkillGenerator {
       .map((t, i) => `  ${i + 1}. \`${t}\``)
       .join('\n');
 
-    const steps = this.generateStepsFromPattern(
-      params.pattern,
-      params.exampleConversations || []
-    );
+    const steps = this.generateStepsFromPattern(params.pattern, params.exampleConversations || []);
 
     const skillMd = `# ${skillName}
 
@@ -336,20 +318,14 @@ ${steps}
     }
   }
 
-  private generateStepsFromPattern(
-    pattern: ToolPattern,
-    examples: any[]
-  ): string {
+  private generateStepsFromPattern(pattern: ToolPattern, examples: any[]): string {
     // Generate step descriptions from pattern
     return pattern.pattern
       .map((tool, i) => `${i + 1}. Call \`${tool}\` with appropriate parameters`)
       .join('\n');
   }
 
-  private computePatternConfidence(
-    occurrences: number,
-    totalSessions: number
-  ): number {
+  private computePatternConfidence(occurrences: number, totalSessions: number): number {
     // Confidence based on frequency and consistency
     const frequency = occurrences / totalSessions;
     const base = Math.min(occurrences / 10, 1); // Cap at 10 occurrences

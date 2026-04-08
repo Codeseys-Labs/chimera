@@ -26,10 +26,8 @@ import type {
   IaCChangeType,
 } from './types';
 
-// Module-level singleton clients
-const avpClient = new VerifiedPermissionsClient({});
-const ddbClient = new DynamoDBClient({});
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+// Clients are created lazily in the constructor to avoid module-scope
+// credential resolution that breaks in test/CI environments.
 
 /**
  * Safety harness for evolution operations
@@ -41,8 +39,8 @@ export class EvolutionSafetyHarness {
 
   constructor(config: EvolutionConfig) {
     this.config = config;
-    this.avp = avpClient;
-    this.ddb = ddbDocClient;
+    this.avp = new VerifiedPermissionsClient({});
+    this.ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
   }
 
   /**
@@ -58,10 +56,7 @@ export class EvolutionSafetyHarness {
     humanApproved?: boolean;
   }): Promise<CedarAuthResult> {
     // Step 1: Check rate limits
-    const rateLimitCheck = await this.checkRateLimits(
-      params.tenantId,
-      params.eventType
-    );
+    const rateLimitCheck = await this.checkRateLimits(params.tenantId, params.eventType);
     if (!rateLimitCheck.allowed) {
       return {
         decision: 'DENY',
@@ -214,10 +209,7 @@ export class EvolutionSafetyHarness {
   /**
    * Increment rate limit counters after successful authorization
    */
-  async incrementRateLimitCounters(
-    tenantId: string,
-    eventType: EvolutionEventType
-  ): Promise<void> {
+  async incrementRateLimitCounters(tenantId: string, eventType: EvolutionEventType): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     const weekStart = this.getWeekStart();
 
@@ -252,9 +244,7 @@ export class EvolutionSafetyHarness {
   /**
    * Get or create rate limit entry for tenant
    */
-  private async getOrCreateRateLimits(
-    tenantId: string
-  ): Promise<EvolutionRateLimits> {
+  private async getOrCreateRateLimits(tenantId: string): Promise<EvolutionRateLimits> {
     const result = await this.ddb.send(
       new GetCommand({
         TableName: this.config.evolutionStateTable,
