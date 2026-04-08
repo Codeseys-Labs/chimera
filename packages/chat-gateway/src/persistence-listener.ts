@@ -49,7 +49,7 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
   const CHECKPOINT_MS = 30_000;
   let finishReason: string | undefined;
   let usage: Record<string, number> | undefined;
-  let toolCalls: Array<{ id: string; name: string; input: string; result?: string }> = [];
+  const toolCalls: Array<{ id: string; name: string; input: string; result?: string }> = [];
   let currentToolCall: { id: string; name: string; input: string } | null = null;
 
   // Timestamp-based sort keys ensure chronological ordering within the session
