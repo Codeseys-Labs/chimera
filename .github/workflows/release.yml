@@ -103,7 +103,7 @@ jobs:
 
       - name: Build TypeScript packages
         run: |
-          cd packages/shared && bun run build
+          cd packages/shared && bunx tsc --build --force
           cd ../core && bun run build
 
       - name: Compile binary
