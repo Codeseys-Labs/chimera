@@ -121,7 +121,7 @@ jobs:
         run: chmod +x "$BINARY"
 
       - name: Test binary (Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && !contains(matrix.target, 'arm64') || runner.arch == 'ARM64'
         working-directory: packages/cli
         env:
           BINARY: ${{ matrix.binary_name }}

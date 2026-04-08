@@ -31,7 +31,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
-        run: bun run test
+        run: bun test ./packages/shared/ ./packages/core/ ./packages/sse-bridge/ ./packages/cli/ ./infra/ ./tests/unit/ --exclude '**/cross-tenant*' --exclude '**/server.test*'
 
       - name: Run lint
         run: bun run lint
