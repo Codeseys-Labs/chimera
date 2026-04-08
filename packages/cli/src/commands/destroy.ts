@@ -149,6 +149,50 @@ async function exportDataArchive(options: {
 }
 
 /**
+ * Check whether a CloudFormation stack exists and is in a deletable state.
+ */
+async function stackExists(client: CloudFormationClient, stackName: string): Promise<boolean> {
+  try {
+    const resp = await client.send(
+      new ListStacksCommand({
+        StackStatusFilter: [
+          StackStatus.CREATE_COMPLETE,
+          StackStatus.UPDATE_COMPLETE,
+          StackStatus.UPDATE_ROLLBACK_COMPLETE,
+          StackStatus.ROLLBACK_COMPLETE,
+          StackStatus.CREATE_FAILED,
+          StackStatus.DELETE_FAILED,
+          StackStatus.DELETE_IN_PROGRESS,
+          StackStatus.CREATE_IN_PROGRESS,
+          StackStatus.UPDATE_IN_PROGRESS,
+        ],
+      })
+    );
+    return (resp.StackSummaries ?? []).some((s) => s.StackName === stackName);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wait for a CloudFormation stack to reach DELETE_COMPLETE.
+ * Polls every 15 seconds, times out after 20 minutes.
+ */
+async function waitForStackDelete(
+  client: CloudFormationClient,
+  stackName: string,
+  timeoutMs = 20 * 60 * 1000
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise<void>((r) => setTimeout(r, 15_000));
+    const exists = await stackExists(client, stackName);
+    if (!exists) return; // Stack gone or in DELETE_COMPLETE (filtered out by ListStacks)
+  }
+  throw new Error(`Timed out waiting for ${stackName} to delete after ${timeoutMs / 60000}m`);
+}
+
+/**
  * Poll CloudFormation stack events every 10 seconds and print new entries.
  * Stops when stopSignal.done is set (caller sets it after CDK process exits).
  * Uses a seen-set to avoid re-printing events across poll cycles.
@@ -498,6 +542,14 @@ Examples:
         for (const stackSuffix of STACK_DESTROY_ORDER) {
           const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
 
+          // Check if stack exists before trying to delete
+          const exists = await stackExists(cfClient, stackName);
+          if (!exists) {
+            if (!options.json && options.monitor)
+              console.log(color.gray(`  ${stackName}: already deleted, skipping`));
+            continue;
+          }
+
           // Pre-delete: disable DDB deletion protection before Data stack teardown
           if (stackSuffix === 'Data') {
             if (!options.json && !options.monitor)
@@ -516,41 +568,31 @@ Examples:
           if (!options.json && options.monitor)
             console.log(color.bold(`\n→ Destroying ${stackName}`));
 
+          // Delete via CloudFormation API directly (no CDK subprocess needed)
+          try {
+            await cfClient.send(new DeleteStackCommand({ StackName: stackName }));
+          } catch (err: any) {
+            if (!options.json && options.monitor)
+              console.log(
+                color.red(`  Failed to initiate delete for ${stackName}: ${err.message}`)
+              );
+            continue;
+          }
+
+          // Wait for deletion to complete
           if (options.monitor && !options.json) {
-            // Run CDK destroy in background so we can poll events in parallel
             const stopSignal = { done: false };
             const monitorPromise = monitorStackEvents(cfClient, stackName, stopSignal);
-            const proc = Bun.spawn(
-              [
-                'npx',
-                'cdk',
-                'destroy',
-                stackName,
-                '--force',
-                '--context',
-                `environment=${safeEnv}`,
-              ],
-              {
-                cwd: `${repoRoot}/infra`,
-                stdout: 'ignore',
-                stderr: 'ignore',
-                env: { ...process.env },
-              }
-            );
-            await proc.exited;
+            await waitForStackDelete(cfClient, stackName);
             stopSignal.done = true;
             await monitorPromise;
           } else {
-            try {
-              // npx spawns Node.js — CDK module resolution works correctly
-              await Bun.$`npx cdk destroy ${stackName} --force --context environment=${safeEnv}`
-                .cwd(`${repoRoot}/infra`)
-                .quiet()
-                .nothrow();
-            } catch {
-              /* Stack may not exist — continue */
-            }
+            await waitForStackDelete(cfClient, stackName);
           }
+
+          if (!options.json && !options.monitor) spinner.text = `${stackName} deleted`;
+          if (!options.json && options.monitor)
+            console.log(color.green(`  ✓ ${stackName} deleted`));
         }
 
         if (!options.json && !options.monitor)
