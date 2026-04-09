@@ -1,12 +1,19 @@
 /**
  * Web platform adapter
  *
- * Simple passthrough adapter for web clients using Vercel AI SDK format.
- * No transformation needed - Vercel AI SDK already speaks the right protocol.
+ * Handles both Vercel AI SDK v4 and v5 message formats:
+ *   v4: { messages: [ { role: 'user', content: '...' } ] }
+ *   v5: { messages: [ { role: 'user', parts: [{ type: 'text', text: '...' }] } ] }
  */
 
 import { PlatformAdapter } from './types';
 import { ChatMessage, TenantContext } from '../types';
+
+/** AI SDK v5 UIMessage part */
+interface TextPart {
+  type: 'text';
+  text: string;
+}
 
 export class WebPlatformAdapter implements PlatformAdapter {
   readonly platform = 'web';
@@ -14,8 +21,7 @@ export class WebPlatformAdapter implements PlatformAdapter {
   /**
    * Parse incoming request body
    *
-   * Web clients using Vercel AI SDK send messages in standard format:
-   * { messages: [ { role: 'user', content: '...' }, ... ] }
+   * Accepts both AI SDK v4 (content string) and v5 (parts array) formats.
    */
   parseIncoming(body: unknown): ChatMessage[] {
     if (!body || typeof body !== 'object') {
@@ -25,7 +31,6 @@ export class WebPlatformAdapter implements PlatformAdapter {
     const request = body as { messages?: unknown };
 
     if (!request.messages) {
-      // Return empty array - let route handler check for empty messages
       return [];
     }
 
@@ -38,7 +43,11 @@ export class WebPlatformAdapter implements PlatformAdapter {
         throw new Error(`Invalid message at index ${index}`);
       }
 
-      const message = msg as { role?: unknown; content?: unknown };
+      const message = msg as {
+        role?: unknown;
+        content?: unknown;
+        parts?: unknown;
+      };
 
       if (
         !message.role ||
@@ -48,13 +57,29 @@ export class WebPlatformAdapter implements PlatformAdapter {
         throw new Error(`Invalid role at message index ${index}`);
       }
 
-      if (!message.content || typeof message.content !== 'string') {
-        throw new Error(`Invalid content at message index ${index}`);
+      // Extract text content: support both v4 (content string) and v5 (parts array)
+      let content: string;
+
+      if (typeof message.content === 'string' && message.content.length > 0) {
+        // AI SDK v4 format: { role, content: "..." }
+        content = message.content;
+      } else if (Array.isArray(message.parts)) {
+        // AI SDK v5 format: { role, parts: [{ type: 'text', text: '...' }] }
+        const textParts = (message.parts as TextPart[])
+          .filter((p) => p && p.type === 'text' && typeof p.text === 'string')
+          .map((p) => p.text);
+        content = textParts.join('');
+      } else {
+        content = '';
+      }
+
+      if (!content) {
+        throw new Error(`Empty content at message index ${index}`);
       }
 
       return {
         role: message.role as 'user' | 'assistant' | 'system',
-        content: message.content,
+        content,
       };
     });
   }
