@@ -57,6 +57,31 @@ function extractToken(c: Context): string | null {
  */
 export async function authenticateJWT(c: Context, next: Next): Promise<Response | void> {
   try {
+    // Dev/test bypass: when Cognito is not configured and NODE_ENV is dev/test,
+    // accept X-Tenant-Id + X-User-Id headers as auth context. This enables
+    // integration tests and local development without a real Cognito user pool.
+    if (!verifier) {
+      const isDevOrTest =
+        process.env.NODE_ENV === 'development' ||
+        process.env.NODE_ENV === 'test' ||
+        process.env.CHIMERA_ENV === 'dev';
+
+      if (isDevOrTest) {
+        const tenantId = c.req.header('x-tenant-id');
+        const userId = c.req.header('x-user-id') || 'dev-user';
+        if (tenantId) {
+          c.set('auth', {
+            sub: userId,
+            tenantId,
+            tenantTier: c.req.header('x-tenant-tier') || 'basic',
+          });
+          await next();
+          return;
+        }
+        // No tenant header either — fall through to 401
+      }
+    }
+
     // Extract token
     const token = extractToken(c);
     if (!token) {
