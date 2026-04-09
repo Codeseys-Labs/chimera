@@ -55,14 +55,26 @@ export interface StackFilter {
 export function createStackInventoryTools(config: StackInventoryConfig) {
   const listStacks = tool({
     name: 'cfn_list_stacks',
-    description: 'List all CloudFormation stacks across configured regions with optional filtering by status, tags, or creation date.',
+    description:
+      'List all CloudFormation stacks across configured regions with optional filtering by status, tags, or creation date.',
     inputSchema: z.object({
-      statuses: z.array(z.string()).optional().describe('Filter by stack status (e.g., ["CREATE_COMPLETE", "UPDATE_COMPLETE"])'),
-      namePattern: z.string().optional().describe('Filter by stack name pattern (supports wildcards)'),
-      tags: z.array(z.object({
-        key: z.string(),
-        value: z.string().optional(),
-      })).optional().describe('Filter by stack tags'),
+      statuses: z
+        .array(z.string())
+        .optional()
+        .describe('Filter by stack status (e.g., ["CREATE_COMPLETE", "UPDATE_COMPLETE"])'),
+      namePattern: z
+        .string()
+        .optional()
+        .describe('Filter by stack name pattern (supports wildcards)'),
+      tags: z
+        .array(
+          z.object({
+            key: z.string(),
+            value: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe('Filter by stack tags'),
       createdAfter: z.string().optional().describe('Created after timestamp (ISO 8601)'),
       createdBefore: z.string().optional().describe('Created before timestamp (ISO 8601)'),
       driftStatuses: z.array(z.string()).optional().describe('Filter by drift status'),
@@ -97,7 +109,8 @@ export function createStackInventoryTools(config: StackInventoryConfig) {
 
   const listStackResources = tool({
     name: 'cfn_list_stack_resources',
-    description: 'List all resources in a CloudFormation stack with optional filtering by resource type or logical ID.',
+    description:
+      'List all resources in a CloudFormation stack with optional filtering by resource type or logical ID.',
     inputSchema: z.object({
       stackName: z.string().describe('Stack name or ID'),
       region: z.string().describe('AWS region'),
@@ -118,25 +131,35 @@ export function createStackInventoryTools(config: StackInventoryConfig) {
 
   const findStackForResource = tool({
     name: 'cfn_find_stack_for_resource',
-    description: 'Find which CloudFormation stack owns a specific resource (reverse lookup from resource ARN to stack).',
+    description:
+      'Find which CloudFormation stack owns a specific resource (reverse lookup from resource ARN to stack).',
     inputSchema: z.object({
       resourceArn: z.string().describe('Resource ARN'),
       region: z.string().describe('AWS region'),
     }),
     callback: async (input) => {
-      const stackName = await findStackForResourceImpl(config, input.resourceArn, input.region as AWSRegion);
+      const stackName = await findStackForResourceImpl(
+        config,
+        input.resourceArn,
+        input.region as AWSRegion
+      );
 
-      return JSON.stringify({
-        resourceArn: input.resourceArn,
-        stackName: stackName || null,
-        managed: !!stackName,
-      }, null, 2);
+      return JSON.stringify(
+        {
+          resourceArn: input.resourceArn,
+          stackName: stackName || null,
+          managed: !!stackName,
+        },
+        null,
+        2
+      );
     },
   });
 
   const detectDrift = tool({
     name: 'cfn_detect_drift',
-    description: 'Detect configuration drift for a CloudFormation stack. Identifies manual changes made outside CloudFormation.',
+    description:
+      'Detect configuration drift for a CloudFormation stack. Identifies manual changes made outside CloudFormation.',
     inputSchema: z.object({
       stackName: z.string().describe('Stack name or ID'),
       region: z.string().describe('AWS region'),
@@ -182,7 +205,12 @@ export function createStackInventoryTools(config: StackInventoryConfig) {
       includeResources: z.boolean().default(false).describe('Include resource details'),
     }),
     callback: async (input) => {
-      const hierarchy = await getStackHierarchyImpl(config, input.stackName, input.region as AWSRegion, input.includeResources ?? false);
+      const hierarchy = await getStackHierarchyImpl(
+        config,
+        input.stackName,
+        input.region as AWSRegion,
+        input.includeResources ?? false
+      );
       return JSON.stringify(hierarchy, null, 2);
     },
   });
@@ -199,17 +227,119 @@ export function createStackInventoryTools(config: StackInventoryConfig) {
 }
 
 // ============================================================================
-// Private helper functions (implementation stubs)
+// Private helper functions — real AWS SDK v3 implementations
 // ============================================================================
 
-async function listStacksImpl(config: StackInventoryConfig, filter?: StackFilter): Promise<StackSummary[]> {
-  // Stub: Would call AWS SDK CloudFormationClient.describeStacks across regions
-  return [];
+async function listStacksImpl(
+  config: StackInventoryConfig,
+  filter?: StackFilter
+): Promise<StackSummary[]> {
+  const { CloudFormationClient, ListStacksCommand } =
+    await import('@aws-sdk/client-cloudformation');
+
+  const defaultStatuses: StackStatus[] = [
+    'CREATE_COMPLETE',
+    'UPDATE_COMPLETE',
+    'UPDATE_ROLLBACK_COMPLETE',
+    'ROLLBACK_COMPLETE',
+    'IMPORT_COMPLETE',
+  ];
+
+  if (config.includeDeleted) {
+    defaultStatuses.push('DELETE_COMPLETE');
+  }
+
+  const statusFilter = filter?.statuses ?? defaultStatuses;
+  const allStacks: StackSummary[] = [];
+
+  for (const region of config.regions) {
+    const client = new CloudFormationClient({ region });
+
+    let nextToken: string | undefined;
+    do {
+      const command = new ListStacksCommand({
+        StackStatusFilter: statusFilter,
+        NextToken: nextToken,
+      });
+
+      const response = await client.send(command);
+
+      for (const summary of response.StackSummaries ?? []) {
+        const stack: StackSummary = {
+          stackId: summary.StackId ?? '',
+          stackName: summary.StackName ?? '',
+          stackStatus: (summary.StackStatus ?? 'CREATE_COMPLETE') as StackStatus,
+          creationTime: summary.CreationTime?.toISOString() ?? new Date().toISOString(),
+          lastUpdatedTime: summary.LastUpdatedTime?.toISOString(),
+          deletionTime: summary.DeletionTime?.toISOString(),
+          templateDescription: summary.TemplateDescription,
+          driftStatus: summary.DriftInformation?.StackDriftStatus as DriftStatus | undefined,
+          driftLastCheckTime: summary.DriftInformation?.LastCheckTimestamp?.toISOString(),
+          parentStackId: summary.ParentId,
+          rootStackId: summary.RootId,
+        };
+
+        // Apply client-side filters
+        if (filter?.namePattern) {
+          const regex = new RegExp(filter.namePattern.replace(/\*/g, '.*'), 'i');
+          if (!regex.test(stack.stackName)) continue;
+        }
+
+        if (filter?.createdAfter && new Date(stack.creationTime) < filter.createdAfter) continue;
+        if (filter?.createdBefore && new Date(stack.creationTime) > filter.createdBefore) continue;
+
+        if (
+          filter?.driftStatuses &&
+          stack.driftStatus &&
+          !filter.driftStatuses.includes(stack.driftStatus)
+        )
+          continue;
+
+        allStacks.push(stack);
+      }
+
+      nextToken = response.NextToken;
+    } while (nextToken);
+  }
+
+  return allStacks;
 }
 
-async function getStackImpl(config: StackInventoryConfig, stackName: string, region: AWSRegion): Promise<StackSummary> {
-  // Stub: Would call AWS SDK CloudFormationClient.describeStacks
-  throw new DiscoveryError('RESOURCE_NOT_FOUND', 'Stack not found', null);
+async function getStackImpl(
+  config: StackInventoryConfig,
+  stackName: string,
+  region: AWSRegion
+): Promise<StackSummary> {
+  const { CloudFormationClient, DescribeStacksCommand } =
+    await import('@aws-sdk/client-cloudformation');
+
+  const client = new CloudFormationClient({ region });
+  const command = new DescribeStacksCommand({ StackName: stackName });
+
+  const response = await client.send(command);
+  const stacks = response.Stacks ?? [];
+
+  if (stacks.length === 0) {
+    throw new DiscoveryError(
+      'RESOURCE_NOT_FOUND',
+      `Stack '${stackName}' not found in ${region}`,
+      null
+    );
+  }
+
+  const s = stacks[0];
+  return {
+    stackId: s.StackId ?? '',
+    stackName: s.StackName ?? '',
+    stackStatus: (s.StackStatus ?? 'CREATE_COMPLETE') as StackStatus,
+    creationTime: s.CreationTime?.toISOString() ?? new Date().toISOString(),
+    lastUpdatedTime: s.LastUpdatedTime?.toISOString(),
+    templateDescription: s.Description,
+    driftStatus: s.DriftInformation?.StackDriftStatus as DriftStatus | undefined,
+    driftLastCheckTime: s.DriftInformation?.LastCheckTimestamp?.toISOString(),
+    parentStackId: s.ParentId,
+    rootStackId: s.RootId,
+  };
 }
 
 async function listStackResourcesImpl(
@@ -221,8 +351,48 @@ async function listStackResourcesImpl(
     resourceTypes?: AWSResourceType[];
   }
 ): Promise<StackResource[]> {
-  // Stub: Would call AWS SDK CloudFormationClient.listStackResources
-  return [];
+  const { CloudFormationClient, ListStackResourcesCommand } =
+    await import('@aws-sdk/client-cloudformation');
+
+  const client = new CloudFormationClient({ region: query.region });
+  const allResources: StackResource[] = [];
+
+  let nextToken: string | undefined;
+  do {
+    const command = new ListStackResourcesCommand({
+      StackName: query.stackName,
+      NextToken: nextToken,
+    });
+
+    const response = await client.send(command);
+
+    for (const summary of response.StackResourceSummaries ?? []) {
+      const resource: StackResource = {
+        logicalResourceId: summary.LogicalResourceId ?? '',
+        physicalResourceId: summary.PhysicalResourceId ?? '',
+        resourceType: (summary.ResourceType ?? '') as AWSResourceType,
+        resourceStatus: summary.ResourceStatus ?? '',
+        timestamp: summary.LastUpdatedTimestamp?.toISOString() ?? new Date().toISOString(),
+        stackId: '', // populated by caller if needed
+        stackName: query.stackName,
+        driftStatus: summary.DriftInformation?.StackResourceDriftStatus as any,
+      };
+
+      // Apply client-side filters
+      if (query.logicalIdPattern) {
+        const regex = new RegExp(query.logicalIdPattern.replace(/\*/g, '.*'), 'i');
+        if (!regex.test(resource.logicalResourceId)) continue;
+      }
+
+      if (query.resourceTypes && !query.resourceTypes.includes(resource.resourceType)) continue;
+
+      allResources.push(resource);
+    }
+
+    nextToken = response.NextToken;
+  } while (nextToken);
+
+  return allResources;
 }
 
 async function findStackForResourceImpl(
@@ -230,7 +400,40 @@ async function findStackForResourceImpl(
   resourceArn: string,
   region: AWSRegion
 ): Promise<string | null> {
-  // Stub: Would call AWS SDK CloudFormationClient.describeStackResource
+  // Extract physical resource ID from ARN for lookup
+  const physicalId = resourceArn.split(':').pop()?.split('/').pop() ?? resourceArn;
+
+  // List stacks in the region and search their resources
+  const stacks = await listStacksImpl(config, {
+    statuses: ['CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE'],
+  });
+
+  const regionStacks = stacks.filter((s) => {
+    // StackId ARN contains the region
+    const stackRegion = s.stackId.split(':')[3];
+    return stackRegion === region;
+  });
+
+  for (const stack of regionStacks) {
+    try {
+      const resources = await listStackResourcesImpl(config, {
+        stackName: stack.stackName,
+        region,
+      });
+
+      const found = resources.find(
+        (r) => r.physicalResourceId === physicalId || r.physicalResourceId === resourceArn
+      );
+
+      if (found) {
+        return stack.stackName;
+      }
+    } catch {
+      // Stack may have been deleted between list and describe; skip
+      continue;
+    }
+  }
+
   return null;
 }
 
@@ -243,23 +446,129 @@ async function detectDriftImpl(
     timeoutSeconds?: number;
   }
 ): Promise<DriftDetectionResult> {
-  // Stub: Would call AWS SDK CloudFormationClient.detectStackDrift
-  return {
-    stackId: '',
-    stackName: options.stackName,
-    stackDriftStatus: 'NOT_CHECKED',
-    detectionTime: new Date().toISOString(),
-    driftedResourcesCount: 0,
-    driftedResources: [],
-  };
+  const {
+    CloudFormationClient,
+    DetectStackDriftCommand,
+    DescribeStackDriftDetectionStatusCommand,
+    DescribeStackResourceDriftsCommand,
+  } = await import('@aws-sdk/client-cloudformation');
+
+  const client = new CloudFormationClient({ region: options.region });
+
+  // Initiate drift detection
+  const detectCommand = new DetectStackDriftCommand({ StackName: options.stackName });
+  const detectResponse = await client.send(detectCommand);
+  const detectionId = detectResponse.StackDriftDetectionId ?? '';
+
+  if (!options.waitForCompletion) {
+    return {
+      stackId: '',
+      stackName: options.stackName,
+      stackDriftStatus: 'NOT_CHECKED',
+      detectionTime: new Date().toISOString(),
+      driftedResourcesCount: 0,
+      driftedResources: [],
+    };
+  }
+
+  // Poll for completion
+  const timeout = (options.timeoutSeconds ?? 300) * 1000;
+  const startTime = Date.now();
+  let status: string = 'DETECTION_IN_PROGRESS';
+
+  while (status === 'DETECTION_IN_PROGRESS' && Date.now() - startTime < timeout) {
+    await sleep(5000);
+
+    const statusCommand = new DescribeStackDriftDetectionStatusCommand({
+      StackDriftDetectionId: detectionId,
+    });
+    const statusResponse = await client.send(statusCommand);
+    status = statusResponse.DetectionStatus ?? 'DETECTION_FAILED';
+
+    if (status === 'DETECTION_COMPLETE') {
+      // Fetch drifted resource details
+      const driftsCommand = new DescribeStackResourceDriftsCommand({
+        StackName: options.stackName,
+        StackResourceDriftStatusFilters: ['MODIFIED', 'DELETED'],
+      });
+      const driftsResponse = await client.send(driftsCommand);
+
+      const driftedResources = (driftsResponse.StackResourceDrifts ?? []).map((d) => ({
+        logicalResourceId: d.LogicalResourceId ?? '',
+        physicalResourceId: d.PhysicalResourceId ?? '',
+        resourceType: (d.ResourceType ?? '') as AWSResourceType,
+        driftStatus: (d.StackResourceDriftStatus ?? 'NOT_CHECKED') as any,
+        expectedProperties: d.ExpectedProperties ? JSON.parse(d.ExpectedProperties) : undefined,
+        actualProperties: d.ActualProperties ? JSON.parse(d.ActualProperties) : undefined,
+        propertyDifferences: (d.PropertyDifferences ?? []).map((pd) => ({
+          propertyPath: pd.PropertyPath ?? '',
+          expectedValue: pd.ExpectedValue,
+          actualValue: pd.ActualValue,
+          differenceType: (pd.DifferenceType ?? 'NOT_EQUAL') as 'ADD' | 'REMOVE' | 'NOT_EQUAL',
+        })),
+      }));
+
+      return {
+        stackId: statusResponse.StackId ?? '',
+        stackName: options.stackName,
+        stackDriftStatus: (statusResponse.StackDriftStatus ?? 'UNKNOWN') as DriftStatus,
+        detectionTime: statusResponse.Timestamp?.toISOString() ?? new Date().toISOString(),
+        driftedResourcesCount: statusResponse.DriftedStackResourceCount ?? 0,
+        driftedResources,
+      };
+    }
+
+    if (status === 'DETECTION_FAILED') {
+      throw new DiscoveryError(
+        'INTERNAL_ERROR',
+        `Drift detection failed for stack '${options.stackName}': ${statusResponse.DetectionStatusReason ?? 'Unknown reason'}`,
+        null
+      );
+    }
+  }
+
+  throw new DiscoveryError(
+    'INTERNAL_ERROR',
+    `Drift detection timed out for stack '${options.stackName}' after ${options.timeoutSeconds}s`,
+    null
+  );
 }
 
 async function detectDriftForAllStacksImpl(
   config: StackInventoryConfig,
   filter?: StackFilter
 ): Promise<DriftDetectionResult[]> {
-  // Stub: Would detect drift for all matching stacks
-  return [];
+  const stacks = await listStacksImpl(config, {
+    statuses: filter?.statuses ?? ['CREATE_COMPLETE', 'UPDATE_COMPLETE'],
+    namePattern: filter?.namePattern,
+  });
+
+  const results: DriftDetectionResult[] = [];
+
+  for (const stack of stacks) {
+    const region = (stack.stackId.split(':')[3] ?? config.regions[0]) as AWSRegion;
+    try {
+      const result = await detectDriftImpl(config, {
+        stackName: stack.stackName,
+        region,
+        waitForCompletion: true,
+        timeoutSeconds: 120,
+      });
+      results.push(result);
+    } catch (error) {
+      // Record failure but continue with other stacks
+      results.push({
+        stackId: stack.stackId,
+        stackName: stack.stackName,
+        stackDriftStatus: 'UNKNOWN',
+        detectionTime: new Date().toISOString(),
+        driftedResourcesCount: 0,
+        driftedResources: [],
+      });
+    }
+  }
+
+  return results;
 }
 
 async function getStackHierarchyImpl(
@@ -268,9 +577,49 @@ async function getStackHierarchyImpl(
   region: AWSRegion,
   includeResources: boolean
 ): Promise<any> {
-  // Stub: Would build stack hierarchy tree
+  const stack = await getStackImpl(config, stackName, region);
+
+  const resources = includeResources
+    ? await listStackResourcesImpl(config, { stackName, region })
+    : [];
+
+  // Find nested stacks (resources of type AWS::CloudFormation::Stack)
+  const nestedStackResources = resources.filter(
+    (r) => r.resourceType === 'AWS::CloudFormation::Stack'
+  );
+
+  const nestedStacks: any[] = [];
+  for (const nested of nestedStackResources) {
+    try {
+      const child = await getStackHierarchyImpl(
+        config,
+        nested.physicalResourceId,
+        region,
+        includeResources
+      );
+      nestedStacks.push(child);
+    } catch {
+      // Nested stack may not be accessible; skip
+      nestedStacks.push({
+        rootStack: nested.physicalResourceId,
+        status: 'INACCESSIBLE',
+        nestedStacks: [],
+      });
+    }
+  }
+
   return {
-    rootStack: stackName,
-    nestedStacks: [],
+    rootStack: stack.stackName,
+    stackId: stack.stackId,
+    status: stack.stackStatus,
+    creationTime: stack.creationTime,
+    lastUpdatedTime: stack.lastUpdatedTime,
+    driftStatus: stack.driftStatus,
+    ...(includeResources && { resources }),
+    nestedStacks,
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

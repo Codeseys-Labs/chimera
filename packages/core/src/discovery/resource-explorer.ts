@@ -135,21 +135,31 @@ export class ExplorerQueryBuilder {
 export function createResourceExplorerTools(config: ResourceExplorerConfig) {
   const search = tool({
     name: 'explorer_search',
-    description: 'Search AWS resources using query string DSL. Supports tag-based queries, resource type filters, and region filters with wildcards.',
+    description:
+      'Search AWS resources using query string DSL. Supports tag-based queries, resource type filters, and region filters with wildcards.',
     inputSchema: z.object({
-      queryString: z.string().describe('Query string (e.g., "tag:Environment=production resourcetype:lambda:function region:us-east-1")'),
+      queryString: z
+        .string()
+        .describe(
+          'Query string (e.g., "tag:Environment=production resourcetype:lambda:function region:us-east-1")'
+        ),
       maxResults: z.number().min(1).max(1000).default(100).describe('Maximum results to return'),
       nextToken: z.string().optional().describe('Pagination token'),
     }),
     callback: async (input) => {
       try {
-        const resources = await executeSearch(config, input.queryString, input.maxResults ?? 100, input.nextToken);
+        const { resources, nextToken } = await executeSearch(
+          config,
+          input.queryString,
+          input.maxResults ?? 100,
+          input.nextToken
+        );
 
         const result: ResourceQueryResult = {
           items: resources.map((r) => explorerResourceToInventoryEntry(config, r)),
           pagination: {
-            nextToken: undefined,
-            hasMore: false,
+            nextToken,
+            hasMore: !!nextToken,
             totalCount: resources.length,
             pageSize: input.maxResults ?? 100,
           },
@@ -164,14 +174,26 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
   const searchWithFilter = tool({
     name: 'explorer_search_with_filter',
-    description: 'Search resources using structured filters. Converts filters to query string automatically.',
+    description:
+      'Search resources using structured filters. Converts filters to query string automatically.',
     inputSchema: z.object({
-      resourceTypes: z.array(z.string()).optional().describe('Filter by resource types (e.g., ["AWS::Lambda::Function"])'),
-      regions: z.array(z.string()).optional().describe('Filter by regions (e.g., ["us-east-1", "us-west-2"])'),
-      tags: z.array(z.object({
-        key: z.string(),
-        value: z.string().optional(),
-      })).optional().describe('Filter by tags'),
+      resourceTypes: z
+        .array(z.string())
+        .optional()
+        .describe('Filter by resource types (e.g., ["AWS::Lambda::Function"])'),
+      regions: z
+        .array(z.string())
+        .optional()
+        .describe('Filter by regions (e.g., ["us-east-1", "us-west-2"])'),
+      tags: z
+        .array(
+          z.object({
+            key: z.string(),
+            value: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe('Filter by tags'),
       limit: z.number().min(1).max(1000).default(100).describe('Maximum results'),
       nextToken: z.string().optional().describe('Pagination token'),
     }),
@@ -184,13 +206,18 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
       const queryString = ExplorerQueryBuilder.fromFilter(filter);
 
-      const resources = await executeSearch(config, queryString, input.limit ?? 100, input.nextToken);
+      const { resources, nextToken } = await executeSearch(
+        config,
+        queryString,
+        input.limit ?? 100,
+        input.nextToken
+      );
 
       const result: ResourceQueryResult = {
         items: resources.map((r) => explorerResourceToInventoryEntry(config, r)),
         pagination: {
-          nextToken: undefined,
-          hasMore: false,
+          nextToken,
+          hasMore: !!nextToken,
           totalCount: resources.length,
           pageSize: input.limit ?? 100,
         },
@@ -202,10 +229,14 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
   const findByTag = tool({
     name: 'explorer_find_by_tag',
-    description: 'Find resources by a single tag. Simplified interface for common tag-based searches.',
+    description:
+      'Find resources by a single tag. Simplified interface for common tag-based searches.',
     inputSchema: z.object({
       tagKey: z.string().describe('Tag key to search for'),
-      tagValue: z.string().optional().describe('Tag value (optional, supports wildcards like "prod*")'),
+      tagValue: z
+        .string()
+        .optional()
+        .describe('Tag value (optional, supports wildcards like "prod*")'),
       maxResults: z.number().min(1).max(1000).default(100).describe('Maximum results'),
     }),
     callback: async (input) => {
@@ -213,7 +244,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
         ? `tag:${input.tagKey}=${input.tagValue}`
         : `tag:${input.tagKey}`;
 
-      const resources = await executeSearch(config, queryString, input.maxResults ?? 100);
+      const { resources } = await executeSearch(config, queryString, input.maxResults ?? 100);
       const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
       return JSON.stringify({ resources: items }, null, 2);
@@ -222,7 +253,8 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
   const findByType = tool({
     name: 'explorer_find_by_type',
-    description: 'Find resources by AWS service and type. Example: findByType("dynamodb", "table") finds all DynamoDB tables.',
+    description:
+      'Find resources by AWS service and type. Example: findByType("dynamodb", "table") finds all DynamoDB tables.',
     inputSchema: z.object({
       service: z.string().describe('AWS service (e.g., "lambda", "dynamodb", "ec2")'),
       type: z.string().describe('Resource type (e.g., "function", "table", "instance")'),
@@ -231,7 +263,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
     callback: async (input) => {
       const queryString = `resourcetype:${input.service}:${input.type}`;
 
-      const resources = await executeSearch(config, queryString, input.maxResults ?? 100);
+      const { resources } = await executeSearch(config, queryString, input.maxResults ?? 100);
       const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
       return JSON.stringify({ resources: items }, null, 2);
@@ -240,12 +272,13 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
   const autocomplete = tool({
     name: 'explorer_autocomplete',
-    description: 'Autocomplete resource search. Returns up to 10 matching resources for search-as-you-type functionality.',
+    description:
+      'Autocomplete resource search. Returns up to 10 matching resources for search-as-you-type functionality.',
     inputSchema: z.object({
       searchTerm: z.string().describe('Partial search term to match'),
     }),
     callback: async (input) => {
-      const resources = await executeSearch(config, input.searchTerm, 10);
+      const { resources } = await executeSearch(config, input.searchTerm, 10);
       const items = resources.map((r) => explorerResourceToInventoryEntry(config, r));
 
       return JSON.stringify({ suggestions: items }, null, 2);
@@ -254,7 +287,8 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
   const getIndexStatus = tool({
     name: 'explorer_get_index_status',
-    description: 'Get Resource Explorer index status. Check if aggregator index is configured and its health.',
+    description:
+      'Get Resource Explorer index status. Check if aggregator index is configured and its health.',
     inputSchema: z.object({}),
     callback: async () => {
       try {
@@ -273,7 +307,8 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 
   const createAggregatorIndex = tool({
     name: 'explorer_create_aggregator_index',
-    description: 'Create or promote aggregator index for complete historical results. Promotes a regional index to aggregator status.',
+    description:
+      'Create or promote aggregator index for complete historical results. Promotes a regional index to aggregator status.',
     inputSchema: z.object({
       region: z.string().optional().describe('Region to promote (default: primary region)'),
     }),
@@ -304,7 +339,7 @@ export function createResourceExplorerTools(config: ResourceExplorerConfig) {
 }
 
 // ============================================================================
-// Private helper functions
+// Private helper functions — real AWS SDK v3 implementations
 // ============================================================================
 
 async function executeSearch(
@@ -312,9 +347,40 @@ async function executeSearch(
   queryString: string,
   maxResults: number,
   nextToken?: string
-): Promise<ExplorerResource[]> {
-  // Stub: Would call AWS SDK ResourceExplorer2Client.search
-  return [];
+): Promise<{ resources: ExplorerResource[]; nextToken?: string }> {
+  const { ResourceExplorer2Client, SearchCommand } =
+    await import('@aws-sdk/client-resource-explorer-2');
+
+  const client = new ResourceExplorer2Client({ region: config.primaryRegion });
+  const commandInput: any = {
+    QueryString: queryString,
+    MaxResults: maxResults,
+  };
+
+  if (nextToken) {
+    commandInput.NextToken = nextToken;
+  }
+  if (config.viewArn) {
+    commandInput.ViewArn = config.viewArn;
+  }
+
+  const command = new SearchCommand(commandInput);
+  const response = await client.send(command);
+
+  const resources: ExplorerResource[] = (response.Resources ?? []).map((r) => ({
+    arn: r.Arn ?? '',
+    resourceType: r.ResourceType ?? '',
+    region: (r.Region ?? '') as AWSRegion,
+    service: r.Service ?? '',
+    lastReportedAt: r.LastReportedAt?.toISOString() ?? new Date().toISOString(),
+    properties: (r.Properties ?? []).map((p) => ({
+      name: p.Name ?? '',
+      data: p.Data,
+    })),
+    owningAccountId: r.OwningAccountId ?? config.accountId,
+  }));
+
+  return { resources, nextToken: response.NextToken };
 }
 
 async function fetchIndexStatus(config: ResourceExplorerConfig): Promise<{
@@ -323,17 +389,43 @@ async function fetchIndexStatus(config: ResourceExplorerConfig): Promise<{
   region: AWSRegion | null;
   state: 'ACTIVE' | 'CREATING' | 'DELETING' | 'UPDATING' | null;
 }> {
-  // Stub: Would call AWS SDK ResourceExplorer2Client.getIndex
-  return {
-    exists: false,
-    type: null,
-    region: null,
-    state: null,
-  };
+  const { ResourceExplorer2Client, GetIndexCommand } =
+    await import('@aws-sdk/client-resource-explorer-2');
+
+  const client = new ResourceExplorer2Client({ region: config.primaryRegion });
+  const command = new GetIndexCommand({});
+
+  try {
+    const response = await client.send(command);
+    return {
+      exists: true,
+      type: (response.Type as 'AGGREGATOR' | 'LOCAL') ?? null,
+      region: (response.Arn?.split(':')[3] ?? null) as AWSRegion | null,
+      state: (response.State as 'ACTIVE' | 'CREATING' | 'DELETING' | 'UPDATING') ?? null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('ResourceNotFoundException') || message.includes('IndexNotFound')) {
+      return { exists: false, type: null, region: null, state: null };
+    }
+    throw error;
+  }
 }
 
-async function promoteToAggregator(config: ResourceExplorerConfig, region: AWSRegion): Promise<void> {
-  // Stub: Would call AWS SDK ResourceExplorer2Client.updateIndexType
+async function promoteToAggregator(
+  config: ResourceExplorerConfig,
+  region: AWSRegion
+): Promise<void> {
+  const { ResourceExplorer2Client, UpdateIndexTypeCommand } =
+    await import('@aws-sdk/client-resource-explorer-2');
+
+  const client = new ResourceExplorer2Client({ region });
+  const command = new UpdateIndexTypeCommand({
+    Arn: `arn:aws:resource-explorer-2:${region}:${config.accountId}:index/default`,
+    Type: 'AGGREGATOR',
+  });
+
+  await client.send(command);
 }
 
 function explorerResourceToInventoryEntry(
@@ -377,11 +469,19 @@ function handleExplorerError(error: unknown, operation: string): DiscoveryError 
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes('AccessDenied') || message.includes('UnauthorizedOperation')) {
-    return new DiscoveryError('PERMISSION_DENIED', `Explorer ${operation} denied: ${message}`, error);
+    return new DiscoveryError(
+      'PERMISSION_DENIED',
+      `Explorer ${operation} denied: ${message}`,
+      error
+    );
   }
 
   if (message.includes('IndexNotFoundException')) {
-    return new DiscoveryError('INDEX_NOT_FOUND', `Resource Explorer index not found: ${message}`, error);
+    return new DiscoveryError(
+      'INDEX_NOT_FOUND',
+      `Resource Explorer index not found: ${message}`,
+      error
+    );
   }
 
   if (message.includes('ValidationException')) {
@@ -393,7 +493,11 @@ function handleExplorerError(error: unknown, operation: string): DiscoveryError 
   }
 
   if (message.includes('ServiceUnavailableException')) {
-    return new DiscoveryError('SERVICE_UNAVAILABLE', `Explorer service unavailable: ${message}`, error);
+    return new DiscoveryError(
+      'SERVICE_UNAVAILABLE',
+      `Explorer service unavailable: ${message}`,
+      error
+    );
   }
 
   return new DiscoveryError('INTERNAL_ERROR', `Explorer ${operation} failed: ${message}`, error);
