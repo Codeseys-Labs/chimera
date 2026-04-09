@@ -25,7 +25,9 @@ phases:
       # These are baked into the JS bundle at compile time via import.meta.env.
       - export VITE_COGNITO_USER_POOL_ID=$(aws cloudformation describe-stacks --stack-name "Chimera-${ENV_NAME:-dev}-Security" --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' --output text 2>/dev/null || echo "")
       - export VITE_COGNITO_CLIENT_ID=$(aws cloudformation describe-stacks --stack-name "Chimera-${ENV_NAME:-dev}-Security" --query 'Stacks[0].Outputs[?OutputKey==`WebClientId`].OutputValue' --output text 2>/dev/null || echo "")
-      - export VITE_API_BASE_URL=$(aws cloudformation describe-stacks --stack-name "Chimera-${ENV_NAME:-dev}-Api" --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text 2>/dev/null || echo "")
+      # The frontend talks to the chat-gateway (ECS/Fargate) for /chat/* endpoints,
+      # served via the Chat stack's CloudFront distribution (not the API Gateway).
+      - export VITE_API_BASE_URL=$(aws cloudformation describe-stacks --stack-name "Chimera-${ENV_NAME:-dev}-Chat" --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' --output text 2>/dev/null || echo "")
       - echo "Building web with VITE_COGNITO_USER_POOL_ID=$VITE_COGNITO_USER_POOL_ID VITE_COGNITO_CLIENT_ID=$VITE_COGNITO_CLIENT_ID VITE_API_BASE_URL=$VITE_API_BASE_URL"
       - cd packages/web && bun run build && cd ../..
 
