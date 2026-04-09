@@ -25,16 +25,8 @@
       "@chimera/chat-gateway": ["../packages/chat-gateway/src"]
     }
   },
-  "include": [
-    "**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "**/*.spec.ts",
-    "**/*.test.ts",
-    "load/**"
-  ],
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts", "load/**", "e2e/**"],
   "references": [
     { "path": "../packages/shared" },
     { "path": "../packages/core" },
