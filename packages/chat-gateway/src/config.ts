@@ -51,7 +51,7 @@ export function loadConfig(): ChatGatewayConfig {
     bedrock: {
       modelId: process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-sonnet-4-6',
       region: process.env.AWS_REGION || process.env.BEDROCK_REGION || 'us-east-1',
-      maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '200000', 10),
+      maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '4096', 10),
       temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '1.0'),
       promptCaching: process.env.BEDROCK_PROMPT_CACHING === 'true',
       enabled: process.env.BEDROCK_ENABLED !== 'false', // Default to enabled
