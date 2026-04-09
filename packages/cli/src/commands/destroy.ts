@@ -257,32 +257,46 @@ async function deleteCodeCommitRepo(
 }
 
 /**
- * Reverse dependency order for stack teardown (most dependent stacks first).
- * Must stay in sync with CHIMERA_STACK_SUFFIXES in doctor.ts (all 14 deployed stacks).
+ * Reverse dependency order for stack teardown.
+ *
+ * Split into two phases:
+ * 1. APPLICATION stacks — the 12 stacks deployed by CodePipeline
+ * 2. BOOTSTRAP stacks — Pipeline + base infra that CodePipeline itself runs on
+ *
+ * Within each phase, stacks are ordered so that dependents are deleted before
+ * the stacks they import from. The key cross-stack dependencies:
+ *   Discovery → Frontend (imports CloudFront domain)
+ *   Chat → Network, Data, Security, Pipeline (imports VPC, tables, etc.)
+ *   Api → Security (imports Cognito)
+ *   Pipeline → Network, Data (imports VPC, artifact bucket)
+ *   All → Network (imports VPC)
  */
-const STACK_DESTROY_ORDER = [
-  // Tier 1: no dependents — leaf stacks
-  'Frontend',
-  'Discovery',
-  // Tier 2: depend on Data/Security
+const APPLICATION_STACKS = [
+  // Tier 1: leaf stacks that import from others
+  'Discovery', // imports Frontend CloudFront domain — must be before Frontend
+  'Frontend', // imports nothing from other app stacks
+  'GatewayRegistration',
+  // Tier 2: depend on Data/Security only
   'Evolution',
   'SkillPipeline',
   'Email',
   'TenantOnboarding',
-  // Tier 3: depend on Network/Data/Pipeline
+  // Tier 3: depend on Network/Data
   'Chat',
   'Orchestration',
   // Tier 4: depend on Security
   'Observability',
   'Api',
-  // Tier 5: depends on Network
-  'Pipeline',
-  // Tier 6: base infrastructure (Security/Data before Network)
-  'Security',
-  'Data',
-  // Tier 7: last — all stacks depend on Network
-  'Network',
 ];
+
+const BOOTSTRAP_STACKS = [
+  'Pipeline', // depends on Network + Data
+  'Security', // depends on nothing (or Network)
+  'Data', // depends on Network
+  'Network', // base — last to go
+];
+
+const STACK_DESTROY_ORDER = [...APPLICATION_STACKS, ...BOOTSTRAP_STACKS];
 
 /**
  * Stacks that contain S3 buckets requiring pre-delete emptying.
