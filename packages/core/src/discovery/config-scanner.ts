@@ -74,15 +74,24 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
    */
   const advancedQuery = tool({
     name: 'config_advanced_query',
-    description: 'Query AWS resources using SQL-like syntax. Supports full SQL filtering, projecting, and joining across all resource types in the account.',
+    description:
+      'Query AWS resources using SQL-like syntax. Supports full SQL filtering, projecting, and joining across all resource types in the account.',
     inputSchema: z.object({
-      expression: z.string().describe('SQL-like query expression (e.g., "SELECT * WHERE resourceType = \'AWS::Lambda::Function\' AND configuration.memorySize > 1024")'),
-      limit: z.number().min(1).max(500).default(100).describe('Maximum results to return (default: 100, max: 500)'),
+      expression: z
+        .string()
+        .describe(
+          'SQL-like query expression (e.g., "SELECT * WHERE resourceType = \'AWS::Lambda::Function\' AND configuration.memorySize > 1024")'
+        ),
+      limit: z
+        .number()
+        .min(1)
+        .max(500)
+        .default(100)
+        .describe('Maximum results to return (default: 100, max: 500)'),
       nextToken: z.string().optional().describe('Pagination token from previous query'),
     }),
     callback: async (input) => {
       try {
-        // Implementation would use AWS SDK ConfigServiceClient.selectAggregateResourceConfig
         const result = await executeAdvancedQuery(config, input);
         return JSON.stringify(result, null, 2);
       } catch (error) {
@@ -96,18 +105,36 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
    */
   const listResources = tool({
     name: 'config_list_resources',
-    description: 'List AWS resources by type with optional filters. Simpler interface than advanced_query for common listing operations.',
+    description:
+      'List AWS resources by type with optional filters. Simpler interface than advanced_query for common listing operations.',
     inputSchema: z.object({
-      resourceTypes: z.array(z.string()).optional().describe('Filter by resource types (e.g., ["AWS::Lambda::Function", "AWS::S3::Bucket"])'),
-      regions: z.array(z.string()).optional().describe('Filter by regions (e.g., ["us-east-1", "us-west-2"])'),
-      tags: z.array(z.object({
-        key: z.string(),
-        value: z.string().optional(),
-      })).optional().describe('Filter by tags (e.g., [{"key": "Environment", "value": "production"}])'),
-      statuses: z.array(z.string()).optional().describe('Filter by config status (e.g., ["OK", "ResourceDiscovered"])'),
+      resourceTypes: z
+        .array(z.string())
+        .optional()
+        .describe('Filter by resource types (e.g., ["AWS::Lambda::Function", "AWS::S3::Bucket"])'),
+      regions: z
+        .array(z.string())
+        .optional()
+        .describe('Filter by regions (e.g., ["us-east-1", "us-west-2"])'),
+      tags: z
+        .array(
+          z.object({
+            key: z.string(),
+            value: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe('Filter by tags (e.g., [{"key": "Environment", "value": "production"}])'),
+      statuses: z
+        .array(z.string())
+        .optional()
+        .describe('Filter by config status (e.g., ["OK", "ResourceDiscovered"])'),
       limit: z.number().min(1).max(500).default(100).describe('Maximum results to return'),
       nextToken: z.string().optional().describe('Pagination token'),
-      includeRelationships: z.boolean().default(false).describe('Include resource relationships in results'),
+      includeRelationships: z
+        .boolean()
+        .default(false)
+        .describe('Include resource relationships in results'),
     }),
     callback: async (input) => {
       try {
@@ -139,20 +166,28 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
    */
   const getConfigurationHistory = tool({
     name: 'config_get_history',
-    description: 'Get configuration history for a specific resource. Returns all recorded configuration changes, enabling time-travel queries.',
+    description:
+      'Get configuration history for a specific resource. Returns all recorded configuration changes, enabling time-travel queries.',
     inputSchema: z.object({
       resourceType: z.string().describe('AWS resource type (e.g., "AWS::Lambda::Function")'),
       resourceId: z.string().describe('Resource identifier (e.g., "agent-runtime")'),
       region: z.string().describe('AWS region (e.g., "us-east-1")'),
       startTime: z.string().optional().describe('Start time for history window (ISO 8601 format)'),
       endTime: z.string().optional().describe('End time for history window (ISO 8601 format)'),
-      chronologicalOrder: z.enum(['Forward', 'Reverse']).default('Reverse').describe('Sort order (Reverse = newest first)'),
-      limit: z.number().min(1).max(100).default(10).describe('Maximum results (default: 10, max: 100)'),
+      chronologicalOrder: z
+        .enum(['Forward', 'Reverse'])
+        .default('Reverse')
+        .describe('Sort order (Reverse = newest first)'),
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(10)
+        .describe('Maximum results (default: 10, max: 100)'),
       nextToken: z.string().optional().describe('Pagination token'),
     }),
     callback: async (input) => {
       try {
-        // Implementation would use AWS SDK ConfigServiceClient.getResourceConfigHistory
         const result = await fetchConfigHistory(config, {
           resourceType: input.resourceType as AWSResourceType,
           resourceId: input.resourceId,
@@ -176,7 +211,8 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
    */
   const getCurrentConfiguration = tool({
     name: 'config_get_current',
-    description: 'Get the most recent configuration snapshot for a specific resource recorded by AWS Config.',
+    description:
+      'Get the most recent configuration snapshot for a specific resource recorded by AWS Config.',
     inputSchema: z.object({
       resourceType: z.string().describe('AWS resource type (e.g., "AWS::EC2::Instance")'),
       resourceId: z.string().describe('Resource identifier (e.g., "i-1234567890abcdef0")'),
@@ -184,8 +220,8 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
     }),
     callback: async (input) => {
       try {
-        // Implementation would use AWS SDK ConfigServiceClient.batchGetAggregateResourceConfig
-        const result = await fetchCurrentConfig(config,
+        const result = await fetchCurrentConfig(
+          config,
           input.resourceType as AWSResourceType,
           input.resourceId,
           input.region as AWSRegion
@@ -210,7 +246,8 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
    */
   const getRelatedResources = tool({
     name: 'config_get_related_resources',
-    description: 'Get all resources related to a specific resource using AWS Config relationship tracking. Finds dependencies and dependents.',
+    description:
+      'Get all resources related to a specific resource using AWS Config relationship tracking. Finds dependencies and dependents.',
     inputSchema: z.object({
       resourceType: z.string().describe('Resource type (e.g., "AWS::DynamoDB::Table")'),
       resourceId: z.string().describe('Resource ID (e.g., "chimera-sessions")'),
@@ -218,7 +255,8 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
     }),
     callback: async (input) => {
       try {
-        const currentConfig = await fetchCurrentConfig(config,
+        const currentConfig = await fetchCurrentConfig(
+          config,
           input.resourceType as AWSResourceType,
           input.resourceId,
           input.region as AWSRegion
@@ -232,7 +270,8 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
         const relatedResources: ResourceInventoryEntry[] = [];
 
         for (const relationship of currentConfig.relationships) {
-          const relatedConfig = await fetchCurrentConfig(config,
+          const relatedConfig = await fetchCurrentConfig(
+            config,
             relationship.resourceType,
             relationship.resourceId,
             input.region as AWSRegion
@@ -259,7 +298,6 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
     inputSchema: z.object({}),
     callback: async () => {
       try {
-        // Implementation would use AWS SDK ConfigServiceClient.describeConfigurationAggregators
         const exists = await checkAggregatorExists(config);
         return JSON.stringify({
           valid: exists,
@@ -286,21 +324,55 @@ export function createConfigScannerTools(config: ConfigAggregatorConfig) {
 }
 
 // ============================================================================
-// Private helper functions (implementation stubs for type safety)
+// Private helper functions — real AWS SDK v3 implementations
 // ============================================================================
 
 async function executeAdvancedQuery(
   config: ConfigAggregatorConfig,
   query: { expression: string; limit?: number; nextToken?: string }
 ): Promise<ResourceQueryResult> {
-  // Stub: Would call AWS SDK ConfigServiceClient.selectAggregateResourceConfig
-  // Parse JSON results and convert to ResourceInventoryEntry[]
+  const { ConfigServiceClient, SelectAggregateResourceConfigCommand } =
+    await import('@aws-sdk/client-config-service');
+
+  const client = new ConfigServiceClient({ region: config.aggregatorRegion });
+  const command = new SelectAggregateResourceConfigCommand({
+    ConfigurationAggregatorName: config.aggregatorName,
+    Expression: query.expression,
+    Limit: query.limit ?? 100,
+    NextToken: query.nextToken,
+  });
+
+  const response = await client.send(command);
+
+  const items: ResourceInventoryEntry[] = (response.Results ?? []).map((jsonStr) => {
+    const raw = JSON.parse(jsonStr);
+    return {
+      arn: raw.arn ?? raw.ARN ?? '',
+      resourceType: raw.resourceType ?? raw.ResourceType ?? '',
+      resourceId: raw.resourceId ?? raw.ResourceId ?? '',
+      region: raw.awsRegion ?? raw.AwsRegion ?? '',
+      accountId: raw.accountId ?? raw.AccountId ?? config.accountId,
+      status: (raw.configurationItemStatus ?? 'OK') as ResourceStatus,
+      tags: Array.isArray(raw.tags)
+        ? raw.tags
+        : raw.tags
+          ? Object.entries(raw.tags).map(([key, value]) => ({ key, value: String(value) }))
+          : [],
+      lastUpdatedAt: raw.configurationItemCaptureTime ?? new Date().toISOString(),
+      configuration: raw.configuration
+        ? typeof raw.configuration === 'string'
+          ? JSON.parse(raw.configuration)
+          : raw.configuration
+        : undefined,
+    };
+  });
+
   return {
-    items: [],
+    items,
     pagination: {
-      nextToken: undefined,
-      hasMore: false,
-      totalCount: 0,
+      nextToken: response.NextToken,
+      hasMore: !!response.NextToken,
+      totalCount: items.length,
       pageSize: query.limit ?? 100,
     },
   };
@@ -319,8 +391,41 @@ async function fetchConfigHistory(
     nextToken?: string;
   }
 ): Promise<ConfigurationItem[]> {
-  // Stub: Would call AWS SDK ConfigServiceClient.getResourceConfigHistory
-  return [];
+  const { ConfigServiceClient, GetResourceConfigHistoryCommand } =
+    await import('@aws-sdk/client-config-service');
+
+  const client = new ConfigServiceClient({ region: query.region });
+  const command = new GetResourceConfigHistoryCommand({
+    resourceType: query.resourceType as any,
+    resourceId: query.resourceId,
+    laterTime: query.endTime,
+    earlierTime: query.startTime,
+    chronologicalOrder: query.chronologicalOrder ?? 'Reverse',
+    limit: query.limit ?? 10,
+    nextToken: query.nextToken,
+  });
+
+  const response = await client.send(command);
+
+  return (response.configurationItems ?? []).map((item) => ({
+    configurationItemCaptureTime:
+      item.configurationItemCaptureTime?.toISOString() ?? new Date().toISOString(),
+    resourceType: (item.resourceType ?? '') as AWSResourceType,
+    resourceId: item.resourceId ?? '',
+    arn: item.arn ?? '',
+    region: (item.awsRegion ?? '') as AWSRegion,
+    availabilityZone: item.availabilityZone,
+    configurationItemStatus: (item.configurationItemStatus ?? 'OK') as ResourceStatus,
+    configuration: item.configuration ? JSON.parse(item.configuration) : {},
+    relationships: (item.relationships ?? []).map((rel) => ({
+      resourceType: (rel.resourceType ?? '') as AWSResourceType,
+      resourceId: rel.resourceId ?? '',
+      resourceArn: rel.resourceName,
+      relationshipType: (rel.relationshipName ?? 'Is associated with') as any,
+    })),
+    tags: item.tags ? Object.entries(item.tags).map(([key, value]) => ({ key, value })) : [],
+    configurationStateId: item.configurationStateId,
+  }));
 }
 
 async function fetchCurrentConfig(
@@ -329,13 +434,68 @@ async function fetchCurrentConfig(
   resourceId: string,
   region: AWSRegion
 ): Promise<ConfigurationItem | null> {
-  // Stub: Would call AWS SDK ConfigServiceClient.batchGetAggregateResourceConfig
-  return null;
+  const { ConfigServiceClient, BatchGetAggregateResourceConfigCommand } =
+    await import('@aws-sdk/client-config-service');
+
+  const client = new ConfigServiceClient({ region: config.aggregatorRegion });
+  const command = new BatchGetAggregateResourceConfigCommand({
+    ConfigurationAggregatorName: config.aggregatorName,
+    ResourceIdentifiers: [
+      {
+        SourceAccountId: config.accountId,
+        SourceRegion: region,
+        ResourceId: resourceId,
+        ResourceType: resourceType as any,
+      },
+    ],
+  });
+
+  const response = await client.send(command);
+  const items = response.BaseConfigurationItems ?? [];
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  const item = items[0];
+  return {
+    configurationItemCaptureTime:
+      item.configurationItemCaptureTime?.toISOString() ?? new Date().toISOString(),
+    resourceType: (item.resourceType ?? '') as AWSResourceType,
+    resourceId: item.resourceId ?? '',
+    arn: item.arn ?? '',
+    region: (item.awsRegion ?? '') as AWSRegion,
+    availabilityZone: item.availabilityZone,
+    configurationItemStatus: (item.configurationItemStatus ?? 'OK') as ResourceStatus,
+    configuration: item.configuration ? JSON.parse(item.configuration) : {},
+    tags: item.supplementaryConfiguration
+      ? Object.entries(item.supplementaryConfiguration).map(([key, value]) => ({
+          key,
+          value: String(value),
+        }))
+      : [],
+  };
 }
 
 async function checkAggregatorExists(config: ConfigAggregatorConfig): Promise<boolean> {
-  // Stub: Would call AWS SDK ConfigServiceClient.describeConfigurationAggregators
-  return false;
+  const { ConfigServiceClient, DescribeConfigurationAggregatorsCommand } =
+    await import('@aws-sdk/client-config-service');
+
+  const client = new ConfigServiceClient({ region: config.aggregatorRegion });
+  const command = new DescribeConfigurationAggregatorsCommand({
+    ConfigurationAggregatorNames: [config.aggregatorName],
+  });
+
+  try {
+    const response = await client.send(command);
+    return (response.ConfigurationAggregators ?? []).length > 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('NoSuchConfigurationAggregator')) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function buildQueryFromFilter(filter?: ResourceFilter): string {
@@ -405,7 +565,11 @@ function handleConfigError(error: unknown, operation: string): DiscoveryError {
   }
 
   if (message.includes('NoSuchConfigurationAggregator')) {
-    return new DiscoveryError('AGGREGATOR_NOT_FOUND', `Config aggregator not found: ${message}`, error);
+    return new DiscoveryError(
+      'AGGREGATOR_NOT_FOUND',
+      `Config aggregator not found: ${message}`,
+      error
+    );
   }
 
   if (message.includes('InvalidExpression') || message.includes('QueryException')) {

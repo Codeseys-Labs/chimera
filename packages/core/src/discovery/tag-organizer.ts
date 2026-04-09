@@ -129,11 +129,15 @@ export function createTagOrganizerTools(config: TagOrganizerConfig) {
     name: 'tags_find_resources',
     description: 'Find AWS resources by tags with flexible filtering options.',
     inputSchema: z.object({
-      tags: z.array(z.object({
-        key: z.string(),
-        values: z.array(z.string()),
-        matchAll: z.boolean().optional(),
-      })).describe('Tag filters'),
+      tags: z
+        .array(
+          z.object({
+            key: z.string(),
+            values: z.array(z.string()),
+            matchAll: z.boolean().optional(),
+          })
+        )
+        .describe('Tag filters'),
       resourceTypes: z.array(z.string()).optional().describe('Filter by resource types'),
       maxResults: z.number().min(1).max(500).default(100).describe('Maximum results'),
     }),
@@ -149,7 +153,10 @@ export function createTagOrganizerTools(config: TagOrganizerConfig) {
     inputSchema: z.object({
       tenantId: z.string().describe('Tenant identifier'),
       resourceTypes: z.array(z.string()).optional().describe('Filter by resource types'),
-      includeUntagged: z.boolean().default(false).describe('Include resources missing TenantId tag'),
+      includeUntagged: z
+        .boolean()
+        .default(false)
+        .describe('Include resources missing TenantId tag'),
     }),
     callback: async (input) => {
       const resources = await findTenantResourcesImpl(config, input.tenantId, input);
@@ -188,10 +195,14 @@ export function createTagOrganizerTools(config: TagOrganizerConfig) {
     description: 'Add or update tags on AWS resources.',
     inputSchema: z.object({
       resourceArns: z.array(z.string()).describe('Resource ARNs to tag'),
-      tags: z.array(z.object({
-        key: z.string(),
-        value: z.string(),
-      })).describe('Tags to add'),
+      tags: z
+        .array(
+          z.object({
+            key: z.string(),
+            value: z.string(),
+          })
+        )
+        .describe('Tags to add'),
     }),
     callback: async (input) => {
       await tagResourcesImpl(config, input.resourceArns, input.tags as Tag[]);
@@ -231,21 +242,69 @@ export function createTagOrganizerTools(config: TagOrganizerConfig) {
 }
 
 // ============================================================================
-// Private helper functions (implementation stubs)
+// Private helper functions — real AWS SDK v3 implementations
 // ============================================================================
 
-async function findResourcesByTagsImpl(config: TagOrganizerConfig, params: any): Promise<TaggedResource[]> {
-  // Stub: Would call AWS SDK ResourceGroupsTaggingAPIClient.getResources
-  return [];
+async function findResourcesByTagsImpl(
+  config: TagOrganizerConfig,
+  params: {
+    tags: Array<{ key: string; values: string[]; matchAll?: boolean }>;
+    resourceTypes?: string[];
+    maxResults?: number;
+  }
+): Promise<TaggedResource[]> {
+  const { GetResourcesCommand } = await import('@aws-sdk/client-resource-groups-tagging-api');
+
+  const tagFilters = params.tags.map((t) => ({
+    Key: t.key,
+    Values: t.values,
+  }));
+
+  const commandInput: any = {
+    TagFilters: tagFilters,
+    ResourcesPerPage: params.maxResults ?? 100,
+  };
+
+  if (params.resourceTypes && params.resourceTypes.length > 0) {
+    commandInput.ResourceTypeFilters = params.resourceTypes;
+  }
+
+  const allResources: TaggedResource[] = [];
+  let paginationToken: string | undefined;
+
+  do {
+    if (paginationToken) {
+      commandInput.PaginationToken = paginationToken;
+    }
+
+    const command = new GetResourcesCommand(commandInput);
+    const response = await config.resourceGroupsTaggingClient.send(command);
+
+    for (const mapping of response.ResourceTagMappingList ?? []) {
+      allResources.push({
+        resourceArn: mapping.ResourceARN ?? '',
+        resourceType: extractResourceTypeFromArn(mapping.ResourceARN ?? ''),
+        tags: (mapping.Tags ?? []).map((t: any) => ({ key: t.Key ?? '', value: t.Value ?? '' })),
+        region: extractRegionFromArn(mapping.ResourceARN ?? ''),
+      });
+    }
+
+    paginationToken = response.PaginationToken;
+  } while (paginationToken && allResources.length < (params.maxResults ?? 100));
+
+  return allResources;
 }
 
 async function findTenantResourcesImpl(
   config: TagOrganizerConfig,
   tenantId: string,
-  options: any
+  options: { resourceTypes?: string[]; includeUntagged?: boolean }
 ): Promise<TaggedResource[]> {
-  // Stub: Would filter resources by TenantId tag
-  return [];
+  return findResourcesByTagsImpl(config, {
+    tags: [{ key: CHIMERA_TAG_SCHEMA.TENANT_ID, values: [tenantId] }],
+    resourceTypes: options.resourceTypes,
+    maxResults: 500,
+  });
 }
 
 async function checkComplianceImpl(
@@ -253,25 +312,250 @@ async function checkComplianceImpl(
   resourceArns: string[],
   policyName?: string
 ): Promise<TagComplianceResult[]> {
-  // Stub: Would validate resources against tag policy
-  return [];
+  const { GetResourcesCommand } = await import('@aws-sdk/client-resource-groups-tagging-api');
+
+  // Fetch current tags for all requested resources
+  // The Tagging API doesn't support filtering by ARN directly,
+  // so we fetch all and filter locally, OR use GetResources with no filters
+  // and match. For efficiency, fetch tags for each ARN individually.
+  const results: TagComplianceResult[] = [];
+  const policy = config.tagPolicy;
+
+  // Batch fetch tags — GetResources doesn't filter by ARN directly,
+  // so we'll use a no-filter request and match, or just iterate.
+  // For a targeted check, query all and filter:
+  const command = new GetResourcesCommand({
+    ResourcesPerPage: 100,
+  });
+
+  const tagMap = new Map<string, Tag[]>();
+  let paginationToken: string | undefined;
+
+  do {
+    const cmdInput: any = { ResourcesPerPage: 100 };
+    if (paginationToken) cmdInput.PaginationToken = paginationToken;
+
+    const response = await config.resourceGroupsTaggingClient.send(
+      new GetResourcesCommand(cmdInput)
+    );
+
+    for (const mapping of response.ResourceTagMappingList ?? []) {
+      const arn = mapping.ResourceARN ?? '';
+      if (resourceArns.includes(arn)) {
+        tagMap.set(
+          arn,
+          (mapping.Tags ?? []).map((t: any) => ({ key: t.Key ?? '', value: t.Value ?? '' }))
+        );
+      }
+    }
+
+    paginationToken = response.PaginationToken;
+
+    // Stop early if we found all requested ARNs
+    if (tagMap.size >= resourceArns.length) break;
+  } while (paginationToken);
+
+  for (const arn of resourceArns) {
+    const tags = tagMap.get(arn) ?? [];
+    const tagKeySet = new Set(tags.map((t) => t.key));
+
+    const missingTags: string[] = [];
+    const invalidTags: Array<{ key: string; value: string; reason: string }> = [];
+
+    // Check required tags
+    for (const requiredKey of policy.requiredTags) {
+      if (!tagKeySet.has(requiredKey)) {
+        missingTags.push(requiredKey);
+      }
+    }
+
+    // Validate tags against rules
+    for (const tag of tags) {
+      const rule = policy.rules[tag.key];
+      if (!rule) continue;
+
+      if (rule.allowedValues && !rule.allowedValues.includes(tag.value)) {
+        invalidTags.push({
+          key: tag.key,
+          value: tag.value,
+          reason: `Value '${tag.value}' not in allowed values: [${rule.allowedValues.join(', ')}]`,
+        });
+      }
+
+      if (rule.pattern) {
+        const regex = new RegExp(rule.pattern);
+        if (!regex.test(tag.value)) {
+          invalidTags.push({
+            key: tag.key,
+            value: tag.value,
+            reason: `Value '${tag.value}' does not match pattern: ${rule.pattern}`,
+          });
+        }
+      }
+
+      if (rule.validator && !rule.validator(tag.value)) {
+        invalidTags.push({
+          key: tag.key,
+          value: tag.value,
+          reason: `Value '${tag.value}' failed custom validation`,
+        });
+      }
+    }
+
+    results.push({
+      resourceArn: arn,
+      resourceType: extractResourceTypeFromArn(arn),
+      compliant: missingTags.length === 0 && invalidTags.length === 0,
+      missingTags,
+      invalidTags,
+      tags,
+    });
+  }
+
+  return results;
 }
 
-async function getComplianceSummaryImpl(config: TagOrganizerConfig, params: any): Promise<TagComplianceSummary> {
-  // Stub: Would aggregate compliance metrics
+async function getComplianceSummaryImpl(
+  config: TagOrganizerConfig,
+  params: { resourceTypes?: string[]; regions?: string[] }
+): Promise<TagComplianceSummary> {
+  const { GetComplianceSummaryCommand } =
+    await import('@aws-sdk/client-resource-groups-tagging-api');
+
+  const commandInput: any = {
+    TagKeyFilters: config.tagPolicy.requiredTags,
+  };
+
+  if (params.resourceTypes && params.resourceTypes.length > 0) {
+    commandInput.ResourceTypeFilters = params.resourceTypes;
+  }
+
+  if (params.regions && params.regions.length > 0) {
+    commandInput.RegionFilters = params.regions;
+  }
+
+  // Also gather per-resource-type breakdown from GetResources
+  const allResources = await findResourcesByTagsImpl(config, {
+    tags: [], // No filters — get all
+    resourceTypes: params.resourceTypes,
+    maxResults: 500,
+  });
+
+  const policy = config.tagPolicy;
+  const byResourceType: Record<string, { total: number; compliant: number }> = {};
+  const violationCounts: Record<string, number> = {};
+  let compliantCount = 0;
+
+  for (const resource of allResources) {
+    const type = resource.resourceType;
+    if (!byResourceType[type]) {
+      byResourceType[type] = { total: 0, compliant: 0 };
+    }
+    byResourceType[type].total++;
+
+    const tagKeySet = new Set(resource.tags.map((t) => t.key));
+    let isCompliant = true;
+
+    for (const required of policy.requiredTags) {
+      if (!tagKeySet.has(required)) {
+        isCompliant = false;
+        violationCounts[required] = (violationCounts[required] || 0) + 1;
+      }
+    }
+
+    if (isCompliant) {
+      compliantCount++;
+      byResourceType[type].compliant++;
+    }
+  }
+
+  const topViolations = Object.entries(violationCounts)
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
   return {
-    totalResources: 0,
-    compliantResources: 0,
-    compliancePercentage: 0,
-    byResourceType: {},
-    topViolations: [],
+    totalResources: allResources.length,
+    compliantResources: compliantCount,
+    compliancePercentage:
+      allResources.length > 0 ? (compliantCount / allResources.length) * 100 : 0,
+    byResourceType,
+    topViolations,
   };
 }
 
-async function tagResourcesImpl(config: TagOrganizerConfig, resourceArns: string[], tags: Tag[]): Promise<void> {
-  // Stub: Would call AWS SDK ResourceGroupsTaggingAPIClient.tagResources
+async function tagResourcesImpl(
+  config: TagOrganizerConfig,
+  resourceArns: string[],
+  tags: Tag[]
+): Promise<void> {
+  const { TagResourcesCommand } = await import('@aws-sdk/client-resource-groups-tagging-api');
+
+  const tagMap: Record<string, string> = {};
+  for (const tag of tags) {
+    tagMap[tag.key] = tag.value;
+  }
+
+  const command = new TagResourcesCommand({
+    ResourceARNList: resourceArns,
+    Tags: tagMap,
+  });
+
+  const response = await config.resourceGroupsTaggingClient.send(command);
+
+  // Check for partial failures
+  const failedResources = response.FailedResourcesMap ?? {};
+  const failedCount = Object.keys(failedResources).length;
+  if (failedCount > 0) {
+    const failureDetails = Object.entries(failedResources)
+      .map(([arn, info]: [string, any]) => `${arn}: ${info.ErrorMessage ?? 'Unknown error'}`)
+      .join('; ');
+    throw new Error(`Failed to tag ${failedCount} resource(s): ${failureDetails}`);
+  }
 }
 
-async function untagResourcesImpl(config: TagOrganizerConfig, resourceArns: string[], tagKeys: string[]): Promise<void> {
-  // Stub: Would call AWS SDK ResourceGroupsTaggingAPIClient.untagResources
+async function untagResourcesImpl(
+  config: TagOrganizerConfig,
+  resourceArns: string[],
+  tagKeys: string[]
+): Promise<void> {
+  const { UntagResourcesCommand } = await import('@aws-sdk/client-resource-groups-tagging-api');
+
+  const command = new UntagResourcesCommand({
+    ResourceARNList: resourceArns,
+    TagKeys: tagKeys,
+  });
+
+  const response = await config.resourceGroupsTaggingClient.send(command);
+
+  // Check for partial failures
+  const failedResources = response.FailedResourcesMap ?? {};
+  const failedCount = Object.keys(failedResources).length;
+  if (failedCount > 0) {
+    const failureDetails = Object.entries(failedResources)
+      .map(([arn, info]: [string, any]) => `${arn}: ${info.ErrorMessage ?? 'Unknown error'}`)
+      .join('; ');
+    throw new Error(`Failed to untag ${failedCount} resource(s): ${failureDetails}`);
+  }
+}
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+function extractResourceTypeFromArn(arn: string): string {
+  // ARN format: arn:aws:service:region:account:resource-type/resource-id
+  const parts = arn.split(':');
+  if (parts.length < 6) return 'unknown';
+
+  const service = parts[2];
+  const resourcePart = parts[5] ?? '';
+  const resourceType = resourcePart.split('/')[0];
+
+  return `${service}::${resourceType}`;
+}
+
+function extractRegionFromArn(arn: string): string {
+  const parts = arn.split(':');
+  return parts[3] ?? '';
 }
