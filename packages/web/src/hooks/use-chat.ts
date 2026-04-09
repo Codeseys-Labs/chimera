@@ -38,19 +38,29 @@ export function getMessageText(msg: UIMessage): string {
 /**
  * Custom fetch wrapper that injects the Cognito ID token and captures the
  * X-Session-Id response header from the gateway.
+ *
+ * The AI SDK's DefaultChatTransport resolves `headers` separately and
+ * merges them into the fetch init. This wrapper also injects the token
+ * as a belt-and-suspenders measure.
  */
-function createAuthFetch(onSessionId: (id: string) => void): typeof globalThis.fetch {
-  const wrapper = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+function createAuthFetch(onSessionId: (id: string) => void) {
+  return async (
+    input: string | URL | globalThis.Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const existingHeaders = (init?.headers ?? {}) as Record<string, string>;
+
+    // Always inject the Cognito token
     const session = await fetchAuthSession();
     const token = session.tokens?.idToken?.toString();
-    if (!token) throw new Error('Not authenticated');
+    const headers: Record<string, string> = {
+      ...existingHeaders,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
 
-    const response = await fetch(input, {
+    const response = await globalThis.fetch(input, {
       ...init,
-      headers: {
-        ...(init?.headers as Record<string, string> | undefined),
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
     });
 
     // Capture session ID from gateway response header
@@ -59,9 +69,6 @@ function createAuthFetch(onSessionId: (id: string) => void): typeof globalThis.f
 
     return response;
   };
-
-  // Copy static properties from globalThis.fetch (e.g. preconnect)
-  return Object.assign(wrapper, globalThis.fetch) as typeof globalThis.fetch;
 }
 
 /**
@@ -90,12 +97,7 @@ export function useChatSession({ tenantId }: UseChatSessionOptions) {
     () =>
       new DefaultChatTransport({
         api: `${apiBase}/chat/stream`,
-        fetch: createAuthFetch(setSessionId),
-        headers: async (): Promise<Record<string, string>> => {
-          const session = await fetchAuthSession();
-          const token = session.tokens?.idToken?.toString();
-          return token ? { Authorization: `Bearer ${token}` } : {};
-        },
+        fetch: createAuthFetch(setSessionId) as typeof globalThis.fetch,
         body: () => ({
           tenantId,
           sessionId: sessionIdRef.current,
