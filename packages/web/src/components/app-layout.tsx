@@ -1,27 +1,23 @@
-import { signOut } from 'aws-amplify/auth'
-import { LayoutDashboard, MessageSquare, Settings, Shield, LogOut } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { cn } from '@/lib/utils'
+import { LayoutDashboard, MessageSquare, Settings, Shield, LogOut } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/admin', label: 'Admin', icon: Shield },
   { href: '/settings', label: 'Settings', icon: Settings },
-]
+];
 
 interface AppLayoutProps {
-  children: React.ReactNode
+  children: React.ReactNode;
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  const current = window.location.pathname.replace(/\/$/, '') || '/dashboard'
-
-  async function handleSignOut() {
-    await signOut()
-    window.location.href = '/login'
-  }
+  const current = window.location.pathname.replace(/\/$/, '') || '/dashboard';
+  const { handleSignOut } = useAuth();
 
   return (
     <div className="flex h-screen">
@@ -41,7 +37,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               href={href}
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent',
-                current === href && 'bg-accent font-medium',
+                current === href && 'bg-accent font-medium'
               )}
             >
               <Icon className="h-4 w-4" />
@@ -66,5 +62,5 @@ export function AppLayout({ children }: AppLayoutProps) {
       {/* Page content */}
       <main className="flex-1 overflow-auto">{children}</main>
     </div>
-  )
+  );
 }

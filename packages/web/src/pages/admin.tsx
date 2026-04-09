@@ -1,54 +1,59 @@
-import { getCurrentUser } from 'aws-amplify/auth'
-import { useEffect, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useTenant } from '@/hooks/use-tenant'
-import { apiGet } from '@/lib/api-client'
-import { useQuery } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAuth } from '@/hooks/use-auth';
+import { useTenant } from '@/hooks/use-tenant';
+import { apiGet } from '@/lib/api-client';
+import { useQuery } from '@tanstack/react-query';
 
 interface User {
-  sub: string
-  email: string
-  name: string
-  status: 'CONFIRMED' | 'UNCONFIRMED' | 'DISABLED'
-  groups: string[]
+  sub: string;
+  email: string;
+  name: string;
+  status: 'CONFIRMED' | 'UNCONFIRMED' | 'DISABLED';
+  groups: string[];
 }
 
 interface ApiKey {
-  id: string
-  maskedKey: string
-  name: string
-  createdAt: string
-  lastUsedAt?: string
+  id: string;
+  maskedKey: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt?: string;
 }
 
 export function AdminPage() {
-  const [tenantId, setTenantId] = useState('')
-
-  useEffect(() => {
-    getCurrentUser()
-      .then((u) => setTenantId(u.userId))
-      .catch(console.error)
-  }, [])
-
-  const { data: tenant, isLoading: tenantLoading } = useTenant(tenantId)
+  const { tenantId } = useAuth();
+  const { data: tenant, isLoading: tenantLoading } = useTenant(tenantId);
 
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ['users', tenantId],
     queryFn: () => apiGet<{ users: User[] }>(`/tenants/${tenantId}/users`),
     enabled: !!tenantId,
-  })
+  });
 
   const { data: keysData, isLoading: keysLoading } = useQuery({
     queryKey: ['api-keys', tenantId],
     queryFn: () => apiGet<{ keys: ApiKey[] }>(`/tenants/${tenantId}/api-keys`),
     enabled: !!tenantId,
-  })
+  });
 
   return (
     <div className="space-y-6 p-6">
@@ -75,7 +80,7 @@ export function AdminPage() {
                 <>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium">Tier:</span>
-                    <Badge>{tenant?.tier ?? '—'}</Badge>
+                    <Badge>{tenant?.tier ?? '\u2014'}</Badge>
                   </div>
                   <div>
                     <p className="mb-2 text-sm font-medium">Features:</p>
@@ -119,9 +124,7 @@ export function AdminPage() {
                         <TableCell>{u.name}</TableCell>
                         <TableCell>{u.email}</TableCell>
                         <TableCell>
-                          <Badge
-                            variant={u.status === 'DISABLED' ? 'destructive' : 'default'}
-                          >
+                          <Badge variant={u.status === 'DISABLED' ? 'destructive' : 'default'}>
                             {u.status}
                           </Badge>
                         </TableCell>
@@ -129,7 +132,9 @@ export function AdminPage() {
                         <TableCell>
                           <Dialog>
                             <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm">Manage</Button>
+                              <Button variant="ghost" size="sm">
+                                Manage
+                              </Button>
                             </DialogTrigger>
                             <DialogContent>
                               <DialogHeader>
@@ -180,7 +185,9 @@ export function AdminPage() {
                           {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : 'Never'}
                         </TableCell>
                         <TableCell>
-                          <Button variant="destructive" size="sm">Revoke</Button>
+                          <Button variant="destructive" size="sm">
+                            Revoke
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -199,5 +206,5 @@ export function AdminPage() {
         </TabsContent>
       </Tabs>
     </div>
-  )
+  );
 }

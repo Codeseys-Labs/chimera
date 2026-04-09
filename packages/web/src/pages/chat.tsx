@@ -1,27 +1,17 @@
-import { fetchAuthSession } from 'aws-amplify/auth';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChatMessage } from '@/components/chat-message';
 import { SessionList } from '@/components/session-list';
-import { useChat } from '@/hooks/use-chat';
+import { useChatSession, getMessageText } from '@/hooks/use-chat';
+import { useAuth } from '@/hooks/use-auth';
 import { useSessions } from '@/hooks/use-sessions';
 import { Send, Square, Loader2 } from 'lucide-react';
 
 export function ChatPage() {
-  const [tenantId, setTenantId] = useState('');
+  const { tenantId } = useAuth();
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    fetchAuthSession()
-      .then((session) => {
-        const claims = session.tokens?.idToken?.payload;
-        const tid = (claims?.['custom:tenant_id'] as string) || 'default-tenant';
-        setTenantId(tid);
-      })
-      .catch(console.error);
-  }, []);
 
   const { data: sessionsData } = useSessions(tenantId, 20);
   const {
@@ -30,11 +20,11 @@ export function ChatPage() {
     isLoadingSession,
     error,
     sendMessage,
+    stop,
     loadSession,
-    abort,
-    clearMessages,
+    clearSession,
     sessionId,
-  } = useChat({ tenantId });
+  } = useChatSession({ tenantId });
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -49,7 +39,7 @@ export function ChatPage() {
   }
 
   function handleSelectSession(id: string) {
-    if (id === sessionId) return; // already active
+    if (id === sessionId) return;
     void loadSession(id);
   }
 
@@ -61,7 +51,7 @@ export function ChatPage() {
           sessions={sessionsData?.sessions ?? []}
           activeSessionId={sessionId ?? undefined}
           onSelect={handleSelectSession}
-          onNew={clearMessages}
+          onNew={clearSession}
         />
       </aside>
 
@@ -88,28 +78,21 @@ export function ChatPage() {
               messages.map((msg, i) => {
                 const isLast = i === messages.length - 1;
                 const msgStreaming = isLast && isStreaming && msg.role === 'assistant';
-                const hasError = msg.status === 'error';
+                const textContent = getMessageText(msg);
 
                 return (
-                  <div key={msg.id}>
-                    <ChatMessage
-                      role={msg.role}
-                      content={msg.content}
-                      timestamp={msg.timestamp}
-                      isStreaming={msgStreaming}
-                    />
-                    {hasError && msg.errorMessage && (
-                      <div className="ml-11 mb-2 rounded-md bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-                        Error: {msg.errorMessage}
-                      </div>
-                    )}
-                  </div>
+                  <ChatMessage
+                    key={msg.id}
+                    role={msg.role as 'user' | 'assistant'}
+                    content={textContent}
+                    isStreaming={msgStreaming}
+                  />
                 );
               })}
 
             {error && (
               <div className="mx-auto max-w-3xl rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
-                {error}
+                {error.message}
               </div>
             )}
 
@@ -123,7 +106,7 @@ export function ChatPage() {
             <textarea
               className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
               rows={3}
-              placeholder="Type a message…"
+              placeholder="Type a message..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={isStreaming || isLoadingSession}
@@ -135,7 +118,7 @@ export function ChatPage() {
               }}
             />
             {isStreaming ? (
-              <Button type="button" variant="outline" size="icon" onClick={abort} aria-label="Stop">
+              <Button type="button" variant="outline" size="icon" onClick={stop} aria-label="Stop">
                 <Square className="h-4 w-4" />
               </Button>
             ) : (

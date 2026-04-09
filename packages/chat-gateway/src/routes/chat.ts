@@ -472,6 +472,7 @@ router.post('/stream', async (c: Context) => {
       headers: {
         ...VERCEL_DSP_HEADERS,
         'X-Message-Id': messageId,
+        'X-Session-Id': sessionId,
       },
     });
   } catch (error) {

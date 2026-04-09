@@ -25,6 +25,7 @@ build/
 !cdk.json
 !jest.config.js
 !.eslintrc.js
+!postcss.config.js
 
 # ============================================
 # Bun artifacts
