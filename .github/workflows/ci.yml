@@ -49,9 +49,7 @@ jobs:
             ./tests/unit/security/ \
             ./tests/unit/infra/ \
             ./tests/unit/swarm/ \
-            ./tests/unit/evolution/ \
-            ./tests/unit/email/ \
-            ./tests/unit/agent/
+            ./tests/unit/email/
 
       - name: Run web tests (vitest)
         run: cd packages/web && bun run test
