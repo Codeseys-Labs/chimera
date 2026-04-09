@@ -450,9 +450,9 @@ export class ChatStack extends cdk.Stack {
       connectionAttempts: 3,
       connectionTimeout: cdk.Duration.seconds(10),
       // SSE streams may take time before first byte (Bedrock cold start, tool execution).
-      // Max allowed by CloudFront is 180s. The gateway sends keepalive pings every 15s
-      // to prevent mid-stream timeouts.
-      readTimeout: cdk.Duration.seconds(180),
+      // CloudFront max is 60s for standard distributions. The gateway sends an immediate
+      // SSE comment on connection open and keepalive pings every 15s to prevent timeouts.
+      readTimeout: cdk.Duration.seconds(60),
       keepaliveTimeout: cdk.Duration.seconds(60),
     });
 
