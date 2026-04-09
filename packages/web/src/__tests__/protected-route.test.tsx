@@ -1,75 +1,83 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { ProtectedRoute } from '../components/protected-route';
 
-vi.mock('aws-amplify/auth', () => ({
-  getCurrentUser: vi.fn(),
+// Mock the useAuth hook
+vi.mock('../hooks/use-auth', () => ({
+  useAuth: vi.fn(),
 }));
 
-import { getCurrentUser } from 'aws-amplify/auth';
-const mockGetCurrentUser = getCurrentUser as ReturnType<typeof vi.fn>;
+import { useAuth } from '../hooks/use-auth';
+const mockUseAuth = useAuth as ReturnType<typeof vi.fn>;
 
-// Bun:test compat — vi.spyOn with getter accessor is Vitest-only.
-// Track location.href directly via Object.defineProperty in individual tests.;
+beforeEach(() => {
+  vi.resetAllMocks();
+});
 
 describe('ProtectedRoute', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    // Reset location mock
-    locationSpy.mockReturnValue({ href: '' } as Location);
-  });
-
-  it('renders children when authenticated', async () => {
-    mockGetCurrentUser.mockResolvedValue({
-      userId: 'user-123',
-      username: 'testuser',
-    } as Awaited<ReturnType<typeof getCurrentUser>>);
-
-    render(
-      <ProtectedRoute>
-        <div>Protected Content</div>
-      </ProtectedRoute>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Protected Content')).toBeTruthy();
+  it('shows spinner when loading', () => {
+    mockUseAuth.mockReturnValue({
+      isLoading: true,
+      isAuthenticated: false,
+      user: null,
+      tenantId: '',
+      userId: '',
+      getAuthToken: vi.fn(),
+      handleSignOut: vi.fn(),
     });
-  });
-
-  it('shows loading spinner while checking auth', () => {
-    // Never resolves
-    mockGetCurrentUser.mockImplementation(() => new Promise(() => {}));
 
     const { container } = render(
       <ProtectedRoute>
-        <div>Content</div>
+        <div>Protected content</div>
       </ProtectedRoute>
     );
 
-    // Loading spinner should be present
-    const spinner = container.querySelector('.animate-spin');
-    expect(spinner).toBeTruthy();
-    // Content should NOT be visible yet
-    expect(screen.queryByText('Content')).toBeNull();
+    expect(container.querySelector('.animate-spin')).toBeTruthy();
+    expect(screen.queryByText('Protected content')).toBeNull();
   });
 
-  it('redirects to /login when unauthenticated', async () => {
-    mockGetCurrentUser.mockRejectedValue(new Error('Not authenticated'));
-
-    const locationAssign = vi.fn();
-    Object.defineProperty(window, 'location', {
-      value: { href: '', assign: locationAssign },
-      writable: true,
+  it('renders children when authenticated', () => {
+    mockUseAuth.mockReturnValue({
+      isLoading: false,
+      isAuthenticated: true,
+      user: { userId: 'test-user', username: 'test' },
+      tenantId: 'tenant-1',
+      userId: 'test-user',
+      getAuthToken: vi.fn(),
+      handleSignOut: vi.fn(),
     });
 
     render(
       <ProtectedRoute>
-        <div>Content</div>
+        <div>Protected content</div>
       </ProtectedRoute>
     );
 
-    await waitFor(() => {
-      expect(window.location.href).toBe('/login');
+    expect(screen.getByText('Protected content')).toBeTruthy();
+  });
+
+  it('redirects to /login when unauthenticated', () => {
+    Object.defineProperty(window, 'location', {
+      value: { href: '' },
+      writable: true,
     });
+
+    mockUseAuth.mockReturnValue({
+      isLoading: false,
+      isAuthenticated: false,
+      user: null,
+      tenantId: '',
+      userId: '',
+      getAuthToken: vi.fn(),
+      handleSignOut: vi.fn(),
+    });
+
+    render(
+      <ProtectedRoute>
+        <div>Protected content</div>
+      </ProtectedRoute>
+    );
+
+    expect(window.location.href).toBe('/login');
   });
 });

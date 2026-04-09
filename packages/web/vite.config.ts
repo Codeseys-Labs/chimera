@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import path from 'path'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
@@ -17,7 +17,8 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom'],
           amplify: ['aws-amplify'],
-          router: ['@tanstack/react-router', '@tanstack/react-query'],
+          'ai-sdk': ['ai', '@ai-sdk/react'],
+          router: ['@tanstack/react-query'],
         },
       },
     },
@@ -27,4 +28,4 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/__tests__/setup.ts'],
   },
-})
+});

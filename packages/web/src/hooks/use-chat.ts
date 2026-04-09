@@ -1,15 +1,8 @@
-import { useCallback, useRef, useState } from 'react';
-import { streamChatResponse } from '@/lib/sse-client';
+import { useChat as useAIChat, type UIMessage } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import { apiGet } from '@/lib/api-client';
-
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-  status?: 'complete' | 'streaming' | 'error';
-  errorMessage?: string;
-}
 
 /** Shape returned by GET /chat/sessions/:id/messages */
 interface PersistedMessage {
@@ -30,91 +23,126 @@ interface SessionMessagesResponse {
   nextCursor?: string;
 }
 
-interface UseChatOptions {
+interface UseChatSessionOptions {
   tenantId: string;
-  initialSessionId?: string;
+}
+
+/** Get text content from a UIMessage's parts array */
+export function getMessageText(msg: UIMessage): string {
+  return msg.parts
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('');
 }
 
 /**
- * Manages chat message state and SSE streaming.
+ * Custom fetch wrapper that injects the Cognito ID token and captures the
+ * X-Session-Id response header from the gateway.
  */
-export function useChat({ tenantId, initialSessionId }: UseChatOptions) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isLoadingSession, setIsLoadingSession] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
-  const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+function createAuthFetch(onSessionId: (id: string) => void): typeof globalThis.fetch {
+  const wrapper = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    if (!token) throw new Error('Not authenticated');
 
+    const response = await fetch(input, {
+      ...init,
+      headers: {
+        ...(init?.headers as Record<string, string> | undefined),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    // Capture session ID from gateway response header
+    const sid = response.headers.get('X-Session-Id');
+    if (sid) onSessionId(sid);
+
+    return response;
+  };
+
+  // Copy static properties from globalThis.fetch (e.g. preconnect)
+  return Object.assign(wrapper, globalThis.fetch) as typeof globalThis.fetch;
+}
+
+/**
+ * Chat hook that wraps @ai-sdk/react v2's useChat with:
+ * - Cognito JWT authentication via custom fetch
+ * - Session management (load/switch/clear sessions)
+ * - Session ID tracking from gateway X-Session-Id header
+ * - Tenant context injection into request body
+ *
+ * The AI SDK's DefaultChatTransport handles the Vercel Data Stream Protocol
+ * parsing — the gateway's SSE bridge already outputs this format.
+ */
+export function useChatSession({ tenantId }: UseChatSessionOptions) {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
+  const sessionIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync with state for use in body resolver
+  sessionIdRef.current = sessionId;
+
+  const apiBase = import.meta.env.VITE_API_BASE_URL as string;
+
+  // Memoize the transport so it's stable across renders.
+  // headers/body are Resolvable (functions) so they always read latest state.
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: `${apiBase}/chat/stream`,
+        fetch: createAuthFetch(setSessionId),
+        headers: async (): Promise<Record<string, string>> => {
+          const session = await fetchAuthSession();
+          const token = session.tokens?.idToken?.toString();
+          return token ? { Authorization: `Bearer ${token}` } : {};
+        },
+        body: () => ({
+          tenantId,
+          sessionId: sessionIdRef.current,
+          platform: 'web',
+        }),
+      }),
+    [apiBase, tenantId]
+  );
+
+  const {
+    messages,
+    sendMessage: aiSendMessage,
+    status,
+    stop,
+    setMessages,
+    error,
+    regenerate,
+  } = useAIChat({
+    transport,
+    onError: (err) => {
+      console.error('[useChatSession] Stream error:', err);
+    },
+    onFinish: () => {
+      // Could trigger session list refresh here
+    },
+  });
+
+  const isStreaming = status === 'streaming' || status === 'submitted';
+
+  /**
+   * Send a text message. Wraps the AI SDK's sendMessage with a simpler API.
+   */
   const sendMessage = useCallback(
     (content: string) => {
       if (!content.trim() || isStreaming) return;
-
-      const userMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content,
-        timestamp: new Date().toISOString(),
-        status: 'complete',
-      };
-
-      // Placeholder for assistant response
-      const assistantId = crypto.randomUUID();
-      const assistantMessage: Message = {
-        id: assistantId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        status: 'streaming',
-      };
-
-      setMessages((prev) => [...prev, userMessage, assistantMessage]);
-      setIsStreaming(true);
-      setError(null);
-
-      const history = messages
-        .concat(userMessage)
-        .map(({ role, content: c }) => ({ role, content: c }));
-
-      abortRef.current = streamChatResponse(history, tenantId, sessionId, {
-        onToken: (token) => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + token } : m))
-          );
-        },
-        onComplete: () => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, status: 'complete' } : m))
-          );
-          setIsStreaming(false);
-          abortRef.current = null;
-        },
-        onError: (err) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, status: 'error', errorMessage: err.message } : m
-            )
-          );
-          setIsStreaming(false);
-          setError(err.message);
-          abortRef.current = null;
-        },
-        onSessionId: (id) => setSessionId(id),
-      });
+      aiSendMessage({ text: content });
     },
-    [isStreaming, messages, tenantId, sessionId]
+    [aiSendMessage, isStreaming]
   );
 
   /**
-   * Load an existing session's messages from DynamoDB and optionally
-   * reconnect to a still-streaming response.
+   * Load an existing session's messages from DynamoDB.
+   * Replaces the current message list and updates the active sessionId.
    */
   const loadSession = useCallback(
     async (targetSessionId: string) => {
-      // Abort any in-flight stream before switching sessions
-      abortRef.current?.abort();
-      setIsStreaming(false);
-      setError(null);
+      stop();
       setIsLoadingSession(true);
 
       try {
@@ -122,86 +150,59 @@ export function useChat({ tenantId, initialSessionId }: UseChatOptions) {
           `/chat/sessions/${targetSessionId}/messages?limit=200`
         );
 
-        const loaded: Message[] = data.messages.map((m) => ({
+        const loaded: UIMessage[] = data.messages.map((m) => ({
           id: m.messageId,
-          role: m.role,
-          content: m.content,
-          timestamp: m.createdAt,
-          status: m.status,
-          errorMessage: m.errorMessage,
+          role: m.role as 'user' | 'assistant',
+          parts: [{ type: 'text' as const, text: m.content }],
         }));
 
         setMessages(loaded);
         setSessionId(targetSessionId);
-
-        // If the last assistant message was still streaming, attempt to reconnect
-        const lastMsg = loaded[loaded.length - 1];
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'streaming') {
-          setIsStreaming(true);
-          abortRef.current = streamChatResponse(
-            [], // empty history — the reconnect endpoint replays from buffer
-            tenantId,
-            targetSessionId,
-            {
-              onToken: (token) => {
-                setMessages((prev) =>
-                  prev.map((m) => (m.id === lastMsg.id ? { ...m, content: m.content + token } : m))
-                );
-              },
-              onComplete: () => {
-                setMessages((prev) =>
-                  prev.map((m) => (m.id === lastMsg.id ? { ...m, status: 'complete' } : m))
-                );
-                setIsStreaming(false);
-                abortRef.current = null;
-              },
-              onError: (err) => {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === lastMsg.id ? { ...m, status: 'error', errorMessage: err.message } : m
-                  )
-                );
-                setIsStreaming(false);
-                setError(err.message);
-                abortRef.current = null;
-              },
-              onSessionId: () => {
-                /* session ID already set */
-              },
-            },
-            lastMsg.id // messageId for GET /chat/stream/:messageId reconnect
-          );
-        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load session');
+        console.error('[useChatSession] Failed to load session:', err);
       } finally {
         setIsLoadingSession(false);
       }
     },
-    [tenantId]
+    [stop, setMessages]
   );
 
-  const abort = useCallback(() => {
-    abortRef.current?.abort();
-    setIsStreaming(false);
-  }, []);
-
-  const clearMessages = useCallback(() => {
-    abort();
+  /**
+   * Clear all messages and start a fresh session.
+   */
+  const clearSession = useCallback(() => {
+    stop();
     setMessages([]);
     setSessionId(null);
-    setError(null);
-  }, [abort]);
+  }, [stop, setMessages]);
 
   return {
+    /** Current message list (AI SDK UIMessage format with parts) */
     messages,
+    /** Whether the agent is currently streaming a response */
     isStreaming,
+    /** Whether historical session messages are being loaded */
     isLoadingSession,
+    /** Current session ID (null for new conversations) */
     sessionId,
+    /** Last error from the stream, if any */
     error,
+    /** Send a text message to the agent */
     sendMessage,
+    /** Stop the current stream */
+    stop,
+    /** Regenerate the last assistant response */
+    regenerate,
+    /** Load messages for an existing session */
     loadSession,
-    abort,
-    clearMessages,
+    /** Clear messages and start a new session */
+    clearSession,
+    /** Direct access to setMessages for advanced use cases */
+    setMessages,
+    /** Current chat status ('ready' | 'submitted' | 'streaming' | 'error') */
+    status,
   };
 }
+
+// Re-export UIMessage for components that need the type
+export type { UIMessage } from 'ai';

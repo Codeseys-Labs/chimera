@@ -1,24 +1,23 @@
-import { getCurrentUser } from 'aws-amplify/auth'
-import { useEffect, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { CostChart } from '@/components/cost-chart'
-import { useSessions } from '@/hooks/use-sessions'
-import { useTenant } from '@/hooks/use-tenant'
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { CostChart } from '@/components/cost-chart';
+import { useAuth } from '@/hooks/use-auth';
+import { useSessions } from '@/hooks/use-sessions';
+import { useTenant } from '@/hooks/use-tenant';
 
 export function DashboardPage() {
-  const [tenantId, setTenantId] = useState('')
-
-  useEffect(() => {
-    getCurrentUser()
-      .then((u) => setTenantId(u.userId))
-      .catch(console.error)
-  }, [])
-
-  const { data: tenant, isLoading: tenantLoading } = useTenant(tenantId)
-  const { data: sessions, isLoading: sessionsLoading } = useSessions(tenantId, 10)
+  const { tenantId } = useAuth();
+  const { data: tenant, isLoading: tenantLoading } = useTenant(tenantId);
+  const { data: sessions, isLoading: sessionsLoading } = useSessions(tenantId, 10);
 
   return (
     <div className="space-y-6 p-6">
@@ -111,7 +110,7 @@ export function DashboardPage() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
 
 function OverviewCard({
@@ -119,9 +118,9 @@ function OverviewCard({
   value,
   loading,
 }: {
-  title: string
-  value: string | number | undefined
-  loading: boolean
+  title: string;
+  value: string | number | undefined;
+  loading: boolean;
 }) {
   return (
     <Card>
@@ -132,9 +131,9 @@ function OverviewCard({
         {loading ? (
           <Skeleton className="h-8 w-24" />
         ) : (
-          <p className="text-3xl font-bold">{value ?? '—'}</p>
+          <p className="text-3xl font-bold">{value ?? '\u2014'}</p>
         )}
       </CardContent>
     </Card>
-  )
+  );
 }
