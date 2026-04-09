@@ -28,7 +28,12 @@ export {
   type ToolCall,
   type StreamEvent,
   type PromptContext,
-  type BedrockModelConfig
+  type BedrockModelConfig,
+  type BedrockStreamEvent,
+  MantleModel,
+  createMantleModel,
+  type MantleModelConfig,
+  type MantleStreamEvent,
 } from './agent';
 
 // Runtime components
@@ -39,7 +44,7 @@ export {
   type RuntimeConfig,
   type RuntimeSession,
   type MemoryOperation,
-  type MemoryResult
+  type MemoryResult,
 } from './runtime';
 
 // Memory module
@@ -117,7 +122,7 @@ export {
   type CronExecutionStatus,
   type CronJob,
   type CronExecution,
-  type CronSchedulerConfig
+  type CronSchedulerConfig,
 } from './orchestration';
 
 // Tenant module (multi-tenant configuration and resource management)

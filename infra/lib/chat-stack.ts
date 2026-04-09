@@ -312,6 +312,9 @@ export class ChatStack extends cdk.Stack {
       internetFacing: true,
       securityGroup: props.albSecurityGroup,
       deletionProtection: isProd,
+      // SSE streams can be long-lived (agent tool execution, multi-step ReAct loops).
+      // Default 60s is too short; gateway sends keepalive pings every 15s.
+      idleTimeout: cdk.Duration.seconds(300),
     });
 
     // CloudWatch access logs for ALB
@@ -446,7 +449,10 @@ export class ChatStack extends cdk.Stack {
       httpsPort: 443,
       connectionAttempts: 3,
       connectionTimeout: cdk.Duration.seconds(10),
-      readTimeout: cdk.Duration.seconds(60),
+      // SSE streams may take time before first byte (Bedrock cold start, tool execution).
+      // Max allowed by CloudFront is 180s. The gateway sends keepalive pings every 15s
+      // to prevent mid-stream timeouts.
+      readTimeout: cdk.Duration.seconds(180),
       keepaliveTimeout: cdk.Duration.seconds(60),
     });
 
