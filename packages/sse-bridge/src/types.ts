@@ -24,7 +24,14 @@ export interface StrandsMessageStartEvent {
 
 export interface StrandsMessageStopEvent {
   type: 'messageStop';
-  stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'content_filtered' | 'guardrail_intervention' | 'cancelled';
+  stopReason:
+    | 'end_turn'
+    | 'tool_use'
+    | 'max_tokens'
+    | 'stop_sequence'
+    | 'content_filtered'
+    | 'guardrail_intervention'
+    | 'cancelled';
   messageId?: string;
 }
 
@@ -119,8 +126,15 @@ export interface VercelDSPStartPart {
 
 export interface VercelDSPFinishPart {
   type: 'finish';
-  messageId: string;
-  finishReason: 'stop' | 'length' | 'content-filter' | 'tool-calls' | 'error' | 'other' | 'cancelled';
+  finishReason:
+    | 'stop'
+    | 'length'
+    | 'content-filter'
+    | 'tool-calls'
+    | 'error'
+    | 'other'
+    | 'cancelled';
+  /** Optional usage stats. Note: AI SDK v5 strict schema does not include this field. */
   usage?: {
     promptTokens: number;
     completionTokens: number;

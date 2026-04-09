@@ -27,7 +27,6 @@ describe('SSE Formatter', () => {
     it('should handle complex nested data', () => {
       const part: VercelDSPStreamPart = {
         type: 'finish',
-        messageId: 'msg_456',
         finishReason: 'stop',
         usage: {
           promptTokens: 100,
@@ -70,7 +69,7 @@ describe('SSE Formatter', () => {
       expect(VERCEL_DSP_HEADERS).toMatchObject({
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
+        Connection: 'keep-alive',
         'x-vercel-ai-ui-message-stream': 'v1',
       });
     });
@@ -144,9 +143,9 @@ describe('SSE Formatter', () => {
       await writer.close();
       expect(writer.isClosed()).toBe(true);
 
-      await expect(
-        writer.write({ type: 'start', messageId: 'msg_1' })
-      ).rejects.toThrow('SSEStreamWriter is closed');
+      await expect(writer.write({ type: 'start', messageId: 'msg_1' })).rejects.toThrow(
+        'SSEStreamWriter is closed'
+      );
     });
 
     it('should handle close idempotently', async () => {
