@@ -19,7 +19,12 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { TaskCategory, ModelId, FeedbackEvent, FeedbackType } from '../evolution/types';
 import { BudgetMonitor } from '../billing/budget-monitor';
-import { estimateTokenCount, estimateMessageTokens, estimateRequestCost, BudgetExceededError } from './token-estimator';
+import {
+  estimateTokenCount,
+  estimateMessageTokens,
+  estimateRequestCost,
+  BudgetExceededError,
+} from './token-estimator';
 import type { Message, ContentBlock, ToolSpec } from './bedrock-model';
 
 // Module-level singleton DynamoDB client (reused across all agent instances)
@@ -69,7 +74,28 @@ export interface AgentConfig {
 
   /** Model instance with converse API (optional, for real LLM calls) */
   model?: {
-    converse(turn: { messages: Message[]; tools?: ToolSpec[]; systemPrompt?: string; modelId?: string }): Promise<{ output: { message: Message }; stopReason: string }>
+    converse(turn: {
+      messages: Message[];
+      tools?: ToolSpec[];
+      systemPrompt?: string;
+      modelId?: string;
+    }): Promise<{ output: { message: Message }; stopReason: string }>;
+
+    /** Token-level streaming variant (optional). Falls back to converse() if absent. */
+    converseStream?(turn: {
+      messages: Message[];
+      tools?: ToolSpec[];
+      systemPrompt?: string;
+      modelId?: string;
+    }): AsyncGenerator<
+      { type: string; [key: string]: unknown },
+      {
+        output: { message: Message };
+        stopReason: string;
+        metrics: { inputTokens: number; outputTokens: number };
+      },
+      unknown
+    >;
   };
 
   /** Loaded tools with full specifications (optional, for tool calling) */
@@ -79,7 +105,7 @@ export interface AgentConfig {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     inputSchema: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    callback: (input: any) => Promise<string>
+    callback: (input: any) => Promise<string>;
   }>;
 
   /** Model router for dynamic model selection (optional) */
@@ -172,13 +198,14 @@ export class ChimeraAgent {
       tenantId: config.tenantId,
       userId: config.userId,
       sessionId: config.sessionId || this.generateSessionId(),
-      memoryNamespace: config.memoryNamespace || this.buildMemoryNamespace(config.tenantId, config.userId),
-      config
+      memoryNamespace:
+        config.memoryNamespace || this.buildMemoryNamespace(config.tenantId, config.userId),
+      config,
     };
 
     // Initialize memory client (default to in-memory if not provided)
-    this.memoryClient = config.memoryClient ||
-      MemoryClientFactory.createInMemoryClient(this.context.memoryNamespace);
+    this.memoryClient =
+      config.memoryClient || MemoryClientFactory.createInMemoryClient(this.context.memoryNamespace);
 
     // Initialize memory with tier-based configuration (async, will complete before first use)
     this.initializeMemory(config.tier || 'basic');
@@ -363,7 +390,7 @@ export class ChimeraAgent {
     const promptContext: PromptContext = {
       tenantId: this.context.tenantId,
       userId: this.context.userId,
-      sessionId: this.context.sessionId
+      sessionId: this.context.sessionId,
     };
 
     // Select prompt variant via PromptOptimizer if experiment is active
@@ -382,9 +409,10 @@ export class ChimeraAgent {
       );
 
       if (experiment) {
-        const s3Key = this.currentPromptVariant === 'b'
-          ? experiment.variantBPromptS3
-          : experiment.variantAPromptS3;
+        const s3Key =
+          this.currentPromptVariant === 'b'
+            ? experiment.variantBPromptS3
+            : experiment.variantAPromptS3;
 
         systemPrompt = await this.config.promptOptimizer.loadPrompt(s3Key);
 
@@ -409,7 +437,7 @@ export class ChimeraAgent {
         output: `[Placeholder] Agent invoked with message: "${message}"\nSystem prompt: ${systemPrompt.substring(0, 100)}...`,
         sessionId: this.context.sessionId,
         stopReason: 'end_turn',
-        context: this.context
+        context: this.context,
       };
 
       // Store assistant response in memory
@@ -448,17 +476,18 @@ export class ChimeraAgent {
     }
 
     // Build tool specs for token estimation
-    const toolSpecs = this.config.loadedTools?.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: this.convertZodToJsonSchema(tool.inputSchema)
-    })) || [];
+    const toolSpecs =
+      this.config.loadedTools?.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: this.convertZodToJsonSchema(tool.inputSchema),
+      })) || [];
 
     // Estimate input tokens
     const inputTokens = estimateMessageTokens({
       messages: [{ role: 'user', content: [{ text: message }] }],
       systemPrompt,
-      tools: toolSpecs.length > 0 ? toolSpecs : undefined
+      tools: toolSpecs.length > 0 ? toolSpecs : undefined,
     });
 
     // Estimate max output tokens (use config default)
@@ -469,7 +498,7 @@ export class ChimeraAgent {
     const estimatedCost = estimateRequestCost({
       modelId,
       inputTokens,
-      maxOutputTokens
+      maxOutputTokens,
     });
 
     // Check budget action
@@ -489,7 +518,7 @@ export class ChimeraAgent {
       // Log warning but proceed
       console.warn(
         `[BudgetWarning] Tenant ${this.context.tenantId} has exceeded budget threshold. ` +
-        `Estimated cost: $${estimatedCost.toFixed(4)}`
+          `Estimated cost: $${estimatedCost.toFixed(4)}`
       );
     }
 
@@ -510,15 +539,16 @@ export class ChimeraAgent {
     // Build initial user message
     messages.push({
       role: 'user',
-      content: [{ text: message }]
+      content: [{ text: message }],
     });
 
     // Build tool specifications for model
-    const toolSpecs = this.config.loadedTools?.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: this.convertZodToJsonSchema(tool.inputSchema)
-    })) || [];
+    const toolSpecs =
+      this.config.loadedTools?.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: this.convertZodToJsonSchema(tool.inputSchema),
+      })) || [];
 
     // ReAct loop
     while (iterations < maxIterations) {
@@ -529,20 +559,25 @@ export class ChimeraAgent {
         messages,
         tools: toolSpecs.length > 0 ? toolSpecs : undefined,
         systemPrompt,
-        modelId: this.currentModelId
+        modelId: this.currentModelId,
       });
 
       stopReason = response.stopReason;
       const assistantMessage = response.output.message;
 
       // Extract text content
-      const textBlocks = assistantMessage.content.filter((block): block is ContentBlock & { text: string } => !!block.text);
+      const textBlocks = assistantMessage.content.filter(
+        (block): block is ContentBlock & { text: string } => !!block.text
+      );
       if (textBlocks.length > 0) {
-        finalOutput = textBlocks.map(block => block.text).join('\n');
+        finalOutput = textBlocks.map((block) => block.text).join('\n');
       }
 
       // Check for tool use
-      const toolUseBlocks = assistantMessage.content.filter((block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } => !!block.toolUse);
+      const toolUseBlocks = assistantMessage.content.filter(
+        (block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } =>
+          !!block.toolUse
+      );
 
       if (toolUseBlocks.length === 0 || stopReason === 'end_turn') {
         // No tools to execute, we're done
@@ -563,20 +598,20 @@ export class ChimeraAgent {
 
       for (const block of toolUseBlocks) {
         const toolUse = block.toolUse;
-        const tool = this.config.loadedTools?.find(t => t.name === toolUse.name);
+        const tool = this.config.loadedTools?.find((t) => t.name === toolUse.name);
 
         if (!tool) {
           // Tool not found - add error result
           toolResults.push({
             toolUseId: toolUse.toolUseId,
             content: `Error: Tool '${toolUse.name}' not found`,
-            status: 'error'
+            status: 'error',
           });
 
           toolCalls.push({
             name: toolUse.name,
             input: toolUse.input,
-            error: `Tool '${toolUse.name}' not found`
+            error: `Tool '${toolUse.name}' not found`,
           });
           continue;
         }
@@ -588,13 +623,13 @@ export class ChimeraAgent {
           toolResults.push({
             toolUseId: toolUse.toolUseId,
             content: result,
-            status: 'success'
+            status: 'success',
           });
 
           toolCalls.push({
             name: toolUse.name,
             input: toolUse.input,
-            result
+            result,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -602,13 +637,13 @@ export class ChimeraAgent {
           toolResults.push({
             toolUseId: toolUse.toolUseId,
             content: `Error: ${errorMessage}`,
-            status: 'error'
+            status: 'error',
           });
 
           toolCalls.push({
             name: toolUse.name,
             input: toolUse.input,
-            error: errorMessage
+            error: errorMessage,
           });
         }
       }
@@ -616,7 +651,7 @@ export class ChimeraAgent {
       // Add tool results message
       messages.push({
         role: 'user',
-        content: toolResults.map(result => ({ toolResult: result }))
+        content: toolResults.map((result) => ({ toolResult: result })),
       });
     }
 
@@ -626,7 +661,7 @@ export class ChimeraAgent {
       sessionId: this.context.sessionId,
       stopReason,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      context: this.context
+      context: this.context,
     };
 
     // Store assistant response in memory
@@ -658,13 +693,14 @@ export class ChimeraAgent {
       if (zodSchema._def) {
         return {
           type: 'object',
-          properties: zodSchema._def.shape ?
-            Object.fromEntries(
-              Object.entries(zodSchema._def.shape()).map(([key]) => [
-                key,
-                { type: 'string' } // Simplified
-              ])
-            ) : {}
+          properties: zodSchema._def.shape
+            ? Object.fromEntries(
+                Object.entries(zodSchema._def.shape()).map(([key]) => [
+                  key,
+                  { type: 'string' }, // Simplified
+                ])
+              )
+            : {},
         };
       }
     }
@@ -751,8 +787,8 @@ export class ChimeraAgent {
     try {
       // Extract interaction metadata
       const hadToolCalls = result.toolCalls && result.toolCalls.length > 0;
-      const toolErrors = result.toolCalls?.filter(tc => tc.error).length || 0;
-      const toolSuccesses = result.toolCalls?.filter(tc => !tc.error).length || 0;
+      const toolErrors = result.toolCalls?.filter((tc) => tc.error).length || 0;
+      const toolSuccesses = result.toolCalls?.filter((tc) => !tc.error).length || 0;
 
       // Calculate basic quality signals
       const interactionQuality = {
@@ -827,137 +863,173 @@ export class ChimeraAgent {
 
     // If no model, yield placeholder events
     if (!this.config.model) {
-      yield {
-        type: 'message_start',
-        sessionId: this.context.sessionId
-      };
-
+      yield { type: 'message_start', sessionId: this.context.sessionId };
       yield {
         type: 'content_block_delta',
-        delta: { text: `[Placeholder] Streaming response for: "${message}"` }
+        delta: { text: `[Placeholder] Streaming response for: "${message}"` },
       };
-
-      yield {
-        type: 'message_stop',
-        stopReason: 'end_turn'
-      };
+      yield { type: 'message_stop', stopReason: 'end_turn' };
       return;
     }
 
-    // Stream with ReAct loop
-    yield {
-      type: 'message_start',
-      sessionId: this.context.sessionId
-    };
+    yield { type: 'message_start', sessionId: this.context.sessionId };
 
     // Build prompt context
     const promptContext: PromptContext = {
       tenantId: this.context.tenantId,
       userId: this.context.userId,
-      sessionId: this.context.sessionId
+      sessionId: this.context.sessionId,
     };
 
     const systemPrompt = this.config.systemPrompt.render(promptContext);
 
     const messages: Message[] = [];
-    messages.push({
-      role: 'user',
-      content: [{ text: message }]
-    });
+    messages.push({ role: 'user', content: [{ text: message }] });
 
-    const toolSpecs = this.config.loadedTools?.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: this.convertZodToJsonSchema(tool.inputSchema)
-    })) || [];
+    const toolSpecs =
+      this.config.loadedTools?.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: this.convertZodToJsonSchema(tool.inputSchema),
+      })) || [];
 
     const maxIterations = 10;
     let iterations = 0;
+    const hasStreaming = typeof this.config.model.converseStream === 'function';
 
     while (iterations < maxIterations) {
       iterations++;
 
-      const response = await this.config.model.converse({
-        messages,
-        tools: toolSpecs.length > 0 ? toolSpecs : undefined,
-        systemPrompt,
-        modelId: this.currentModelId
-      });
+      // --- TRUE STREAMING PATH ---
+      // Use ConverseStreamCommand for token-by-token streaming when available.
+      if (hasStreaming) {
+        const streamGen = this.config.model.converseStream!({
+          messages,
+          tools: toolSpecs.length > 0 ? toolSpecs : undefined,
+          systemPrompt,
+          modelId: this.currentModelId,
+        });
 
-      const assistantMessage = response.output.message;
+        // Forward Bedrock stream events as our StreamEvents.
+        // Cast events to access typed fields (the generator yields { type: string; ... }).
+        let streamResult = await streamGen.next();
+        while (!streamResult.done) {
+          const evt = streamResult.value as Record<string, any>;
 
-      // Emit text content
-      const textBlocks = assistantMessage.content.filter((block): block is ContentBlock & { text: string } => !!block.text);
-      for (const block of textBlocks) {
-        yield {
-          type: 'content_block_delta',
-          delta: { text: block.text }
-        };
-      }
-
-      // Check for tool use
-      const toolUseBlocks = assistantMessage.content.filter((block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } => !!block.toolUse);
-
-      if (toolUseBlocks.length === 0 || response.stopReason === 'end_turn') {
-        messages.push(assistantMessage);
-        yield {
-          type: 'message_stop',
-          stopReason: response.stopReason
-        };
-        break;
-      }
-
-      // Emit tool call events
-      for (const block of toolUseBlocks) {
-        const toolUse = block.toolUse;
-        const tool = this.config.loadedTools?.find(t => t.name === toolUse.name);
-
-        if (tool) {
-          try {
-            const result = await tool.callback(toolUse.input);
-            yield {
-              type: 'tool_call',
-              toolCall: {
-                name: toolUse.name,
-                input: toolUse.input,
-                result
-              }
-            };
-
-            // Add to messages for next iteration
-            messages.push(assistantMessage);
-            messages.push({
-              role: 'user',
-              content: [{
-                toolResult: {
-                  toolUseId: toolUse.toolUseId,
-                  content: result,
-                  status: 'success'
-                }
-              }]
-            });
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            yield {
-              type: 'tool_call',
-              toolCall: {
-                name: toolUse.name,
-                input: toolUse.input,
-                error: errorMessage
-              }
-            };
+          if (evt.type === 'contentBlockStart') {
+            yield { type: 'content_block_start', blockType: String(evt.blockType || 'text') };
+          } else if (evt.type === 'contentBlockDelta' && evt.delta?.text) {
+            yield { type: 'content_block_delta', delta: { text: String(evt.delta.text) } };
+          } else if (evt.type === 'contentBlockStop') {
+            yield { type: 'content_block_stop' };
           }
-        } else {
-          yield {
-            type: 'tool_call',
-            toolCall: {
-              name: toolUse.name,
-              input: toolUse.input,
-              error: `Tool '${toolUse.name}' not found`
-            }
-          };
+
+          streamResult = await streamGen.next();
+        }
+
+        // streamResult.value is the assembled ConverseResponse
+        const response = streamResult.value;
+        if (!response) {
+          yield { type: 'message_stop', stopReason: 'end_turn' };
+          break;
+        }
+
+        const assistantMessage = response.output.message;
+
+        // Check for tool use
+        const toolUseBlocks = assistantMessage.content.filter(
+          (block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } =>
+            !!block.toolUse
+        );
+
+        if (toolUseBlocks.length === 0 || response.stopReason === 'end_turn') {
+          messages.push(assistantMessage);
+          yield { type: 'message_stop', stopReason: response.stopReason };
+          break;
+        }
+
+        // Handle tool calls
+        for (const block of toolUseBlocks) {
+          yield* this.handleToolCall(block.toolUse, messages, assistantMessage);
+        }
+      } else {
+        // --- FALLBACK: synchronous converse ---
+        const response = await this.config.model.converse({
+          messages,
+          tools: toolSpecs.length > 0 ? toolSpecs : undefined,
+          systemPrompt,
+          modelId: this.currentModelId,
+        });
+
+        const assistantMessage = response.output.message;
+
+        // Emit text content (full block at once — no token streaming)
+        const textBlocks = assistantMessage.content.filter(
+          (block): block is ContentBlock & { text: string } => !!block.text
+        );
+        for (const block of textBlocks) {
+          yield { type: 'content_block_delta', delta: { text: block.text } };
+        }
+
+        const toolUseBlocks = assistantMessage.content.filter(
+          (block): block is ContentBlock & { toolUse: NonNullable<ContentBlock['toolUse']> } =>
+            !!block.toolUse
+        );
+
+        if (toolUseBlocks.length === 0 || response.stopReason === 'end_turn') {
+          messages.push(assistantMessage);
+          yield { type: 'message_stop', stopReason: response.stopReason };
+          break;
+        }
+
+        for (const block of toolUseBlocks) {
+          yield* this.handleToolCall(block.toolUse, messages, assistantMessage);
         }
       }
+    }
+  }
+
+  /**
+   * Handle a single tool call: execute the tool and yield events.
+   */
+  private async *handleToolCall(
+    toolUse: NonNullable<ContentBlock['toolUse']>,
+    messages: Message[],
+    assistantMessage: Message
+  ): AsyncGenerator<StreamEvent, void, unknown> {
+    const tool = this.config.loadedTools?.find((t) => t.name === toolUse.name);
+
+    if (tool) {
+      try {
+        const result = await tool.callback(toolUse.input);
+        yield {
+          type: 'tool_call',
+          toolCall: { name: toolUse.name, input: toolUse.input, result },
+        };
+
+        messages.push(assistantMessage);
+        messages.push({
+          role: 'user',
+          content: [
+            { toolResult: { toolUseId: toolUse.toolUseId, content: result, status: 'success' } },
+          ],
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        yield {
+          type: 'tool_call',
+          toolCall: { name: toolUse.name, input: toolUse.input, error: errorMessage },
+        };
+      }
+    } else {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          name: toolUse.name,
+          input: toolUse.input,
+          error: `Tool '${toolUse.name}' not found`,
+        },
+      };
     }
   }
 

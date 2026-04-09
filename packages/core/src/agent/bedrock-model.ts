@@ -1,15 +1,17 @@
 /**
  * Bedrock Model Adapter - Wraps AWS Bedrock Converse API for ChimeraAgent
  *
- * Provides the same interface as MockModel but connects to real AWS Bedrock LLMs.
- * Supports Claude 3, Claude 4, and other Bedrock models via the Converse API.
+ * Supports both synchronous (converse) and streaming (converseStream) modes.
+ * The streaming mode uses ConverseStreamCommand for true token-level streaming.
  */
 
 import {
   BedrockRuntimeClient,
   ConverseCommand,
+  ConverseStreamCommand,
   ConverseCommandInput,
   ConverseCommandOutput,
+  ConverseStreamCommandInput,
   Message as BedrockMessage,
   ContentBlock as BedrockContentBlock,
   Tool as BedrockTool,
@@ -27,7 +29,7 @@ function getBedrockClient(region: string): BedrockRuntimeClient {
 }
 
 export interface BedrockModelConfig {
-  /** Model ID (e.g., 'anthropic.claude-3-sonnet-20240229-v1:0') */
+  /** Model ID (e.g., 'us.anthropic.claude-sonnet-4-6') */
   modelId: string;
 
   /** AWS region (default: us-east-1) */
@@ -100,23 +102,29 @@ export interface ConverseResponse {
 }
 
 /**
+ * Events emitted by the streaming converseStream method.
+ * These map closely to Bedrock's ConverseStreamOutput events.
+ */
+export type BedrockStreamEvent =
+  | { type: 'messageStart' }
+  | {
+      type: 'contentBlockStart';
+      blockIndex: number;
+      blockType: 'text' | 'tool_use';
+      toolUse?: { toolUseId: string; name: string };
+    }
+  | {
+      type: 'contentBlockDelta';
+      blockIndex: number;
+      delta: { text?: string; toolUseInput?: string };
+    }
+  | { type: 'contentBlockStop'; blockIndex: number }
+  | { type: 'messageStop'; stopReason: string }
+  | { type: 'metadata'; inputTokens: number; outputTokens: number };
+
+/**
  * BedrockModel wraps AWS Bedrock Converse API for agent integration.
- *
- * Usage:
- * ```typescript
- * const model = new BedrockModel({
- *   modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
- *   region: 'us-east-1',
- *   maxTokens: 4096,
- *   temperature: 1.0
- * });
- *
- * const agent = createAgent({
- *   systemPrompt: createDefaultSystemPrompt(),
- *   tenantId: 'tenant-123',
- *   model
- * });
- * ```
+ * Supports both synchronous (converse) and streaming (converseStream) modes.
  */
 export class BedrockModel {
   private client: BedrockRuntimeClient;
@@ -158,10 +166,11 @@ export class BedrockModel {
       return {
         toolResult: {
           toolUseId: block.toolResult.toolUseId ?? '',
-          content: typeof block.toolResult.content === 'string'
-            ? [{ text: block.toolResult.content }]
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            : [{ json: block.toolResult.content as any }],
+          content:
+            typeof block.toolResult.content === 'string'
+              ? [{ text: block.toolResult.content }]
+              : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                [{ json: block.toolResult.content as any }],
           status: block.toolResult.status,
         },
       };
@@ -176,7 +185,7 @@ export class BedrockModel {
   private convertMessage(message: Message): BedrockMessage {
     return {
       role: message.role,
-      content: message.content.map(block => this.convertContentBlock(block)),
+      content: message.content.map((block) => this.convertContentBlock(block)),
     };
   }
 
@@ -214,13 +223,11 @@ export class BedrockModel {
       };
     }
 
-    // Bedrock shouldn't return toolResult in assistant messages, but handle it just in case
     if (block.toolResult) {
       const content = block.toolResult.content;
       let contentStr: string | Record<string, unknown>;
 
       if (Array.isArray(content)) {
-        // Extract first content item
         const firstItem = content[0];
         if (firstItem && 'text' in firstItem) {
           contentStr = firstItem.text as string;
@@ -230,7 +237,7 @@ export class BedrockModel {
           contentStr = JSON.stringify(content);
         }
       } else {
-        contentStr = (content as unknown) as string;
+        contentStr = content as unknown as string;
       }
 
       return {
@@ -246,13 +253,12 @@ export class BedrockModel {
   }
 
   /**
-   * Call Bedrock Converse API
+   * Build Bedrock API input from a ConverseTurn.
    */
-  async converse(turn: ConverseTurn): Promise<ConverseResponse> {
-    // Build Bedrock API request
+  private buildInput(turn: ConverseTurn): ConverseCommandInput {
     const input: ConverseCommandInput = {
       modelId: turn.modelId || this.config.modelId,
-      messages: turn.messages.map(msg => this.convertMessage(msg)),
+      messages: turn.messages.map((msg) => this.convertMessage(msg)),
       inferenceConfig: {
         maxTokens: turn.maxTokens || this.config.maxTokens,
         temperature: turn.temperature !== undefined ? turn.temperature : this.config.temperature,
@@ -260,30 +266,34 @@ export class BedrockModel {
       },
     };
 
-    // Add system prompt if provided
     if (turn.systemPrompt) {
       input.system = [{ text: turn.systemPrompt }];
     }
 
-    // Add tools if provided
     if (turn.tools && turn.tools.length > 0) {
       input.toolConfig = {
-        tools: turn.tools.map(tool => this.convertTool(tool)),
+        tools: turn.tools.map((tool) => this.convertTool(tool)),
       };
     }
 
-    // Call Bedrock
+    return input;
+  }
+
+  /**
+   * Call Bedrock Converse API (synchronous — waits for full response).
+   * Used as fallback and for tool result handling.
+   */
+  async converse(turn: ConverseTurn): Promise<ConverseResponse> {
+    const input = this.buildInput(turn);
     const command = new ConverseCommand(input);
     const response: ConverseCommandOutput = await this.client.send(command);
 
-    // Validate response
     if (!response.output || !response.output.message) {
       throw new Error('Invalid Bedrock response: missing output.message');
     }
 
-    // Convert response to our format
     const assistantMessage = response.output.message;
-    const contentBlocks = (assistantMessage.content || []).map(block =>
+    const contentBlocks = (assistantMessage.content || []).map((block) =>
       this.convertBedrockContentBlock(block)
     );
 
@@ -299,6 +309,138 @@ export class BedrockModel {
         inputTokens: response.usage?.inputTokens || 0,
         outputTokens: response.usage?.outputTokens || 0,
       },
+    };
+  }
+
+  /**
+   * Call Bedrock ConverseStream API — yields events token-by-token.
+   *
+   * This is the key method for true streaming. Each text token arrives
+   * as a separate contentBlockDelta event, giving the user immediate
+   * visual feedback as the model generates.
+   *
+   * Also returns the assembled assistant message for ReAct loop continuation.
+   */
+  async *converseStream(
+    turn: ConverseTurn
+  ): AsyncGenerator<BedrockStreamEvent, ConverseResponse, unknown> {
+    const input = this.buildInput(turn) as ConverseStreamCommandInput;
+    const command = new ConverseStreamCommand(input);
+    const response = await this.client.send(command);
+
+    if (!response.stream) {
+      throw new Error('Invalid Bedrock response: missing stream');
+    }
+
+    // Accumulate the full response for return value
+    const contentBlocks: ContentBlock[] = [];
+    let currentBlockIndex = -1;
+    let currentText = '';
+    let currentToolInput = '';
+    let currentToolUseId = '';
+    let currentToolName = '';
+    let stopReason = 'end_turn';
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    for await (const event of response.stream) {
+      if (event.messageStart) {
+        yield { type: 'messageStart' };
+      }
+
+      if (event.contentBlockStart) {
+        currentBlockIndex = event.contentBlockStart.contentBlockIndex ?? 0;
+        const startEvent = event.contentBlockStart.start;
+
+        if (startEvent && 'toolUse' in startEvent && startEvent.toolUse) {
+          currentToolUseId = startEvent.toolUse.toolUseId ?? '';
+          currentToolName = startEvent.toolUse.name ?? '';
+          currentToolInput = '';
+          yield {
+            type: 'contentBlockStart',
+            blockIndex: currentBlockIndex,
+            blockType: 'tool_use',
+            toolUse: { toolUseId: currentToolUseId, name: currentToolName },
+          };
+        } else {
+          currentText = '';
+          yield {
+            type: 'contentBlockStart',
+            blockIndex: currentBlockIndex,
+            blockType: 'text',
+          };
+        }
+      }
+
+      if (event.contentBlockDelta) {
+        const delta = event.contentBlockDelta.delta;
+        if (delta && 'text' in delta && delta.text) {
+          currentText += delta.text;
+          yield {
+            type: 'contentBlockDelta',
+            blockIndex: event.contentBlockDelta.contentBlockIndex ?? currentBlockIndex,
+            delta: { text: delta.text },
+          };
+        }
+        if (delta && 'toolUse' in delta && delta.toolUse?.input) {
+          currentToolInput += delta.toolUse.input;
+          yield {
+            type: 'contentBlockDelta',
+            blockIndex: event.contentBlockDelta.contentBlockIndex ?? currentBlockIndex,
+            delta: { toolUseInput: delta.toolUse.input },
+          };
+        }
+      }
+
+      if (event.contentBlockStop) {
+        const blockIdx = event.contentBlockStop.contentBlockIndex ?? currentBlockIndex;
+        // Assemble the block
+        if (currentToolName) {
+          let parsedInput: Record<string, unknown> = {};
+          try {
+            parsedInput = JSON.parse(currentToolInput);
+          } catch {
+            /* invalid JSON — leave empty */
+          }
+          contentBlocks.push({
+            toolUse: {
+              toolUseId: currentToolUseId,
+              name: currentToolName,
+              input: parsedInput,
+            },
+          });
+          currentToolName = '';
+          currentToolUseId = '';
+          currentToolInput = '';
+        } else if (currentText) {
+          contentBlocks.push({ text: currentText });
+          currentText = '';
+        }
+        yield { type: 'contentBlockStop', blockIndex: blockIdx };
+      }
+
+      if (event.messageStop) {
+        stopReason = event.messageStop.stopReason ?? 'end_turn';
+        yield { type: 'messageStop', stopReason };
+      }
+
+      if (event.metadata) {
+        inputTokens = event.metadata.usage?.inputTokens ?? 0;
+        outputTokens = event.metadata.usage?.outputTokens ?? 0;
+        yield { type: 'metadata', inputTokens, outputTokens };
+      }
+    }
+
+    // Return the assembled response for the ReAct loop
+    return {
+      output: {
+        message: {
+          role: 'assistant' as const,
+          content: contentBlocks,
+        },
+      },
+      stopReason,
+      metrics: { inputTokens, outputTokens },
     };
   }
 

@@ -550,6 +550,89 @@ router.get('/stream/:messageId', async (c: Context) => {
 });
 
 /**
+ * GET /chat/sessions
+ *
+ * List sessions for the authenticated tenant.
+ * Returns session metadata sorted by lastActivity (most recent first).
+ *
+ * Query params:
+ *   ?limit=20  — max sessions to return (default 20, max 100)
+ *   ?cursor=   — SK value to start after (for pagination)
+ */
+router.get('/sessions', async (c: Context) => {
+  try {
+    const tenantContext = c.get('tenantContext') as TenantContext | undefined;
+    if (!tenantContext) {
+      const error: ErrorResponse = {
+        error: { code: 'MISSING_TENANT_CONTEXT', message: 'Tenant context not found.' },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 500);
+    }
+
+    const limitParam = parseInt(c.req.query('limit') || '20', 10);
+    const limit = Math.min(Math.max(1, limitParam), 100);
+    const cursor = c.req.query('cursor');
+
+    const pk = `TENANT#${tenantContext.tenantId}`;
+
+    const queryInput: any = {
+      TableName: SESSIONS_TABLE,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: {
+        ':pk': pk,
+        ':prefix': 'SESSION#',
+      },
+      Limit: limit,
+      ScanIndexForward: false, // most recent first (by SK which includes sessionId)
+    };
+
+    if (cursor) {
+      queryInput.ExclusiveStartKey = { PK: pk, SK: cursor };
+    }
+
+    const result = await ddbClient.send(new QueryCommand(queryInput));
+
+    // Sort by lastActivity descending (DynamoDB SK order may not match)
+    const sessions = (result.Items || [])
+      .map((item: any) => ({
+        id: item.sessionId,
+        title: item.title || 'Untitled',
+        status: item.status || 'idle',
+        messageCount: item.messageCount || 0,
+        lastMessage: item.lastMessage,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt || item.lastActivity,
+      }))
+      .sort((a: any, b: any) => {
+        const ta = new Date(a.updatedAt || 0).getTime();
+        const tb = new Date(b.updatedAt || 0).getTime();
+        return tb - ta;
+      });
+
+    const response: any = {
+      sessions,
+      count: sessions.length,
+    };
+
+    if (result.LastEvaluatedKey) {
+      response.nextCursor = result.LastEvaluatedKey.SK;
+    }
+
+    return c.json(response, 200);
+  } catch (error) {
+    const errorResponse: ErrorResponse = {
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      timestamp: new Date().toISOString(),
+    };
+    return c.json(errorResponse, 500);
+  }
+});
+
+/**
  * GET /chat/sessions/:sessionId/messages
  *
  * Load persisted messages for a session from DynamoDB.

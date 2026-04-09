@@ -13,7 +13,12 @@
  * - On error: write partial content with status: 'error'
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  UpdateCommand,
+  GetCommand,
+} from '@aws-sdk/lib-dynamodb';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE =
@@ -99,6 +104,61 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
       })
     )
     .catch((err) => console.error('Failed to persist assistant placeholder:', err.message));
+
+  // Upsert session metadata record (PK: TENANT#{tenantId}, SK: SESSION#{sessionId}).
+  // Creates on first message; updates lastActivity and messageCount on subsequent messages.
+  // Title is derived from the first user message (truncated to 80 chars).
+  const sessionPK = `TENANT#${tenantId}`;
+  const sessionSK = `SESSION#${sessionId}`;
+  const title = userContent.length > 80 ? userContent.slice(0, 77) + '...' : userContent;
+
+  void (async () => {
+    try {
+      // Check if session already exists
+      const existing = await client.send(
+        new GetCommand({ TableName: TABLE, Key: { PK: sessionPK, SK: sessionSK } })
+      );
+
+      if (existing.Item) {
+        // Update existing session
+        await client.send(
+          new UpdateCommand({
+            TableName: TABLE,
+            Key: { PK: sessionPK, SK: sessionSK },
+            UpdateExpression:
+              'SET lastActivity = :now, messageCount = if_not_exists(messageCount, :zero) + :two, updatedAt = :now',
+            ExpressionAttributeValues: {
+              ':now': now,
+              ':zero': 0,
+              ':two': 2, // user + assistant
+            },
+          })
+        );
+      } else {
+        // Create new session metadata
+        await client.send(
+          new PutCommand({
+            TableName: TABLE,
+            Item: {
+              PK: sessionPK,
+              SK: sessionSK,
+              sessionId,
+              tenantId,
+              userId,
+              title,
+              status: 'active',
+              messageCount: 2,
+              lastActivity: now,
+              createdAt: now,
+              updatedAt: now,
+            },
+          })
+        );
+      }
+    } catch (err: any) {
+      console.error('Failed to upsert session metadata:', err.message);
+    }
+  })();
 
   return {
     onPart(part: any) {
@@ -194,6 +254,19 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
         console.log(
           `Persisted message ${messageId} (${textAccumulator.length} chars, ${toolCalls.length} tool calls)`
         );
+
+        // Update session to idle
+        void client
+          .send(
+            new UpdateCommand({
+              TableName: TABLE,
+              Key: { PK: sessionPK, SK: sessionSK },
+              UpdateExpression: 'SET #s = :idle, lastActivity = :now, updatedAt = :now',
+              ExpressionAttributeNames: { '#s': 'status' },
+              ExpressionAttributeValues: { ':idle': 'idle', ':now': new Date().toISOString() },
+            })
+          )
+          .catch((e) => console.error('Failed to update session status to idle:', e.message));
       } catch (err: any) {
         console.error(`Failed to persist completion for ${messageId}:`, err.message);
       }
@@ -214,6 +287,18 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
             },
           })
         );
+        // Update session to error status
+        void client
+          .send(
+            new UpdateCommand({
+              TableName: TABLE,
+              Key: { PK: sessionPK, SK: sessionSK },
+              UpdateExpression: 'SET #s = :err, lastActivity = :now, updatedAt = :now',
+              ExpressionAttributeNames: { '#s': 'status' },
+              ExpressionAttributeValues: { ':err': 'error', ':now': new Date().toISOString() },
+            })
+          )
+          .catch((e) => console.error('Failed to update session status to error:', e.message));
       } catch (writeErr: any) {
         console.error(`Failed to persist error for ${messageId}:`, writeErr.message);
       }

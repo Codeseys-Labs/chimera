@@ -15,21 +15,29 @@ export {
   type AgentContext,
   type AgentResult,
   type ToolCall,
-  type StreamEvent
+  type StreamEvent,
 } from './agent';
 
 export {
   BedrockModel,
   createBedrockModel,
-  type BedrockModelConfig
+  type BedrockModelConfig,
+  type BedrockStreamEvent,
 } from './bedrock-model';
+
+export {
+  MantleModel,
+  createMantleModel,
+  type MantleModelConfig,
+  type MantleStreamEvent,
+} from './mantle-model';
 
 export {
   SystemPromptTemplate,
   createSystemPrompt,
   createDefaultSystemPrompt,
   DEFAULT_SYSTEM_PROMPT,
-  type PromptContext
+  type PromptContext,
 } from './prompt';
 
 // Re-export evolution types needed by agent users
