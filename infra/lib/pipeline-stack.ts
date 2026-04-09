@@ -194,6 +194,18 @@ export class PipelineStack extends cdk.Stack {
       timeout: cdk.Duration.minutes(15),
     });
 
+    // The build step resolves Cognito/API stack outputs to inject VITE_* env
+    // vars into the Vite build. Grant CloudFormation read on Security + Api stacks.
+    buildProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudformation:DescribeStacks'],
+        resources: [
+          `arn:aws:cloudformation:${this.region}:${this.account}:stack/Chimera-${props.envName}-Security/*`,
+          `arn:aws:cloudformation:${this.region}:${this.account}:stack/Chimera-${props.envName}-Api/*`,
+        ],
+      })
+    );
+
     // ======================================================================
     // CodeBuild Project for Docker Build Stage
     // ======================================================================
