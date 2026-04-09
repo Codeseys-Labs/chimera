@@ -17,9 +17,9 @@ phases:
   build:
     commands:
       - export PATH="$HOME/.bun/bin:$PATH"
-      - 'bun run lint || true'
-      - 'bun run typecheck || true'
-      - 'bun run test || true'
+      - bun run lint
+      - bun run typecheck
+      - bun run test
       - cd infra && npx cdk synth --all && cd ..
       # Resolve Cognito + API config from deployed stacks for the Vite build.
       # These are baked into the JS bundle at compile time via import.meta.env.
