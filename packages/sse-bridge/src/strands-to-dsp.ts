@@ -82,7 +82,10 @@ export class StrandsToDSPConverter {
   /**
    * Handle messageStart event
    */
-  private handleMessageStart(event: { type: 'messageStart'; messageId?: string }): VercelDSPStreamPart[] {
+  private handleMessageStart(event: {
+    type: 'messageStart';
+    messageId?: string;
+  }): VercelDSPStreamPart[] {
     if (event.messageId) {
       this.state.messageId = event.messageId;
     }
@@ -147,7 +150,6 @@ export class StrandsToDSPConverter {
 
     parts.push({
       type: 'finish',
-      messageId: event.messageId || this.state.messageId,
       finishReason,
     });
 
@@ -413,10 +415,7 @@ export class StrandsToDSPConverter {
   /**
    * Handle stepStart event (multi-step agent loop markers)
    */
-  private handleStepStart(event: {
-    type: 'stepStart';
-    stepIndex?: number;
-  }): VercelDSPStreamPart[] {
+  private handleStepStart(event: { type: 'stepStart'; stepIndex?: number }): VercelDSPStreamPart[] {
     if (event.stepIndex !== undefined) {
       this.state.stepIndex = event.stepIndex;
     } else {
