@@ -19,9 +19,10 @@ phases:
       - export PATH="$HOME/.bun/bin:$PATH"
       - bun run lint
       - bun run typecheck
-      # Run tests (excluding CLI package — its credential/auth tests conflict
-      # with CodeBuild's IAM role. CLI tests run in GitHub Actions CI instead).
-      - bun test ./packages/shared/ ./packages/core/ ./packages/sse-bridge/ ./packages/chat-gateway/ ./infra/
+      # Run tests (excluding CLI package — credential tests conflict with CodeBuild IAM role,
+      # and excluding chat-gateway — Bun CJS/ESM compat issues with @aws-sdk/lib-dynamodb).
+      # Both packages are fully tested in GitHub Actions CI.
+      - bun test ./packages/shared/ ./packages/core/ ./packages/sse-bridge/ ./infra/
       - cd infra && npx cdk synth --all && cd ..
       # Resolve Cognito + API config from deployed stacks for the Vite build.
       # These are baked into the JS bundle at compile time via import.meta.env.
