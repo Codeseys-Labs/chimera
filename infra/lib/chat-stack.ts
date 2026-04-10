@@ -4,8 +4,6 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
-import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
-import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -458,103 +456,8 @@ export class ChatStack extends cdk.Stack {
       keepaliveTimeout: cdk.Duration.seconds(60),
     });
 
-    // ======================================================================
-    // WAF WebACL for CloudFront
-    // Scope: CLOUDFRONT — AWS provisions this in us-east-1 automatically.
-    // Rules:
-    //   1. AWS Managed Common Rules — blocks common exploits (XSS, SQLi, etc.)
-    //   2. AWS Managed Known Bad Inputs — blocks known malicious payloads
-    //   3. Rate limiting — 2000 requests per 5-min window per IP
-    // ======================================================================
-    const chatWebAcl = new wafv2.CfnWebACL(this, 'ChatWebAcl', {
-      name: `chimera-chat-waf-${props.envName}`,
-      scope: 'CLOUDFRONT',
-      defaultAction: { allow: {} },
-      visibilityConfig: {
-        cloudWatchMetricsEnabled: true,
-        metricName: `chimera-chat-waf-${props.envName}`,
-        sampledRequestsEnabled: true,
-      },
-      rules: [
-        {
-          name: 'AWSManagedRulesCommonRuleSet',
-          priority: 1,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesCommonRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `chat-common-rules-${props.envName}`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        {
-          name: 'AWSManagedRulesKnownBadInputsRuleSet',
-          priority: 2,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesKnownBadInputsRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `chat-bad-inputs-${props.envName}`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        {
-          name: 'RateLimitPerIP',
-          priority: 3,
-          action: { block: {} },
-          statement: {
-            rateBasedStatement: {
-              limit: 2000,
-              aggregateKeyType: 'IP',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `chat-rate-limit-${props.envName}`,
-            sampledRequestsEnabled: true,
-          },
-        },
-      ],
-    });
-
-    // CloudWatch metric for blocked requests
-    const chatWafBlockedMetric = new cloudwatch.Metric({
-      namespace: 'AWS/WAFV2',
-      metricName: 'BlockedRequests',
-      dimensionsMap: {
-        WebACL: `chimera-chat-waf-${props.envName}`,
-        Region: 'us-east-1',
-        Rule: 'ALL',
-      },
-      statistic: 'Sum',
-      period: cdk.Duration.minutes(5),
-    });
-
-    new cloudwatch.Alarm(this, 'ChatWafBlockedAlarm', {
-      alarmName: `chimera-chat-waf-blocked-${props.envName}`,
-      alarmDescription:
-        'High number of WAF-blocked requests on chat gateway CloudFront distribution',
-      metric: chatWafBlockedMetric,
-      threshold: 1000,
-      evaluationPeriods: 3,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
-
     // CloudFront distribution — API proxy only; static frontend served by FrontendStack
-    // WAF WebACL attached for edge protection.
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
-      webAclId: chatWebAcl.attrArn,
       comment: `Chimera Chat Gateway CDN - ${props.envName}`,
       enabled: true,
       priceClass: isProd
@@ -688,12 +591,6 @@ export class ChatStack extends cdk.Stack {
       value: `https://${this.distribution.distributionDomainName}`,
       exportName: `${this.stackName}-CloudFrontUrl`,
       description: 'CloudFront HTTPS endpoint URL',
-    });
-
-    new cdk.CfnOutput(this, 'ChatWebAclArn', {
-      value: chatWebAcl.attrArn,
-      exportName: `${this.stackName}-ChatWebAclArn`,
-      description: 'WAF WebACL ARN for chat gateway CloudFront distribution',
     });
   }
 }
