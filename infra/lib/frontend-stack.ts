@@ -3,8 +3,6 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
-import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
-import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import { Construct } from 'constructs';
 import { ChimeraBucket } from '../constructs/chimera-bucket';
@@ -80,109 +78,15 @@ export class FrontendStack extends cdk.Stack {
     });
 
     // ======================================================================
-    // WAF WebACL for CloudFront
-    // Scope: CLOUDFRONT — AWS provisions this in us-east-1 automatically.
-    // Rules:
-    //   1. AWS Managed Common Rules — blocks common exploits (XSS, SQLi, etc.)
-    //   2. AWS Managed Known Bad Inputs — blocks known malicious payloads
-    //   3. Rate limiting — 2000 requests per 5-min window per IP
-    // ======================================================================
-    const frontendWebAcl = new wafv2.CfnWebACL(this, 'FrontendWebAcl', {
-      name: `chimera-frontend-waf-${props.envName}`,
-      scope: 'CLOUDFRONT',
-      defaultAction: { allow: {} },
-      visibilityConfig: {
-        cloudWatchMetricsEnabled: true,
-        metricName: `chimera-frontend-waf-${props.envName}`,
-        sampledRequestsEnabled: true,
-      },
-      rules: [
-        {
-          name: 'AWSManagedRulesCommonRuleSet',
-          priority: 1,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesCommonRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `frontend-common-rules-${props.envName}`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        {
-          name: 'AWSManagedRulesKnownBadInputsRuleSet',
-          priority: 2,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesKnownBadInputsRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `frontend-bad-inputs-${props.envName}`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        {
-          name: 'RateLimitPerIP',
-          priority: 3,
-          action: { block: {} },
-          statement: {
-            rateBasedStatement: {
-              limit: 2000,
-              aggregateKeyType: 'IP',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `frontend-rate-limit-${props.envName}`,
-            sampledRequestsEnabled: true,
-          },
-        },
-      ],
-    });
-
-    // CloudWatch metric for blocked requests
-    const frontendWafBlockedMetric = new cloudwatch.Metric({
-      namespace: 'AWS/WAFV2',
-      metricName: 'BlockedRequests',
-      dimensionsMap: {
-        WebACL: `chimera-frontend-waf-${props.envName}`,
-        Region: 'us-east-1',
-        Rule: 'ALL',
-      },
-      statistic: 'Sum',
-      period: cdk.Duration.minutes(5),
-    });
-
-    new cloudwatch.Alarm(this, 'FrontendWafBlockedAlarm', {
-      alarmName: `chimera-frontend-waf-blocked-${props.envName}`,
-      alarmDescription: 'High number of WAF-blocked requests on frontend CloudFront distribution',
-      metric: frontendWafBlockedMetric,
-      threshold: 1000,
-      evaluationPeriods: 3,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
-
-    // ======================================================================
     // CloudFront Distribution
     // Default behavior: S3 via OAC (HTML with revalidation)
     // /assets/*: S3 via OAC (Vite-hashed assets, long cache)
     // SPA fallback: 403/404 -> index.html for client-side routing
     // OAC is required for SSE-KMS encrypted buckets (OAI does not support SSE-KMS).
-    // WAF WebACL attached for edge protection.
     // ======================================================================
     const s3Origin = origins.S3BucketOrigin.withOriginAccessControl(this.bucket);
 
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
-      webAclId: frontendWebAcl.attrArn,
       comment: `Chimera Frontend CDN - ${props.envName}`,
       enabled: true,
       priceClass: isProd
@@ -314,12 +218,6 @@ export class FrontendStack extends cdk.Stack {
       value: `https://${this.distribution.distributionDomainName}`,
       exportName: `${this.stackName}-FrontendUrl`,
       description: 'Frontend HTTPS URL',
-    });
-
-    new cdk.CfnOutput(this, 'FrontendWebAclArn', {
-      value: frontendWebAcl.attrArn,
-      exportName: `${this.stackName}-FrontendWebAclArn`,
-      description: 'WAF WebACL ARN for frontend CloudFront distribution',
     });
   }
 }
