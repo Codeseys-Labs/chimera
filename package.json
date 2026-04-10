@@ -38,7 +38,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "pretypecheck": "cd packages/shared && bunx tsc --build --force",
-    "typecheck": "tsc --build",
+    "typecheck": "tsc --build --force",
     "clean": "bun run clean:packages && bun run clean:infra",
     "clean:packages": "rm -rf packages/*/dist packages/*/node_modules",
     "clean:infra": "rm -rf infra/dist infra/cdk.out",
