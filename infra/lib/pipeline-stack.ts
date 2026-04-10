@@ -353,6 +353,15 @@ export class PipelineStack extends cdk.Stack {
       })
     );
 
+    // Grant CodeCommit read so the Deploy project can be triggered standalone
+    // (e.g., by `chimera destroy` which overrides source to CODECOMMIT).
+    deployProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['codecommit:GitPull'],
+        resources: [`arn:aws:codecommit:${this.region}:${this.account}:chimera`],
+      })
+    );
+
     // ======================================================================
     // CodeBuild Project for Frontend Deploy Stage
     // Uploads packages/web/dist/ to the S3 frontend bucket after CDK deploy.
