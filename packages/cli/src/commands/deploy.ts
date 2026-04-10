@@ -530,6 +530,14 @@ Examples:
         sourcePath = await resolveSourcePath(sourceLocation);
         if (!options.json) spinner.succeed(color.green(`Source ready: ${sourcePath}`));
 
+        // Install dependencies if deploying from a non-local source (git/github/auto).
+        // Local source already has node_modules from the developer's workspace.
+        if (options.source !== 'local') {
+          if (!options.json) spinner.start('Installing dependencies...');
+          await Bun.$`bun install --frozen-lockfile`.cwd(sourcePath).quiet();
+          if (!options.json) spinner.succeed(color.green('Dependencies installed'));
+        }
+
         let sourceCommitSha: string | undefined;
         try {
           sourceCommitSha = await Bun.$`git rev-parse HEAD`.cwd(sourcePath!).quiet().text();
