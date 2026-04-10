@@ -1,0 +1,48 @@
+# Destroy buildspec — invoked by `chimera destroy` via standalone CodeBuild StartBuild.
+#
+# Runs `cdk destroy` on all application stacks EXCEPT the Pipeline stack itself
+# (which is destroyed separately by the CLI after this build completes).
+#
+# The Pipeline stack's DeployProject already has sts:AssumeRole on cdk-* roles,
+# which grants full CDK destroy permissions.
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - curl -fsSL https://bun.sh/install | bash
+      - export PATH="$HOME/.bun/bin:$PATH"
+
+  pre_build:
+    commands:
+      - export PATH="$HOME/.bun/bin:$PATH"
+      - bun install --frozen-lockfile
+
+  build:
+    commands:
+      - export PATH="$HOME/.bun/bin:$PATH"
+      # Destroy all stacks EXCEPT the Pipeline stack (which owns this CodeBuild project).
+      # CDK resolves the dependency graph and destroys in the correct order.
+      # --exclusively prevents CDK from pulling in dependency stacks.
+      - |
+        cd infra && npx cdk destroy \
+          "Chimera-${ENV_NAME:-dev}-Discovery" \
+          "Chimera-${ENV_NAME:-dev}-Frontend" \
+          "Chimera-${ENV_NAME:-dev}-GatewayRegistration" \
+          "Chimera-${ENV_NAME:-dev}-Evolution" \
+          "Chimera-${ENV_NAME:-dev}-SkillPipeline" \
+          "Chimera-${ENV_NAME:-dev}-Email" \
+          "Chimera-${ENV_NAME:-dev}-TenantOnboarding" \
+          "Chimera-${ENV_NAME:-dev}-Chat" \
+          "Chimera-${ENV_NAME:-dev}-Orchestration" \
+          "Chimera-${ENV_NAME:-dev}-Observability" \
+          "Chimera-${ENV_NAME:-dev}-Api" \
+          "Chimera-${ENV_NAME:-dev}-Security" \
+          "Chimera-${ENV_NAME:-dev}-Data" \
+          "Chimera-${ENV_NAME:-dev}-Network" \
+          --force --exclusively \
+          --context environment="${ENV_NAME:-dev}" \
+          --context repositoryName="chimera" \
+        && cd ..

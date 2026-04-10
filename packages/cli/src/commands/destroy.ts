@@ -1,7 +1,14 @@
 /**
  * Deployment lifecycle commands - destroy, cleanup, and redeploy
  *
- * CDK runs via `npx cdk` (spawned by Bun.$) to preserve Node.js module resolution.
+ * Destroy uses a 3-phase approach:
+ * 1. Trigger CodeBuild (the Deploy project) to run `cdk destroy` on all application stacks
+ * 2. Delete the Pipeline CFN stack (bootstrap infra: CodePipeline, CodeBuild, ECR)
+ * 3. Delete the CodeCommit repository (SDK-created, not CFN-managed)
+ *
+ * This way the CLI only manages what it creates (the bootstrap), and the pipeline's
+ * CodeBuild project handles destroying everything it deployed — including any stacks
+ * the agent may have added via self-evolution.
  */
 
 import { Command } from 'commander';
@@ -16,6 +23,11 @@ import {
   DescribeStackEventsCommand,
   StackStatus,
 } from '@aws-sdk/client-cloudformation';
+import {
+  CodeBuildClient,
+  StartBuildCommand,
+  BatchGetBuildsCommand,
+} from '@aws-sdk/client-codebuild';
 import { CodeCommitClient, DeleteRepositoryCommand } from '@aws-sdk/client-codecommit';
 import {
   DynamoDBClient,
@@ -30,6 +42,8 @@ import * as os from 'os';
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 import { findProjectRoot } from '../utils/project.js';
+
+// ─── Utility functions ───────────────────────────────────────────────────────
 
 /**
  * Clean up failed CloudFormation stacks in ROLLBACK_COMPLETE state
@@ -55,8 +69,6 @@ async function cleanupFailedStacks(client: CloudFormationClient, envName: string
 
 /**
  * Export DynamoDB tables from all Chimera stacks for the given environment.
- * Archives are written to ~/.chimera/archives/<env>-<timestamp>/.
- * Returns the archive directory path.
  */
 async function exportDataArchive(options: {
   env: string;
@@ -77,7 +89,6 @@ async function exportDataArchive(options: {
         StackStatus.CREATE_COMPLETE,
         StackStatus.UPDATE_COMPLETE,
         StackStatus.UPDATE_ROLLBACK_COMPLETE,
-        StackStatus.ROLLBACK_COMPLETE,
       ],
     })
   );
@@ -109,10 +120,7 @@ async function exportDataArchive(options: {
 
     do {
       const scanResp = await ddbClient.send(
-        new ScanCommand({
-          TableName: tableName,
-          ExclusiveStartKey: lastKey,
-        })
+        new ScanCommand({ TableName: tableName, ExclusiveStartKey: lastKey })
       );
       items.push(...(scanResp.Items || []));
       lastKey = scanResp.LastEvaluatedKey;
@@ -176,7 +184,6 @@ async function stackExists(client: CloudFormationClient, stackName: string): Pro
 
 /**
  * Wait for a CloudFormation stack to reach DELETE_COMPLETE.
- * Polls every 15 seconds, times out after 20 minutes.
  */
 async function waitForStackDelete(
   client: CloudFormationClient,
@@ -187,132 +194,35 @@ async function waitForStackDelete(
   while (Date.now() - start < timeoutMs) {
     await new Promise<void>((r) => setTimeout(r, 15_000));
     const exists = await stackExists(client, stackName);
-    if (!exists) return; // Stack gone or in DELETE_COMPLETE (filtered out by ListStacks)
+    if (!exists) return;
   }
   throw new Error(`Timed out waiting for ${stackName} to delete after ${timeoutMs / 60000}m`);
 }
 
 /**
- * Poll CloudFormation stack events every 10 seconds and print new entries.
- * Stops when stopSignal.done is set (caller sets it after CDK process exits).
- * Uses a seen-set to avoid re-printing events across poll cycles.
- */
-async function monitorStackEvents(
-  client: CloudFormationClient,
-  stackName: string,
-  stopSignal: { done: boolean }
-): Promise<void> {
-  const seen = new Set<string>();
-
-  while (!stopSignal.done) {
-    try {
-      const resp = await client.send(new DescribeStackEventsCommand({ StackName: stackName }));
-      const events = resp.StackEvents ?? [];
-
-      // Emit only new events, oldest first
-      for (const event of [...events].reverse()) {
-        if (event.EventId && !seen.has(event.EventId)) {
-          seen.add(event.EventId);
-          const ts = event.Timestamp?.toISOString().replace('T', ' ').slice(0, 19) ?? '';
-          const status = event.ResourceStatus ?? '';
-          const reason = event.ResourceStatusReason ? ` — ${event.ResourceStatusReason}` : '';
-          const statusStr = status.includes('FAILED')
-            ? color.red(status)
-            : status.includes('COMPLETE')
-              ? color.green(status)
-              : color.gray(status);
-          console.log(`  ${color.gray(ts)} ${event.LogicalResourceId} ${statusStr}${reason}`);
-        }
-      }
-    } catch {
-      // Stack may be fully deleted mid-poll — exit gracefully
-      break;
-    }
-
-    await new Promise<void>((r) => setTimeout(r, 10_000));
-  }
-}
-
-/**
  * Delete the CodeCommit repository created by chimera deploy.
- * The repo is not CDK-managed (created via SDK in deploy.ts), so CDK destroy
- * leaves it orphaned — we must delete it explicitly here.
  */
 async function deleteCodeCommitRepo(
   client: CodeCommitClient,
   repoName: string,
   keepRepo: boolean
 ): Promise<void> {
-  if (keepRepo) {
-    return;
-  }
+  if (keepRepo) return;
   try {
     await client.send(new DeleteRepositoryCommand({ repositoryName: repoName }));
   } catch (error: any) {
-    if (error.name !== 'RepositoryDoesNotExistException') {
-      throw error;
-    }
-    // Repo already gone — nothing to do
+    if (error.name !== 'RepositoryDoesNotExistException') throw error;
   }
 }
 
 /**
- * Reverse dependency order for stack teardown.
- *
- * Split into two phases:
- * 1. APPLICATION stacks — the 12 stacks deployed by CodePipeline
- * 2. BOOTSTRAP stacks — Pipeline + base infra that CodePipeline itself runs on
- *
- * Within each phase, stacks are ordered so that dependents are deleted before
- * the stacks they import from. The key cross-stack dependencies:
- *   Discovery → Frontend (imports CloudFront domain)
- *   Chat → Network, Data, Security, Pipeline (imports VPC, tables, etc.)
- *   Api → Security (imports Cognito)
- *   Pipeline → Network, Data (imports VPC, artifact bucket)
- *   All → Network (imports VPC)
- */
-const APPLICATION_STACKS = [
-  // Tier 1: leaf stacks that import from others
-  'Discovery', // imports Frontend CloudFront domain — must be before Frontend
-  'Frontend', // imports nothing from other app stacks
-  'GatewayRegistration',
-  // Tier 2: depend on Data/Security only
-  'Evolution',
-  'SkillPipeline',
-  'Email',
-  'TenantOnboarding',
-  // Tier 3: depend on Network/Data
-  'Chat',
-  'Orchestration',
-  // Tier 4: depend on Security
-  'Observability',
-  'Api',
-];
-
-const BOOTSTRAP_STACKS = [
-  'Pipeline', // depends on Network + Data
-  'Security', // depends on nothing (or Network)
-  'Data', // depends on Network
-  'Network', // base — last to go
-];
-
-const STACK_DESTROY_ORDER = [...APPLICATION_STACKS, ...BOOTSTRAP_STACKS];
-
-/**
- * Stacks that contain S3 buckets requiring pre-delete emptying.
- * CloudFormation cannot delete non-empty S3 buckets.
- */
-const S3_STACK_SUFFIXES = new Set(['Frontend', 'Email', 'Pipeline', 'Data']);
-
-/**
  * Empty all objects (and versions) from an S3 bucket.
- * ListObjectVersions covers both versioned and non-versioned buckets.
  */
 async function emptyS3Bucket(bucketName: string, s3Client: S3Client): Promise<void> {
   let keyMarker: string | undefined;
   let versionIdMarker: string | undefined;
-
   let isTruncated = true;
+
   try {
     while (isTruncated) {
       const resp = await s3Client.send(
@@ -342,15 +252,13 @@ async function emptyS3Bucket(bucketName: string, s3Client: S3Client): Promise<vo
       versionIdMarker = resp.NextVersionIdMarker;
     }
   } catch (err: any) {
-    // Bucket may already be deleted or not exist — skip silently
     if (err.name === 'NoSuchBucket' || err.Code === 'NoSuchBucket') return;
     throw err;
   }
 }
 
 /**
- * Enumerate S3 buckets in a CFN stack via DescribeStackResources and empty each.
- * No-op if the stack does not exist (already deleted or never deployed).
+ * Enumerate S3 buckets in a CFN stack and empty each.
  */
 async function emptyStackS3Buckets(
   stackName: string,
@@ -362,7 +270,7 @@ async function emptyStackS3Buckets(
     const resp = await cfClient.send(new DescribeStackResourcesCommand({ StackName: stackName }));
     resources = resp.StackResources ?? [];
   } catch {
-    return; // Stack doesn't exist — nothing to empty
+    return;
   }
 
   const buckets = resources
@@ -375,8 +283,7 @@ async function emptyStackS3Buckets(
 }
 
 /**
- * Disable DynamoDB deletion protection on all tables in the Data stack.
- * CDK stacks cannot delete DDB tables that have deletion protection enabled.
+ * Disable DynamoDB deletion protection on all tables in a stack.
  */
 async function disableDdbDeletionProtection(
   stackName: string,
@@ -388,7 +295,7 @@ async function disableDdbDeletionProtection(
     const resp = await cfClient.send(new DescribeStackResourcesCommand({ StackName: stackName }));
     resources = resp.StackResources ?? [];
   } catch {
-    return; // Stack doesn't exist — nothing to do
+    return;
   }
 
   const tables = resources
@@ -398,21 +305,77 @@ async function disableDdbDeletionProtection(
   for (const table of tables) {
     try {
       await ddbClient.send(
-        new UpdateTableCommand({
-          TableName: table,
-          DeletionProtectionEnabled: false,
-        })
+        new UpdateTableCommand({ TableName: table, DeletionProtectionEnabled: false })
       );
     } catch {
-      // Table may not exist or already have protection disabled — skip
+      // Table may not exist or already unprotected
     }
   }
 }
 
+// ─── Phase 1: Trigger CodeBuild to run cdk destroy ──────────────────────────
+
 /**
- * Reseed DynamoDB tables from a local archive produced by exportDataArchive.
- * Items are in DynamoDB wire format (AttributeValue) so they can be used
- * directly in PutRequest.Item without further marshalling.
+ * Start a standalone CodeBuild build on the Deploy project that runs
+ * `cdk destroy --all` via buildspec-destroy.yml. This leverages the existing
+ * IAM permissions on the Deploy CodeBuild project (sts:AssumeRole on cdk-* roles).
+ *
+ * Returns the build ID for status polling.
+ */
+async function startDestroyBuild(
+  cbClient: CodeBuildClient,
+  projectName: string,
+  envName: string
+): Promise<string> {
+  const resp = await cbClient.send(
+    new StartBuildCommand({
+      projectName,
+      buildspecOverride: 'buildspec-destroy.yml',
+      environmentVariablesOverride: [{ name: 'ENV_NAME', value: envName, type: 'PLAINTEXT' }],
+    })
+  );
+
+  const buildId = resp.build?.id;
+  if (!buildId) throw new Error('CodeBuild StartBuild returned no build ID');
+  return buildId;
+}
+
+/**
+ * Poll a CodeBuild build until it completes. Returns true if succeeded, false if failed.
+ */
+async function waitForBuild(
+  cbClient: CodeBuildClient,
+  buildId: string,
+  onStatus?: (phase: string, status: string) => void,
+  timeoutMs = 60 * 60 * 1000 // 60 min — CDK destroy can be slow
+): Promise<boolean> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    await new Promise<void>((r) => setTimeout(r, 15_000));
+
+    const resp = await cbClient.send(new BatchGetBuildsCommand({ ids: [buildId] }));
+    const build = resp.builds?.[0];
+    if (!build) continue;
+
+    const phase = build.currentPhase ?? 'UNKNOWN';
+    const status = build.buildStatus ?? 'IN_PROGRESS';
+
+    if (onStatus) onStatus(phase, status);
+
+    if (status === 'SUCCEEDED') return true;
+    if (['FAILED', 'FAULT', 'TIMED_OUT', 'STOPPED'].includes(status)) {
+      return false;
+    }
+  }
+
+  throw new Error(`Timed out waiting for CodeBuild build after ${timeoutMs / 60000}m`);
+}
+
+// ─── Reseed ─────────────────────────────────────────────────────────────────
+
+/**
+ * Reseed DynamoDB tables from a local archive.
  */
 export async function reseedFromArchive(archivePath: string, region: string): Promise<void> {
   const manifestPath = path.join(archivePath, 'manifest.json');
@@ -445,7 +408,7 @@ export async function reseedFromArchive(archivePath: string, region: string): Pr
         if (!unprocessed || unprocessed.length === 0) break;
         if (attempt === MAX_RETRIES) {
           throw new Error(
-            `BatchWriteItem failed after ${MAX_RETRIES} retries: ${unprocessed.length} items unprocessed in table "${tableName}"`
+            `BatchWriteItem failed after ${MAX_RETRIES} retries: ${unprocessed.length} items unprocessed`
           );
         }
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
@@ -456,30 +419,39 @@ export async function reseedFromArchive(archivePath: string, region: string): Pr
   }
 }
 
+// ─── Command registration ───────────────────────────────────────────────────
+
 export function registerDestroyCommands(program: Command): void {
-  // chimera destroy — Tear down all CloudFormation stacks
+  // ─── chimera destroy ──────────────────────────────────────────────────────
   program
     .command('destroy')
-    .description('Tear down all Chimera stacks from the AWS account')
+    .description('Tear down all Chimera infrastructure from the AWS account')
     .option('--region <region>', 'AWS region')
     .option('--env <environment>', 'Environment name')
     .option('--force', 'Skip confirmation prompt')
-    .option('--retain-data', 'Export DynamoDB table data to a local archive before destroying')
-    .option(
-      '--export-path <path>',
-      'Export destination (default: ~/.chimera/archives/<env>-<timestamp>)'
-    )
-    .option('--keep-repo', 'Preserve the CodeCommit repository (skip deletion)')
-    .option('--monitor', 'Stream CloudFormation stack events in real-time during destruction')
+    .option('--retain-data', 'Export DynamoDB table data before destroying')
+    .option('--export-path <path>', 'Export destination for --retain-data')
+    .option('--keep-repo', 'Preserve the CodeCommit repository')
+    .option('--monitor', 'Stream CodeBuild log events in real-time')
     .option('--json', 'Output result as JSON')
     .addHelpText(
       'after',
       `
+Destroy lifecycle:
+  Phase 1: Trigger CodeBuild to run \`cdk destroy\` on all application stacks
+           (the pipeline's Deploy project already has CDK permissions)
+  Phase 2: Delete the Pipeline stack (CodePipeline, CodeBuild, ECR, artifacts)
+  Phase 3: Delete the CodeCommit repository
+
+The CLI only manages the bootstrap resources it created. The CodeBuild project
+handles destroying everything the pipeline deployed — including any stacks the
+agent may have self-evolved.
+
 Examples:
   $ chimera destroy
-  $ chimera destroy --force --env prod
+  $ chimera destroy --force
   $ chimera destroy --retain-data --export-path ./backup
-  $ chimera destroy --json`
+  $ chimera destroy --force --keep-repo`
     )
     .action(async (options) => {
       const spinner = ora('Starting Chimera destruction').start();
@@ -512,6 +484,7 @@ Examples:
           return;
         }
 
+        // Confirmation prompt
         if (!options.force && !options.json) {
           spinner.stop();
           const inquirer = await import('inquirer');
@@ -525,117 +498,176 @@ Examples:
               default: false,
             },
           ]);
-
           if (!answers.confirmed) {
             console.log(color.gray('Destruction cancelled'));
             return;
           }
-
           spinner.start('Destroying infrastructure');
         }
 
+        const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
+        const repoName = wsConfig?.workspace?.repository ?? 'chimera';
+        const cfClient = new CloudFormationClient({ region });
+        const cbClient = new CodeBuildClient({ region });
+        const ddbClient = new DynamoDBClient({ region });
+        const s3Client = new S3Client({ region });
+
+        // ── Optional: export data archive ──────────────────────────────────
         let archivePath: string | undefined;
         if (options.retainData) {
           if (!options.json) spinner.text = 'Exporting data archive...';
           archivePath = await exportDataArchive({ env, region, exportPath: options.exportPath });
           if (!options.json) {
             spinner.succeed(color.green(`Data archived to ${archivePath}`));
-            console.log(
-              color.gray('  Archive path saved to ~/.chimera/last-archive.json for reseeding')
-            );
             spinner.start('Destroying infrastructure');
           }
         }
 
-        const repoRoot = findProjectRoot();
-        const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
-        const repoName = wsConfig?.workspace?.repository ?? 'chimera';
-        const cfClient = new CloudFormationClient({ region });
-        const ddbClient = new DynamoDBClient({ region });
-        const s3Client = new S3Client({ region });
+        // ── Pre-destroy: disable DDB protection on ALL Chimera stacks ──────
+        // This must happen before CDK destroy runs, because CDK destroy will
+        // fail on tables with deletion protection enabled.
+        if (!options.json) spinner.text = 'Disabling DynamoDB deletion protection...';
+        const listResp = await cfClient.send(
+          new ListStacksCommand({
+            StackStatusFilter: [
+              StackStatus.CREATE_COMPLETE,
+              StackStatus.UPDATE_COMPLETE,
+              StackStatus.UPDATE_ROLLBACK_COMPLETE,
+            ],
+          })
+        );
+        const chimeraStacks = (listResp.StackSummaries ?? [])
+          .filter((s) => s.StackName?.startsWith(`Chimera-${safeEnv}-`))
+          .map((s) => s.StackName!);
 
-        if (options.monitor && !options.json) {
-          spinner.stop();
-          console.log(color.bold('\nMonitoring CloudFormation events (Ctrl-C to abort):\n'));
-        } else if (!options.json) {
-          console.log(
-            color.gray('  Tip: use --monitor to stream CloudFormation events in real-time')
-          );
-        }
-
-        for (const stackSuffix of STACK_DESTROY_ORDER) {
-          const stackName = `Chimera-${safeEnv}-${stackSuffix}`;
-
-          // Check if stack exists before trying to delete
-          const exists = await stackExists(cfClient, stackName);
-          if (!exists) {
-            if (!options.json && options.monitor)
-              console.log(color.gray(`  ${stackName}: already deleted, skipping`));
-            continue;
-          }
-
-          // Pre-delete: disable DDB deletion protection and empty S3 buckets
-          // for ALL stacks (any stack may contain protected tables or non-empty buckets)
-          if (!options.json && !options.monitor)
-            spinner.text = `Pre-delete cleanup for ${stackName}...`;
-          if (!options.json && options.monitor)
-            console.log(
-              color.gray(`  Pre-delete cleanup: disabling DDB protection, emptying S3 buckets...`)
-            );
+        for (const stackName of chimeraStacks) {
           await disableDdbDeletionProtection(stackName, cfClient, ddbClient);
           await emptyStackS3Buckets(stackName, cfClient, s3Client);
-
-          if (!options.json && !options.monitor) spinner.text = `Destroying ${stackName}...`;
-          if (!options.json && options.monitor)
-            console.log(color.bold(`\n→ Destroying ${stackName}`));
-
-          // Delete via CloudFormation API directly (no CDK subprocess needed)
-          try {
-            await cfClient.send(new DeleteStackCommand({ StackName: stackName }));
-          } catch (err: any) {
-            if (!options.json && options.monitor)
-              console.log(
-                color.red(`  Failed to initiate delete for ${stackName}: ${err.message}`)
-              );
-            continue;
-          }
-
-          // Wait for deletion to complete
-          if (options.monitor && !options.json) {
-            const stopSignal = { done: false };
-            const monitorPromise = monitorStackEvents(cfClient, stackName, stopSignal);
-            await waitForStackDelete(cfClient, stackName);
-            stopSignal.done = true;
-            await monitorPromise;
-          } else {
-            await waitForStackDelete(cfClient, stackName);
-          }
-
-          if (!options.json && !options.monitor) spinner.text = `${stackName} deleted`;
-          if (!options.json && options.monitor)
-            console.log(color.green(`  ✓ ${stackName} deleted`));
         }
 
-        if (!options.json && !options.monitor)
-          spinner.succeed(color.green('All CloudFormation stacks destroyed'));
-        if (!options.json && options.monitor)
-          console.log(color.bold('\n✓ All CloudFormation stacks destroyed'));
+        // ── Phase 1: Trigger CodeBuild to run cdk destroy ──────────────────
+        const deployProjectName = `chimera-deploy-${safeEnv}`;
+        const pipelineStackName = `Chimera-${safeEnv}-Pipeline`;
 
-        // Delete CodeCommit repo after CDK stacks are gone (Pipeline must be
-        // destroyed first so the repo is no longer referenced by any trigger).
-        if (!options.json) spinner.start(`Deleting CodeCommit repository "${repoName}"...`);
+        const pipelineExists = await stackExists(cfClient, pipelineStackName);
+        if (!pipelineExists) {
+          if (!options.json) {
+            spinner.warn(color.yellow('Pipeline stack not found — nothing to destroy'));
+          }
+          // Still try to clean up CodeCommit
+          const ccClient = new CodeCommitClient({ region });
+          await deleteCodeCommitRepo(ccClient, repoName, !!options.keepRepo);
+          const cur = loadWorkspaceConfig();
+          saveWorkspaceConfig({ ...cur, deployment: undefined, endpoints: undefined });
+          return;
+        }
+
+        if (!options.json) {
+          spinner.succeed(color.green('Pre-destroy cleanup complete'));
+          console.log(color.bold('\nPhase 1: Triggering CodeBuild to destroy application stacks'));
+          spinner.start(`Starting CodeBuild project: ${deployProjectName}...`);
+        }
+
+        const buildId = await startDestroyBuild(cbClient, deployProjectName, safeEnv);
+        if (!options.json) {
+          spinner.succeed(color.green(`CodeBuild started: ${buildId}`));
+          spinner.start('Waiting for CDK destroy to complete (this may take 15-30 minutes)...');
+        }
+
+        const buildSucceeded = await waitForBuild(cbClient, buildId, (phase, status) => {
+          if (!options.json && options.monitor) {
+            console.log(color.gray(`  [CodeBuild] Phase: ${phase}  Status: ${status}`));
+          }
+        });
+
+        if (!buildSucceeded) {
+          if (!options.json) {
+            spinner.fail(color.red('CodeBuild cdk destroy failed'));
+            console.log(
+              color.yellow(
+                '\nThe CodeBuild destroy build failed. Check CloudWatch logs for details:'
+              )
+            );
+            console.log(
+              color.gray(
+                `  aws logs tail /aws/codebuild/${deployProjectName} --since 30m --region ${region}`
+              )
+            );
+            console.log(color.yellow('\nFalling back to direct CloudFormation stack deletion...'));
+          }
+          // Fallback: try direct DeleteStack on remaining app stacks
+          // This handles the case where CDK destroy fails (e.g., circular deps)
+          for (const stackName of chimeraStacks) {
+            if (stackName === pipelineStackName) continue; // Skip Pipeline — deleted in Phase 2
+            const exists = await stackExists(cfClient, stackName);
+            if (!exists) continue;
+            try {
+              await cfClient.send(new DeleteStackCommand({ StackName: stackName }));
+              await waitForStackDelete(cfClient, stackName);
+            } catch (err: any) {
+              if (!options.json) {
+                console.log(color.red(`  Failed to delete ${stackName}: ${err.message}`));
+              }
+            }
+          }
+        } else {
+          if (!options.json) {
+            spinner.succeed(color.green('Phase 1 complete: all application stacks destroyed'));
+          }
+        }
+
+        // ── Phase 2: Delete the Pipeline stack ─────────────────────────────
+        if (!options.json) {
+          console.log(color.bold('\nPhase 2: Deleting Pipeline bootstrap stack'));
+          spinner.start(`Destroying ${pipelineStackName}...`);
+        }
+
+        // Empty Pipeline stack's S3 buckets (artifact bucket)
+        await emptyStackS3Buckets(pipelineStackName, cfClient, s3Client);
+
+        const pipelineStillExists = await stackExists(cfClient, pipelineStackName);
+        if (pipelineStillExists) {
+          await cfClient.send(new DeleteStackCommand({ StackName: pipelineStackName }));
+
+          if (options.monitor && !options.json) {
+            spinner.stop();
+            // Simple poll-based monitoring
+            const start = Date.now();
+            while (Date.now() - start < 20 * 60 * 1000) {
+              await new Promise<void>((r) => setTimeout(r, 15_000));
+              const exists = await stackExists(cfClient, pipelineStackName);
+              if (!exists) break;
+              console.log(color.gray(`  ${pipelineStackName}: DELETE_IN_PROGRESS...`));
+            }
+          } else {
+            await waitForStackDelete(cfClient, pipelineStackName);
+          }
+        }
+
+        if (!options.json) {
+          spinner.succeed(color.green('Phase 2 complete: Pipeline stack destroyed'));
+        }
+
+        // ── Phase 3: Delete CodeCommit repository ──────────────────────────
+        if (!options.json) {
+          console.log(color.bold('\nPhase 3: Deleting CodeCommit repository'));
+          spinner.start(`Deleting repository "${repoName}"...`);
+        }
+
         const ccClient = new CodeCommitClient({ region });
         await deleteCodeCommitRepo(ccClient, repoName, !!options.keepRepo);
+
         if (!options.json) {
           if (options.keepRepo) {
-            spinner.info(color.gray(`CodeCommit repository "${repoName}" preserved (--keep-repo)`));
+            spinner.info(color.gray(`Repository "${repoName}" preserved (--keep-repo)`));
           } else {
-            spinner.succeed(color.green(`CodeCommit repository "${repoName}" deleted`));
+            spinner.succeed(color.green(`Repository "${repoName}" deleted`));
           }
         }
 
+        // ── Cleanup: update chimera.toml ───────────────────────────────────
         const cur = loadWorkspaceConfig();
-        saveWorkspaceConfig({ ...cur, deployment: undefined });
+        saveWorkspaceConfig({ ...cur, deployment: undefined, endpoints: undefined });
 
         if (options.json) {
           console.log(
@@ -646,6 +678,7 @@ Examples:
           );
         } else {
           console.log(color.green('\n✓ Infrastructure destroyed'));
+          console.log(color.gray('  All Chimera resources have been removed from the account.'));
         }
       } catch (error: any) {
         if (options.json) {
@@ -660,7 +693,7 @@ Examples:
       }
     });
 
-  // chimera cleanup — Delete stacks stuck in ROLLBACK_COMPLETE state
+  // ─── chimera cleanup ────────────────────────────────────────────────────────
   program
     .command('cleanup')
     .description('Delete Chimera stacks stuck in ROLLBACK_COMPLETE state')
@@ -720,7 +753,7 @@ Examples:
       }
     });
 
-  // chimera redeploy — Clean up failed stacks then retry CDK deployment
+  // ─── chimera redeploy ───────────────────────────────────────────────────────
   program
     .command('redeploy')
     .description('Clean up failed stacks then retry CDK deployment')
@@ -770,7 +803,6 @@ Examples:
         const repoRoot = findProjectRoot();
         const safeEnv = env.replace(/[^a-zA-Z0-9-]/g, '');
 
-        // npx spawns Node.js — CDK module resolution works correctly
         await Bun.$`npx cdk deploy --all --require-approval never --context environment=${safeEnv} --context repositoryName=chimera`.cwd(
           `${repoRoot}/infra`
         );
