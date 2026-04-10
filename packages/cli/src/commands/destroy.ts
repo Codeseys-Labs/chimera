@@ -327,10 +327,16 @@ async function startDestroyBuild(
   projectName: string,
   envName: string
 ): Promise<string> {
+  // The Deploy project is a PipelineProject — it can't be started standalone
+  // without overriding the artifact type. We override to NO_ARTIFACTS since
+  // the destroy build produces no output artifacts.
   const resp = await cbClient.send(
     new StartBuildCommand({
       projectName,
       buildspecOverride: 'buildspec-destroy.yml',
+      sourceTypeOverride: 'CODECOMMIT',
+      sourceLocationOverride: `https://git-codecommit.${process.env.AWS_REGION || 'us-west-2'}.amazonaws.com/v1/repos/chimera`,
+      artifactsOverride: { type: 'NO_ARTIFACTS' },
       environmentVariablesOverride: [{ name: 'ENV_NAME', value: envName, type: 'PLAINTEXT' }],
     })
   );
