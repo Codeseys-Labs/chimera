@@ -32,12 +32,14 @@ phases:
           aws dynamodb update-table --table-name "$table" --no-deletion-protection-enabled --region "${AWS_DEFAULT_REGION:-us-west-2}" 2>/dev/null || true
         done
       - |
-        echo "Emptying S3 buckets..."
-        for stack in $(aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?starts_with(StackName, 'Chimera-${ENV_NAME:-dev}-')].StackName" --output text --region "${AWS_DEFAULT_REGION:-us-west-2}"); do
-          for bucket in $(aws cloudformation describe-stack-resources --stack-name "$stack" --query "StackResources[?ResourceType=='AWS::S3::Bucket'].PhysicalResourceId" --output text --region "${AWS_DEFAULT_REGION:-us-west-2}" 2>/dev/null); do
-            echo "  Emptying $bucket"
-            aws s3 rm "s3://$bucket" --recursive --region "${AWS_DEFAULT_REGION:-us-west-2}" 2>/dev/null || true
-          done
+        echo "Emptying ALL chimera S3 buckets (including access log buckets)..."
+        REGION="${AWS_DEFAULT_REGION:-us-west-2}"
+        for bucket in $(aws s3api list-buckets --query 'Buckets[?starts_with(Name, `chimera-`)].Name' --output text 2>/dev/null); do
+          echo "  Emptying $bucket"
+          aws s3 rm "s3://$bucket" --recursive --region "$REGION" 2>/dev/null || true
+          # Handle versioned objects
+          aws s3api delete-objects --bucket "$bucket" --delete "$(aws s3api list-object-versions --bucket "$bucket" --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json --region "$REGION" 2>/dev/null)" --region "$REGION" 2>/dev/null || true
+          aws s3api delete-objects --bucket "$bucket" --delete "$(aws s3api list-object-versions --bucket "$bucket" --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json --region "$REGION" 2>/dev/null)" --region "$REGION" 2>/dev/null || true
         done
       # Destroy all stacks EXCEPT the Pipeline stack (which owns this CodeBuild project).
       # CDK resolves the dependency graph and destroys in the correct order.
