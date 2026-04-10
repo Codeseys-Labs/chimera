@@ -299,7 +299,12 @@ async function disableDdbDeletionProtection(
   }
 
   const tables = resources
-    .filter((r) => r.ResourceType === 'AWS::DynamoDB::Table' && r.PhysicalResourceId)
+    .filter(
+      (r) =>
+        (r.ResourceType === 'AWS::DynamoDB::Table' ||
+          r.ResourceType === 'AWS::DynamoDB::GlobalTable') &&
+        r.PhysicalResourceId
+    )
     .map((r) => r.PhysicalResourceId!);
 
   for (const table of tables) {
