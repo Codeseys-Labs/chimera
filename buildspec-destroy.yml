@@ -23,6 +23,22 @@ phases:
   build:
     commands:
       - export PATH="$HOME/.bun/bin:$PATH"
+      # Pre-destroy: disable DynamoDB deletion protection and empty S3 buckets.
+      # CDK destroy will fail if tables have deletion protection or buckets are non-empty.
+      - |
+        echo "Disabling DynamoDB deletion protection..."
+        for table in $(aws dynamodb list-tables --query 'TableNames[?starts_with(@, `chimera-`)]' --output text --region "${AWS_DEFAULT_REGION:-us-west-2}"); do
+          echo "  Disabling protection on $table"
+          aws dynamodb update-table --table-name "$table" --no-deletion-protection-enabled --region "${AWS_DEFAULT_REGION:-us-west-2}" 2>/dev/null || true
+        done
+      - |
+        echo "Emptying S3 buckets..."
+        for stack in $(aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?starts_with(StackName, 'Chimera-${ENV_NAME:-dev}-')].StackName" --output text --region "${AWS_DEFAULT_REGION:-us-west-2}"); do
+          for bucket in $(aws cloudformation describe-stack-resources --stack-name "$stack" --query "StackResources[?ResourceType=='AWS::S3::Bucket'].PhysicalResourceId" --output text --region "${AWS_DEFAULT_REGION:-us-west-2}" 2>/dev/null); do
+            echo "  Emptying $bucket"
+            aws s3 rm "s3://$bucket" --recursive --region "${AWS_DEFAULT_REGION:-us-west-2}" 2>/dev/null || true
+          done
+        done
       # Destroy all stacks EXCEPT the Pipeline stack (which owns this CodeBuild project).
       # CDK resolves the dependency graph and destroys in the correct order.
       # --exclusively prevents CDK from pulling in dependency stacks.
