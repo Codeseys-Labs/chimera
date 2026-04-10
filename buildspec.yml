@@ -19,7 +19,9 @@ phases:
       - export PATH="$HOME/.bun/bin:$PATH"
       - bun run lint
       - bun run typecheck
-      - bun run test
+      # Run tests (excluding CLI package — its credential/auth tests conflict
+      # with CodeBuild's IAM role. CLI tests run in GitHub Actions CI instead).
+      - bun test ./packages/shared/ ./packages/core/ ./packages/sse-bridge/ ./packages/chat-gateway/ ./infra/
       - cd infra && npx cdk synth --all && cd ..
       # Resolve Cognito + API config from deployed stacks for the Vite build.
       # These are baked into the JS bundle at compile time via import.meta.env.
