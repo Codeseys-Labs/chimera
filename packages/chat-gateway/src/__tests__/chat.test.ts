@@ -20,8 +20,8 @@ async function* makeSource(parts: VercelDSPStreamPart[]): AsyncGenerator<VercelD
 
 // Lazy-load supertest and the Hono app to avoid module-load failure when
 // supertest is not installed (it is not yet in package.json).
-let request: any = null;
-let app: any = null;
+const request: any = null;
+const app: any = null;
 
 // Server import disabled — triggers Bun CJS/ESM compat errors with AWS SDK.
 // HTTP integration tests are skipped; StreamTee and unit tests work without the server.
