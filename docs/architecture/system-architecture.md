@@ -1,8 +1,8 @@
 ---
 title: 'Chimera System Architecture'
-version: 1.0.0
+version: 2.0.0
 status: canonical
-last_updated: 2026-03-30
+last_updated: 2026-04-10
 task: chimera-17ef
 ---
 
@@ -12,9 +12,9 @@ Comprehensive architecture diagrams for the AWS Chimera multi-tenant agent platf
 
 ---
 
-## 1. System Overview — 14 CDK Stacks
+## 1. System Overview — 15 CDK Stacks
 
-The full infrastructure is expressed as 14 CloudFormation stacks synthesized under the `Chimera-{env}` prefix. Arrows represent explicit `addDependency()` edges.
+The full infrastructure is expressed as 15 CloudFormation stacks synthesized under the `Chimera-{env}` prefix. Arrows represent explicit `addDependency()` edges.
 
 ```mermaid
 flowchart TD
@@ -25,12 +25,12 @@ flowchart TD
     API["Api<br/>REST API · WebSocket<br/>JWT authorizer"]
     PIPE["Pipeline<br/>CodePipeline · CodeCommit<br/>CodeBuild · ECR repos"]
     SKILL["SkillPipeline<br/>Step Functions<br/>7-stage scanner"]
-    CHAT["Chat<br/>ECS Fargate · ALB<br/>CloudFront OAC"]
+    CHAT["Chat<br/>Hono on ECS Fargate · ALB (300s idle)<br/>AI SDK v5 DSP · 5 platform adapters"]
     ORCH["Orchestration<br/>EventBridge · SQS FIFO<br/>A2A queues"]
     EVO["Evolution<br/>Step Functions engine<br/>DynamoDB state · S3 artifacts"]
     TENANT["TenantOnboarding<br/>Step Functions workflow<br/>Cedar policy store · Lambdas"]
     EMAIL["Email<br/>SES receipt rules · S3<br/>Parser / Sender Lambdas"]
-    FRONT["Frontend<br/>S3 + CloudFront OAC<br/>React SPA"]
+    FRONT["Frontend<br/>React 19 + Vite 6 + shadcn/ui<br/>S3 + CloudFront OAC"]
     GW["GatewayRegistration<br/>AgentCore Gateway targets<br/>MCP endpoint registry"]
 
     NET --> DATA
@@ -51,22 +51,23 @@ flowchart TD
 
 **Stack responsibilities at a glance:**
 
-| Stack               | Key Resources                                                              |
-| ------------------- | -------------------------------------------------------------------------- |
-| Network             | VPC, public/private subnets, NAT gateways, VPC endpoints, security groups  |
-| Data                | 6 DynamoDB tables, 3 S3 buckets, optional DAX cluster                      |
-| Security            | Cognito user pool + app client, WAF WebACL, KMS CMK                        |
-| Observability       | CloudWatch dashboards, SNS alarm topic, DDB throttle alarms                |
-| Api                 | REST API (v1 + WebSocket), JWT authorizer, webhook routes                  |
-| Pipeline            | CodePipeline, CodeCommit repo, CodeBuild project, ECR repositories         |
-| SkillPipeline       | Step Functions 7-stage skill security scanner                              |
-| Chat                | ECS Fargate cluster + service, ALB, CloudFront OAC distribution            |
-| Orchestration       | EventBridge bus, SQS FIFO task queues, agent-to-agent queues               |
-| Evolution           | Step Functions evolution engine, DynamoDB state table, S3 artifacts        |
-| TenantOnboarding    | Step Functions provisioning workflow, Cedar policy store, Lambda functions |
-| Email               | SES receipt rules, S3 inbound bucket, parser/sender Lambdas, SQS queue     |
-| Frontend            | S3 bucket + CloudFront OAC, React SPA hosting                              |
-| GatewayRegistration | AgentCore Gateway targets, MCP endpoint registry                           |
+| Stack               | Key Resources                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Network             | VPC, public/private subnets, NAT gateways, VPC endpoints, security groups                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Data                | 6 DynamoDB tables, 3 S3 buckets, optional DAX cluster                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Security            | Cognito user pool + app client, WAF WebACL, KMS CMK                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Observability       | CloudWatch dashboards, SNS alarm topic, DDB throttle alarms                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Api                 | REST API (v1 + WebSocket), JWT authorizer, webhook routes                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Pipeline            | CodePipeline, CodeCommit repo, CodeBuild project, ECR repositories                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| SkillPipeline       | Step Functions 7-stage skill security scanner                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Chat                | Hono server on ECS Fargate, ALB (idleTimeout: 300s), AI SDK v5 Vercel Data Stream Protocol, 5 platform adapters (Web, Slack, Discord, Teams, Telegram), token-level streaming via ConverseStreamCommand, session persistence in DynamoDB, reconnection endpoint `GET /chat/stream/:messageId`                                                                                                                                                                                      |
+| Orchestration       | EventBridge bus, SQS FIFO task queues, agent-to-agent queues                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Evolution           | Step Functions evolution engine, DynamoDB state table, S3 artifacts                                                                                                                                                                                                                                                                                                                                                                                                                |
+| TenantOnboarding    | Step Functions provisioning workflow, Cedar policy store, Lambda functions                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Email               | SES receipt rules, S3 inbound bucket, parser/sender Lambdas, SQS queue                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Frontend            | React 19 + Vite 6 + shadcn/ui (14 components), @ai-sdk/react v2 useChat with DefaultChatTransport, AWS Amplify v6 Cognito auth, 5 pages (Login, Dashboard, Chat, Admin, Settings), model selector in Settings (Converse + Mantle backends), S3 + CloudFront OAC hosting                                                                                                                                                                                                            |
+| GatewayRegistration | 4-tier Lambda tool targets: **Tier 1** (Lambda, EC2, S3, CloudWatch, SQS — all tenants), **Tier 2** (RDS, Redshift, Athena, Glue, OpenSearch — advanced+), **Tier 3** (StepFunctions, Bedrock, SageMaker, Rekognition, Textract, Transcribe, CodeBuild, CodeCommit, CodePipeline — premium), **Discovery** (Config, Cost Explorer, Tags, Resource Explorer, CloudFormation — all tenants). SSM Parameter Store for runtime ARN discovery                                           |
+| Discovery           | Cloud Map HTTP namespace + service registrations, 6 discovery tools: **config-scanner** (AWS Config SDK — advanced query, history, compliance), **resource-explorer** (Resource Explorer 2 SDK — search, index), **stack-inventory** (CloudFormation SDK — list/describe, drift detection), **tag-organizer** (Tagging API SDK — search, compliance, tag/untag), **cost-analyzer** (Cost Explorer SDK — cost by service, forecast), **resource-index** (in-memory cross-reference) |
 
 ---
 
@@ -127,6 +128,23 @@ sequenceDiagram
     ALB-->>CLI: stream tokens
     CLI-->>U: render via ink / stdout
 ```
+
+---
+
+## 3a. Model Backends
+
+Chimera supports two model backends, selectable per-tenant via the Settings UI.
+
+| Backend          | Protocol                           | Endpoint                                                             | Streaming                                        |
+| ---------------- | ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------ |
+| **BedrockModel** | AWS Converse API                   | `ConverseCommand` (sync) / `ConverseStreamCommand` (token streaming) | True token-level SSE via `ConverseStreamCommand` |
+| **MantleModel**  | OpenAI-compatible Chat Completions | `https://bedrock-mantle.{region}.api.aws/v1/chat/completions`        | SSE in OpenAI delta format                       |
+
+**BedrockModel** (`packages/core/src/agent/bedrock-model.ts`): Wraps AWS SDK `@aws-sdk/client-bedrock-runtime`. Supports sync (`ConverseCommand`) and streaming (`ConverseStreamCommand`) modes with module-level singleton client cache per region.
+
+**MantleModel** (`packages/core/src/agent/mantle-model.ts`): Uses Bedrock's distributed inference engine (Mantle) via OpenAI-compatible endpoints. Supports Chat Completions API (`/v1/chat/completions`) and Responses API (`/v1/responses`). Auth via Bedrock API key or SigV4 bearer token.
+
+Per-tenant model configuration is stored in the `chimera-tenants` DynamoDB table and editable from the web Settings page model selector.
 
 ---
 
@@ -364,7 +382,35 @@ sequenceDiagram
     ECS-->>DEV: deployment complete
 ```
 
+**Pipeline stages (5):**
+
+1. **Source** — CodeCommit push triggers pipeline automatically
+2. **Build** — CodeBuild runs lint, typecheck, `bun test`, `npx cdk synth --all`, Vite build + Docker build (parallel)
+3. **Deploy** — `npx cdk deploy --all` + Frontend S3 sync + CloudFront invalidation
+4. **Test** — Canary bake period (30 min) with CloudWatch alarm monitoring
+5. **Rollout** — Progressive traffic shift: 5% → 25% → 50% → 100% with validation gates
+
+**Destroy:** CodeBuild-delegated via `buildspec-destroy.yml` (see ADR-032).
+
 **CDK runtime note:** All CDK commands use `npx cdk` (Node.js runtime). `bunx cdk` breaks CDK `instanceof` checks, causing `TypeError: peer.canInlineRule is not a function` in security group rules.
+
+---
+
+## 8a. Testing Architecture
+
+**GitHub Actions CI** (`.github/workflows/ci.yml`): 3 parallel jobs after the test gate:
+
+| Job                        | Steps                                                                                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Test, Lint & Typecheck** | `bun test` (shared, core, sse-bridge, chat-gateway, cli, infra, unit tests), `vitest` (web), Python agent tests, `bun run lint`, `bun run typecheck` |
+| **Build Docker Images**    | Monorepo tsc build → Bun bundle → `docker build` chat-gateway + agents images                                                                        |
+| **Build CLI Binary**       | `bun build --compile` for standalone CLI binary                                                                                                      |
+
+**CodeBuild** (`buildspec.yml`): lint, typecheck, unit tests (shared, core, sse-bridge, infra), CDK synth, Vite build with Cognito/API config from CloudFormation outputs.
+
+**Playwright E2E** (`tests/e2e/`): 3 spec files — smoke (3 tests), chat (4 tests), settings (4 tests) — 11 spec tests total.
+
+**Total test count:** ~2,500 tests across unit, integration, e2e, and Python agent test suites.
 
 ---
 
@@ -418,18 +464,20 @@ LTM compression strategy: SUMMARY (all tiers), USER_PREFERENCE (Advanced+), SEMA
 
 ## Cross-Reference
 
-| Diagram                  | Related Docs                                                   |
-| ------------------------ | -------------------------------------------------------------- |
-| CDK Stacks (§1)          | [deployment-architecture.md](deployment-architecture.md)       |
-| CLI Lifecycle (§2)       | [cli-lifecycle.md](cli-lifecycle.md)                           |
-| Request Flow (§3)        | [agent-architecture.md](agent-architecture.md) §1              |
-| Auth Flow (§4)           | `packages/cli/src/commands/login.ts`, `packages/cli/src/auth/` |
-| Self-Evolution (§5)      | [agent-architecture.md](agent-architecture.md) §4              |
-| Evolution Feedback (§5a) | `infra/lib/evolution-stack.ts`, `packages/agents/`             |
-| Multi-Tenant (§6)        | [canonical-data-model.md](canonical-data-model.md)             |
-| Skill Lifecycle (§7)     | [agent-architecture.md](agent-architecture.md) §3              |
-| Deploy Pipeline (§8)     | `packages/cli/src/commands/deploy.ts`                          |
-| Session State (§9)       | [agent-architecture.md](agent-architecture.md) §1, §7          |
+| Diagram                    | Related Docs                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| CDK Stacks (§1)            | [deployment-architecture.md](deployment-architecture.md)                              |
+| CLI Lifecycle (§2)         | [cli-lifecycle.md](cli-lifecycle.md)                                                  |
+| Request Flow (§3)          | [agent-architecture.md](agent-architecture.md) §1                                     |
+| Model Backends (§3a)       | `packages/core/src/agent/bedrock-model.ts`, `packages/core/src/agent/mantle-model.ts` |
+| Auth Flow (§4)             | `packages/cli/src/commands/login.ts`, `packages/cli/src/auth/`                        |
+| Self-Evolution (§5)        | [agent-architecture.md](agent-architecture.md) §4                                     |
+| Evolution Feedback (§5a)   | `infra/lib/evolution-stack.ts`, `packages/agents/`                                    |
+| Multi-Tenant (§6)          | [canonical-data-model.md](canonical-data-model.md)                                    |
+| Skill Lifecycle (§7)       | [agent-architecture.md](agent-architecture.md) §3                                     |
+| Deploy Pipeline (§8)       | `packages/cli/src/commands/deploy.ts`, `buildspec.yml`                                |
+| Testing Architecture (§8a) | `.github/workflows/ci.yml`, `tests/e2e/`                                              |
+| Session State (§9)         | [agent-architecture.md](agent-architecture.md) §1, §7                                 |
 
 ---
 
