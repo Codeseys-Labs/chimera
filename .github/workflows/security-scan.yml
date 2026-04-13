@@ -14,7 +14,7 @@ env:
 jobs:
   dependency-scan:
     name: Dependency Vulnerability Scan
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       contents: read
@@ -48,7 +48,7 @@ jobs:
 
   sast-scan:
     name: Static Application Security Testing
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404 # 4vcpu: CodeQL/semgrep SAST on ~100K LOC
     timeout-minutes: 15
     permissions:
       contents: read
@@ -78,7 +78,7 @@ jobs:
 
   secret-scan:
     name: Secret Scanning
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -93,7 +93,7 @@ jobs:
 
   security-summary:
     name: Security Summary
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     needs: [dependency-scan, sast-scan, secret-scan]
     if: always()
     steps:

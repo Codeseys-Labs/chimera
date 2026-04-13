@@ -16,7 +16,7 @@ env:
 jobs:
   test:
     name: Test, Lint & Typecheck
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404 # 4vcpu: parallel tests + tsc compilation
     timeout-minutes: 15
     steps:
       - name: Checkout code
@@ -74,7 +74,7 @@ jobs:
 
   build-containers:
     name: Build Docker Images
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404 # 4vcpu: Docker builds are CPU+IO heavy
     timeout-minutes: 15
     needs: test
     steps:
@@ -109,7 +109,7 @@ jobs:
 
   build-cli:
     name: Build CLI Binary
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     needs: test
     steps:

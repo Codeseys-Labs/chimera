@@ -23,7 +23,7 @@ env:
 jobs:
   e2e:
     name: Playwright E2E
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404 # 4vcpu: Playwright + Chromium needs RAM
     timeout-minutes: 30
     steps:
       - name: Checkout code
