@@ -207,6 +207,15 @@ export class PipelineStack extends cdk.Stack {
       })
     );
 
+    // CDK synth needs to look up VPC availability zones on fresh deploys
+    // (when cdk.context.json is not cached).
+    buildProject.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ec2:DescribeAvailabilityZones', 'ec2:DescribeVpcs', 'ec2:DescribeSubnets'],
+        resources: ['*'],
+      })
+    );
+
     // ======================================================================
     // CodeBuild Project for Docker Build Stage
     // ======================================================================
