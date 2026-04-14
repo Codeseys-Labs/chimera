@@ -11,11 +11,12 @@
 
 import { chromium, type Page, type Browser, type BrowserContext } from 'playwright';
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://dXXXXXXXXXXXXX.cloudfront.net';
-const COGNITO_DOMAIN = process.env.COGNITO_DOMAIN || 'chimera-dev-123456789012';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const COGNITO_DOMAIN = process.env.COGNITO_DOMAIN || 'chimera-dev';
 const COGNITO_REGION = 'us-west-2';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'CHANGE_ME_BEFORE_USE';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD env var required');
 
 interface TestResult {
   name: string;

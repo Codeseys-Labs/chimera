@@ -1,5 +1,5 @@
 ---
-title: "Infrastructure Self-Discovery"
+title: 'Infrastructure Self-Discovery'
 version: 1.0.0
 status: canonical
 last_updated: 2026-03-30
@@ -29,7 +29,7 @@ CDK stacks export named values via `CfnOutput`. Agents read these at startup via
 ### Reading outputs programmatically
 
 ```typescript
-import { CloudFormationClient, DescribeStacksCommand } from "@aws-sdk/client-cloudformation";
+import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
 
 const cfn = new CloudFormationClient({ region: process.env.AWS_REGION });
 
@@ -45,39 +45,46 @@ async function getStackOutputs(stackName: string): Promise<Record<string, string
 }
 
 // Example: get the chat endpoint from the ChatStack
-const chat = await getStackOutputs("Chimera-dev-Chat");
-const chatUrl = chat["ChatAlbDnsName"]; // ECS ALB DNS
+const chat = await getStackOutputs('Chimera-dev-Chat');
+const chatUrl = chat['ChatAlbDnsName']; // ECS ALB DNS
 ```
 
 ### Stack naming convention
 
 All Chimera stacks follow the pattern: `Chimera-{env}-{StackName}`
 
-| Stack | Key Outputs |
-|-------|-------------|
-| `Chimera-{env}-Network` | VPC ID, subnet IDs, security group IDs |
-| `Chimera-{env}-Data` | DynamoDB table names, S3 bucket names |
-| `Chimera-{env}-Security` | Cognito pool ID, KMS key ARNs |
-| `Chimera-{env}-Chat` | ALB DNS, ECS cluster ARN |
-| `Chimera-{env}-Api` | API Gateway invoke URL |
+| Stack                    | Key Outputs                            |
+| ------------------------ | -------------------------------------- |
+| `Chimera-{env}-Network`  | VPC ID, subnet IDs, security group IDs |
+| `Chimera-{env}-Data`     | DynamoDB table names, S3 bucket names  |
+| `Chimera-{env}-Security` | Cognito pool ID, KMS key ARNs          |
+| `Chimera-{env}-Chat`     | ALB DNS, ECS cluster ARN               |
+| `Chimera-{env}-Api`      | API Gateway invoke URL                 |
 
 ### Discovering all deployed Chimera stacks
 
 ```typescript
-import { CloudFormationClient, ListStacksCommand, StackStatus } from "@aws-sdk/client-cloudformation";
+import {
+  CloudFormationClient,
+  ListStacksCommand,
+  StackStatus,
+} from '@aws-sdk/client-cloudformation';
 
 async function listChimeraStacks(env: string): Promise<string[]> {
   const cfn = new CloudFormationClient({ region: process.env.AWS_REGION });
-  const { StackSummaries } = await cfn.send(new ListStacksCommand({
-    StackStatusFilter: [StackStatus.CREATE_COMPLETE, StackStatus.UPDATE_COMPLETE],
-  }));
+  const { StackSummaries } = await cfn.send(
+    new ListStacksCommand({
+      StackStatusFilter: [StackStatus.CREATE_COMPLETE, StackStatus.UPDATE_COMPLETE],
+    })
+  );
   return (StackSummaries ?? [])
-    .filter(s => s.StackName?.startsWith(`Chimera-${env}-`))
-    .map(s => s.StackName!);
+    .filter((s) => s.StackName?.startsWith(`Chimera-${env}-`))
+    .map((s) => s.StackName!);
 }
 ```
 
 **Tradeoffs:**
+
 - ✅ Source-of-truth — CFN outputs are always in sync with deployed resources
 - ✅ No extra infrastructure required
 - ✅ Works across environments via stack naming convention
@@ -105,15 +112,15 @@ resources in an account/region from these tags.
 import {
   ResourceGroupsTaggingAPIClient,
   GetResourcesCommand,
-} from "@aws-sdk/client-resource-groups-tagging-api";
+} from '@aws-sdk/client-resource-groups-tagging-api';
 
 async function discoverChimeraResources(env: string) {
   const client = new ResourceGroupsTaggingAPIClient({ region: process.env.AWS_REGION });
   const { ResourceTagMappingList } = await client.send(
     new GetResourcesCommand({
       TagFilters: [
-        { Key: "Project", Values: ["Chimera"] },
-        { Key: "Environment", Values: [env] },
+        { Key: 'Project', Values: ['Chimera'] },
+        { Key: 'Environment', Values: [env] },
       ],
     })
   );
@@ -122,6 +129,7 @@ async function discoverChimeraResources(env: string) {
 ```
 
 **Tradeoffs:**
+
 - ✅ Works even for resources that don't have CFN outputs
 - ✅ Comprehensive — finds DynamoDB, S3, KMS, VPC, Cognito, ECS, etc.
 - ✅ Useful for auditing / detecting orphaned resources
@@ -160,6 +168,7 @@ successful stack deployment. The `chimera deploy` CLI command triggers this
 after `cdk deploy` completes (extends the zero-touch deploy flow).
 
 **Tradeoffs:**
+
 - ✅ Sub-millisecond reads — no CFN API call overhead
 - ✅ Can store computed/derived state that CFN outputs don't capture
 - ✅ Queryable — find all resources of a given type, all stacks in an env
@@ -186,32 +195,32 @@ Audited in us-west-2, account `123456789012`:
 
 ### Active Stacks
 
-| Stack | Status | Deployed |
-|-------|--------|----------|
-| `Chimera-dev-Network` | CREATE_COMPLETE | 2026-03-27 |
-| `Chimera-dev-Data` | CREATE_COMPLETE | 2026-03-27 |
+| Stack                  | Status          | Deployed   |
+| ---------------------- | --------------- | ---------- |
+| `Chimera-dev-Network`  | CREATE_COMPLETE | 2026-03-27 |
+| `Chimera-dev-Data`     | CREATE_COMPLETE | 2026-03-27 |
 | `Chimera-dev-Frontend` | CREATE_COMPLETE | 2026-03-27 |
 
 ### Cleaned Up (this session)
 
-| Resource | Type | Reason |
-|----------|------|--------|
-| `Chimera-dev-Evolution` | CloudFormation stack | DELETE_FAILED — orphaned from previous deploy cycle |
-| `chimera-dev-evolution-evolutionartifactsbucketacce-toqozfgywyse` | S3 bucket | Access logs bucket blocking Evolution stack delete; emptied and deleted |
-| `chimera-evolution-state-dev` | DynamoDB table | Empty GlobalTable blocking Evolution stack delete; deleted |
-| `Chimera-dev-Api-ApiCloudWatchRole73EC6FC4-LiCXyS1ydbU2` | IAM Role | Orphaned from Api stack deploy 2026-03-23 |
-| `Chimera-dev-Api-ApiCloudWatchRole73EC6FC4-lXoiFqeSgJLf` | IAM Role | Orphaned from Api stack deploy 2026-03-26 |
-| `Chimera-dev-Api-ApiCloudWatchRole73EC6FC4-YsgDPe2TwIQx` | IAM Role | Orphaned from Api stack deploy 2026-03-27 |
+| Resource                                                          | Type                 | Reason                                                                  |
+| ----------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `Chimera-dev-Evolution`                                           | CloudFormation stack | DELETE_FAILED — orphaned from previous deploy cycle                     |
+| `chimera-dev-evolution-evolutionartifactsbucketacce-toqozfgywyse` | S3 bucket            | Access logs bucket blocking Evolution stack delete; emptied and deleted |
+| `chimera-evolution-state-dev`                                     | DynamoDB table       | Empty GlobalTable blocking Evolution stack delete; deleted              |
+| `Chimera-dev-Api-ApiCloudWatchRole73EC6FC4-LiCXyS1ydbU2`          | IAM Role             | Orphaned from Api stack deploy 2026-03-23                               |
+| `Chimera-dev-Api-ApiCloudWatchRole73EC6FC4-lXoiFqeSgJLf`          | IAM Role             | Orphaned from Api stack deploy 2026-03-26                               |
+| `Chimera-dev-Api-ApiCloudWatchRole73EC6FC4-YsgDPe2TwIQx`          | IAM Role             | Orphaned from Api stack deploy 2026-03-27                               |
 
 ### Tagging Verification
 
 All active resources have the required tags:
 
-| Tag | Value | Verified On |
-|-----|-------|-------------|
-| `Project` | `Chimera` | All 3 stacks + all S3 buckets + DDB tables + KMS key + VPC |
-| `Environment` | `dev` | All 3 stacks + all S3 buckets + DDB tables + KMS key + VPC |
-| `ManagedBy` | `CDK` | All 3 stacks + all S3 buckets + DDB tables + KMS key + VPC |
+| Tag           | Value     | Verified On                                                |
+| ------------- | --------- | ---------------------------------------------------------- |
+| `Project`     | `Chimera` | All 3 stacks + all S3 buckets + DDB tables + KMS key + VPC |
+| `Environment` | `dev`     | All 3 stacks + all S3 buckets + DDB tables + KMS key + VPC |
+| `ManagedBy`   | `CDK`     | All 3 stacks + all S3 buckets + DDB tables + KMS key + VPC |
 
 The CDK `TaggingAspect` is functioning correctly. Resource-level tags confirmed
 on: VPC, 6 S3 buckets (including access-log buckets), DynamoDB tables, KMS key.

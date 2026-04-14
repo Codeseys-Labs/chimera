@@ -4,9 +4,10 @@
 
 import { chromium, type Page, type Browser, type BrowserContext } from 'playwright';
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://dXXXXXXXXXXXXX.cloudfront.net';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'CHANGE_ME_BEFORE_USE';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD env var required');
 
 async function main() {
   console.log(`\n=== Chimera Chat Debug Session ===`);

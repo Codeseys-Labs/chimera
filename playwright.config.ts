@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://dXXXXXXXXXXXXX.cloudfront.net';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 export default defineConfig({
   testDir: './tests/e2e',

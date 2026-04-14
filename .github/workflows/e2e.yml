@@ -6,11 +6,11 @@ on:
       frontend_url:
         description: 'Frontend URL (CloudFront)'
         required: false
-        default: 'https://dXXXXXXXXXXXXX.cloudfront.net'
+        default: 'http://localhost:5173'
       chat_gateway_url:
         description: 'Chat Gateway URL'
         required: false
-        default: 'https://dYYYYYYYYYYYYY.cloudfront.net'
+        default: 'http://localhost:3000'
 
 concurrency:
   group: e2e-${{ github.ref }}

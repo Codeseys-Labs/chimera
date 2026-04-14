@@ -38,22 +38,22 @@ OpenFang is an **open-source Agent Operating System** built entirely from scratc
 
 The project compiles 137,000 lines of Rust across 14 crates into a single ~32MB binary. It ships with 7 autonomous "Hands" (pre-built capability packages), 40 messaging channel adapters, 53 built-in tools, 60 bundled skills, and support for 27 LLM providers with 123+ models.
 
-OpenFang is **not a fork of OpenClaw** in the traditional sense (it shares no code). Rather, it was built from scratch as an independent project inspired by OpenClaw's vision but with a fundamentally different architecture and philosophy. The creator, Jaber (GitHub: `jaberjaber23`), founder of RightNow AI, has been explicit about this: *"We love OpenClaw and it inspired a lot of what we built, but we wanted something that works at the kernel level."*
+OpenFang is **not a fork of OpenClaw** in the traditional sense (it shares no code). Rather, it was built from scratch as an independent project inspired by OpenClaw's vision but with a fundamentally different architecture and philosophy. The creator, Jaber (GitHub: `jaberjaber23`), founder of RightNow AI, has been explicit about this: _"We love OpenClaw and it inspired a lot of what we built, but we wanted something that works at the kernel level."_
 
 **Key differentiators at a glance:**
 
-| Metric | OpenFang | OpenClaw |
-|--------|----------|----------|
-| Language | Rust (88.1%) | TypeScript (88.1%) |
-| Binary Size | ~32 MB | ~500 MB + Node.js |
-| Memory (idle) | ~40 MB | ~394 MB |
-| Cold Start | ~180 ms | ~6 s |
-| Security Layers | 16 | 3 |
-| Channel Adapters | 40 | 13 |
-| Autonomous Hands | 7 built-in | None |
-| Agent Sandbox | WASM dual-metered | None |
-| Desktop App | Tauri 2.0 | None |
-| Audit Trail | Merkle hash-chain | Logs |
+| Metric           | OpenFang          | OpenClaw           |
+| ---------------- | ----------------- | ------------------ |
+| Language         | Rust (88.1%)      | TypeScript (88.1%) |
+| Binary Size      | ~32 MB            | ~500 MB + Node.js  |
+| Memory (idle)    | ~40 MB            | ~394 MB            |
+| Cold Start       | ~180 ms           | ~6 s               |
+| Security Layers  | 16                | 3                  |
+| Channel Adapters | 40                | 13                 |
+| Autonomous Hands | 7 built-in        | None               |
+| Agent Sandbox    | WASM dual-metered | None               |
+| Desktop App      | Tauri 2.0         | None               |
+| Audit Trail      | Merkle hash-chain | Logs               |
 
 ---
 
@@ -110,6 +110,7 @@ OpenClaw's agents wait for you to type something. OpenFang's Hands work for you 
 ### 3. Rust vs. TypeScript
 
 The choice of Rust gives OpenFang:
+
 - **10x lower memory footprint** (40 MB vs 394 MB)
 - **33x faster cold start** (180 ms vs 6 s)
 - **15x smaller binary** (32 MB vs 500 MB)
@@ -224,6 +225,7 @@ Hands are OpenFang's most distinctive innovation and the primary reason it calls
 ### What is a Hand?
 
 A Hand is a pre-built autonomous capability package that:
+
 - Runs on a **schedule** (not triggered by user messages)
 - Builds and maintains **knowledge graphs**
 - Reports results to a **dashboard**
@@ -239,7 +241,9 @@ All Hands are compiled directly into the binary at build time, ensuring consiste
 ### The 7 Built-in Hands
 
 #### 1. Clip (Content)
+
 Turns long-form video into viral short clips:
+
 - 8-phase pipeline: download, analyze, segment, extract, caption, thumbnail, voiceover, publish
 - FFmpeg + yt-dlp integration
 - 5 speech-to-text backends
@@ -248,7 +252,9 @@ Turns long-form video into viral short clips:
 - Optional AI voice-overs
 
 #### 2. Lead (Data)
+
 Autonomous lead generation and qualification:
+
 - Daily discovery of qualified leads matching Ideal Customer Profile (ICP)
 - Web research loops for enrichment
 - 0-100 ICP scoring system
@@ -257,7 +263,9 @@ Autonomous lead generation and qualification:
 - Scheduled delivery to dashboard or channels
 
 #### 3. Collector (Intelligence)
+
 OSINT-style intelligence collection:
+
 - Continuous monitoring of specified targets
 - Change detection with diff analysis
 - Sentiment tracking over time
@@ -266,7 +274,9 @@ OSINT-style intelligence collection:
 - Multi-source correlation
 
 #### 4. Predictor (Forecasting)
+
 Superforecasting engine:
+
 - Multi-source signal collection
 - Calibrated reasoning chains
 - Predictions with confidence intervals
@@ -275,7 +285,9 @@ Superforecasting engine:
 - Trend analysis across data streams
 
 #### 5. Researcher (Research)
+
 Deep autonomous research agent:
+
 - Cross-references multiple sources
 - CRAAP (Currency, Relevance, Authority, Accuracy, Purpose) credibility evaluation
 - APA-format cited reports
@@ -284,7 +296,9 @@ Deep autonomous research agent:
 - Generates comprehensive research documents
 
 #### 6. Twitter (Social)
+
 Autonomous X/Twitter account management:
+
 - 7 rotating content formats
 - Optimal posting time scheduling
 - Automated mention responses
@@ -293,7 +307,9 @@ Autonomous X/Twitter account management:
 - Content strategy optimization
 
 #### 7. Browser (Automation)
+
 Web automation agent:
+
 - Playwright bridge for browser control
 - Multi-step workflow navigation
 - Form filling and button clicking
@@ -350,28 +366,28 @@ Custom Hands can be published to **FangHub**, the OpenFang marketplace.
 
 OpenFang's security model is one of its strongest differentiators. With 16 discrete security systems, it offers defense-in-depth that operates at the kernel level. Each layer functions independently, meaning a breach in one layer does not compromise the others.
 
-From the project's philosophy: *"Giving an LLM tools with zero isolation is insane and we're not doing it."*
+From the project's philosophy: _"Giving an LLM tools with zero isolation is insane and we're not doing it."_
 
 ### Complete Security Layer Inventory
 
-| # | Layer | Description |
-|---|-------|-------------|
-| 1 | **WASM Dual-Metered Sandbox** | Tool code executes in WebAssembly with fuel metering AND epoch interruption. Prevents runaway code from consuming resources. |
-| 2 | **Merkle Hash-Chain Audit Trail** | Every action is cryptographically linked to the previous one. Tampering with any record invalidates the entire chain. |
-| 3 | **Information Flow Taint Tracking** | Propagates labels through execution paths to track secrets. Prevents accidental leakage of sensitive data. |
-| 4 | **Ed25519 Signed Agent Manifests** | Agent identities and capability sets are cryptographically signed. Prevents unauthorized agent impersonation. |
-| 5 | **SSRF Protection** | Blocks outbound requests to private IPs, localhost, link-local addresses, and cloud metadata endpoints (169.254.169.254). |
-| 6 | **Secret Zeroization** | API keys are automatically wiped from memory using `Zeroizing<String>` when no longer needed. Prevents memory scraping. |
-| 7 | **OFP Mutual Authentication** | HMAC-SHA256 nonce-based authentication for P2P networking. Both sides must prove identity. |
-| 8 | **Capability Gates** | RBAC requiring explicit capability grants for agent operations. Agents can only access what they're authorized to use. |
-| 9 | **Security Headers** | CSP, X-Frame-Options, HSTS, X-Content-Type-Options, and other headers in all HTTP responses. |
-| 10 | **Health Endpoint Redaction** | Public health checks return minimal information, preventing information leakage about internal state. |
-| 11 | **Subprocess Sandbox** | Child processes have environment variables cleared with selective passthrough. Prevents credential leakage to subprocesses. |
-| 12 | **Prompt Injection Scanner** | Detects override attempts, data exfiltration patterns, and shell reference injection in prompts. |
-| 13 | **Loop Guard** | SHA256-based tool call loop detection with circuit breaker. Prevents infinite loops from burning API credits. |
-| 14 | **Session Repair** | 7-phase message history validation with automatic recovery from corruption. Ensures session integrity. |
-| 15 | **Path Traversal Prevention** | Canonicalizes file paths and prevents symlink escapes. Prevents agents from accessing unauthorized file system locations. |
-| 16 | **GCRA Rate Limiter** | Cost-aware token bucket rate limiting with per-IP tracking. Generic Cell Rate Algorithm prevents abuse. |
+| #   | Layer                               | Description                                                                                                                  |
+| --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **WASM Dual-Metered Sandbox**       | Tool code executes in WebAssembly with fuel metering AND epoch interruption. Prevents runaway code from consuming resources. |
+| 2   | **Merkle Hash-Chain Audit Trail**   | Every action is cryptographically linked to the previous one. Tampering with any record invalidates the entire chain.        |
+| 3   | **Information Flow Taint Tracking** | Propagates labels through execution paths to track secrets. Prevents accidental leakage of sensitive data.                   |
+| 4   | **Ed25519 Signed Agent Manifests**  | Agent identities and capability sets are cryptographically signed. Prevents unauthorized agent impersonation.                |
+| 5   | **SSRF Protection**                 | Blocks outbound requests to private IPs, localhost, link-local addresses, and cloud metadata endpoints (169.254.169.254).    |
+| 6   | **Secret Zeroization**              | API keys are automatically wiped from memory using `Zeroizing<String>` when no longer needed. Prevents memory scraping.      |
+| 7   | **OFP Mutual Authentication**       | HMAC-SHA256 nonce-based authentication for P2P networking. Both sides must prove identity.                                   |
+| 8   | **Capability Gates**                | RBAC requiring explicit capability grants for agent operations. Agents can only access what they're authorized to use.       |
+| 9   | **Security Headers**                | CSP, X-Frame-Options, HSTS, X-Content-Type-Options, and other headers in all HTTP responses.                                 |
+| 10  | **Health Endpoint Redaction**       | Public health checks return minimal information, preventing information leakage about internal state.                        |
+| 11  | **Subprocess Sandbox**              | Child processes have environment variables cleared with selective passthrough. Prevents credential leakage to subprocesses.  |
+| 12  | **Prompt Injection Scanner**        | Detects override attempts, data exfiltration patterns, and shell reference injection in prompts.                             |
+| 13  | **Loop Guard**                      | SHA256-based tool call loop detection with circuit breaker. Prevents infinite loops from burning API credits.                |
+| 14  | **Session Repair**                  | 7-phase message history validation with automatic recovery from corruption. Ensures session integrity.                       |
+| 15  | **Path Traversal Prevention**       | Canonicalizes file paths and prevents symlink escapes. Prevents agents from accessing unauthorized file system locations.    |
+| 16  | **GCRA Rate Limiter**               | Cost-aware token bucket rate limiting with per-IP tracking. Generic Cell Rate Algorithm prevents abuse.                      |
 
 ### WASM Sandbox Deep Dive
 
@@ -395,6 +411,7 @@ The WASM sandbox deserves special attention as it's analogous to how Linux isola
 ```
 
 Each agent runs in its own WASM sandbox with:
+
 - **Fuel metering:** A budget of computation units. When exhausted, execution halts.
 - **Epoch interruption:** A wall-clock timeout. Regardless of fuel, execution is interrupted after the epoch expires.
 - **Capability mapping:** The agent's manifest defines which capabilities (tools, APIs, file paths) are available inside the sandbox.
@@ -408,6 +425,7 @@ Each agent runs in its own WASM sandbox with:
 OpenFang reads `SKILL.md` natively -- the same format used by [[01-OpenClaw-Core-Architecture|OpenClaw]], Claude Code, and Codex. This provides instant compatibility with the existing OpenClaw skill ecosystem.
 
 Skills in OpenFang can be:
+
 - **Prompt-only:** Instructions and context for the LLM
 - **Executable:** Python or Node.js tools that run in the sandbox
 - **MCP-based:** External tools connected via Model Context Protocol servers
@@ -427,6 +445,7 @@ FangHub is OpenFang's native skill marketplace. It coexists with OpenClaw's Claw
 ### ClawHub Compatibility
 
 The `openfang-skills` crate includes a ClawHub client, enabling OpenFang to:
+
 - Search for skills on ClawHub
 - Install OpenClaw skills directly
 - Use `SKILL.md` files without modification
@@ -496,6 +515,7 @@ openfang migrate --from openclaw --dry-run
 ### Additional Migration Sources
 
 The migration engine also supports:
+
 - **LangChain** projects
 - **AutoGPT** configurations
 
@@ -523,13 +543,13 @@ The `openfang-memory` crate implements a production-grade persistence layer:
 
 ### Comparison with OpenClaw
 
-| Feature | OpenFang | OpenClaw |
-|---------|----------|----------|
-| Storage | SQLite + vector embeddings | File-based Markdown |
-| Search | Semantic (vector) + full-text | File system scan |
-| Persistence | Built-in, automatic | Manual save/load |
-| Compaction | Automatic | None |
-| Knowledge Graphs | Built-in | None |
+| Feature          | OpenFang                      | OpenClaw            |
+| ---------------- | ----------------------------- | ------------------- |
+| Storage          | SQLite + vector embeddings    | File-based Markdown |
+| Search           | Semantic (vector) + full-text | File system scan    |
+| Persistence      | Built-in, automatic           | Manual save/load    |
+| Compaction       | Automatic                     | None                |
+| Knowledge Graphs | Built-in                      | None                |
 
 ---
 
@@ -635,33 +655,33 @@ From a Hacker News discussion, the development process involves orchestrating up
 
 As of March 2026, OpenFang has **22 contributors** (20 human + dependabot + Claude). The top contributors:
 
-| Contributor | Role/Focus |
-|-------------|-----------|
-| `jaberjaber23` | Founder, primary architect, majority of commits |
-| `dependabot[bot]` | Automated dependency updates |
-| `Fail-Safe` | Community contributor |
-| `houko` | Community contributor |
-| `tsubasakong` | Community contributor |
-| `AL-ZiLLA` | Community contributor |
-| `zdianjiang` | Community contributor |
-| `QiuYi111` | Community contributor |
-| `KeysiJones` | Community contributor |
-| `cryptonahue` | Community contributor |
-| `tbaumann` | Community contributor |
-| `zvictor` | Community contributor |
-| `vnz` | Community contributor |
-| `tuzkier` | Community contributor |
-| `mdrissel` | Community contributor |
-| `skymoore` | Community contributor |
-| `psumo` | Community contributor |
-| `claude` | AI pair programming contributor |
+| Contributor       | Role/Focus                                      |
+| ----------------- | ----------------------------------------------- |
+| `jaberjaber23`    | Founder, primary architect, majority of commits |
+| `dependabot[bot]` | Automated dependency updates                    |
+| `Fail-Safe`       | Community contributor                           |
+| `houko`           | Community contributor                           |
+| `tsubasakong`     | Community contributor                           |
+| `AL-ZiLLA`        | Community contributor                           |
+| `zdianjiang`      | Community contributor                           |
+| `QiuYi111`        | Community contributor                           |
+| `KeysiJones`      | Community contributor                           |
+| `cryptonahue`     | Community contributor                           |
+| `tbaumann`        | Community contributor                           |
+| `zvictor`         | Community contributor                           |
+| `vnz`             | Community contributor                           |
+| `tuzkier`         | Community contributor                           |
+| `mdrissel`        | Community contributor                           |
+| `skymoore`        | Community contributor                           |
+| `psumo`           | Community contributor                           |
+| `claude`          | AI pair programming contributor                 |
 
 ### Community Engagement
 
 - **GitHub Issues:** 50 open issues as of March 2026
 - **Release cadence:** 79 releases in 22 days (~3.5/day), indicating extremely active development
 - **Community PR handling:** In v0.1.3, the team closed 6 issues and "reviewed and rebuilt 4 community PR ideas in-house" -- suggesting a pattern where community ideas are validated but implementation is done by the core team for consistency
-- **Security reporting:** Email-based at `<redacted-email>` with 48-hour response commitment
+- **Security reporting:** Email-based at `<redacted>` with 48-hour response commitment
 - **Social media:** Active on X/Twitter, YouTube videos about the project have appeared
 
 ### Community Sentiment
@@ -669,11 +689,13 @@ As of March 2026, OpenFang has **22 contributors** (20 human + dependabot + Clau
 From Reddit discussions (r/AIDeveloperNews, r/AI_Agents, r/LocalLLaMA):
 
 **Positive:**
+
 - "The agents and the subagents endpoints are good and overall the architecture is promising"
 - Praised for Rust-based architecture and security emphasis
 - Seen as a legitimate alternative to OpenClaw for production use
 
 **Critical:**
+
 - "The learning curve is steeper than lightweight alternatives"
 - Concerns about breaking changes pre-v1.0
 - Some skepticism about AI-generated code in the codebase
@@ -694,29 +716,31 @@ The release history shows intense development:
 
 ### OpenFang vs OpenClaw
 
-| Dimension | OpenClaw | OpenFang |
-|-----------|----------|----------|
-| **Philosophy** | Personal AI assistant, chat-driven | Agent Operating System, autonomous |
-| **Language** | TypeScript + Node.js | Pure Rust, 14 crates |
-| **Architecture** | Gateway + Brain + Memory + Skills | Kernel + Runtime + API + 11 subsystems |
-| **Agent Model** | Reactive (responds to messages) | Autonomous (runs on schedules) |
-| **Memory** | File-based Markdown | SQLite + vector embeddings |
-| **Security** | 3 basic layers | 16 discrete layers |
-| **Sandbox** | None | WASM dual-metered |
-| **Distribution** | npm package + Node.js runtime | Single 32MB binary |
-| **Desktop** | None | Tauri 2.0 native app |
-| **Maturity** | 4+ months, 321K+ stars, proven | 3 weeks, 14.9K stars, pre-1.0 |
-| **Ecosystem** | Massive (1,075+ contributors, ClawHub) | Growing (22 contributors, FangHub) |
-| **Enterprise** | AWS Lightsail managed, NemoClaw wrapper | Self-hosted only |
-| **Skill Format** | SKILL.md (originator) | SKILL.md (compatible) + HAND.toml |
+| Dimension        | OpenClaw                                | OpenFang                               |
+| ---------------- | --------------------------------------- | -------------------------------------- |
+| **Philosophy**   | Personal AI assistant, chat-driven      | Agent Operating System, autonomous     |
+| **Language**     | TypeScript + Node.js                    | Pure Rust, 14 crates                   |
+| **Architecture** | Gateway + Brain + Memory + Skills       | Kernel + Runtime + API + 11 subsystems |
+| **Agent Model**  | Reactive (responds to messages)         | Autonomous (runs on schedules)         |
+| **Memory**       | File-based Markdown                     | SQLite + vector embeddings             |
+| **Security**     | 3 basic layers                          | 16 discrete layers                     |
+| **Sandbox**      | None                                    | WASM dual-metered                      |
+| **Distribution** | npm package + Node.js runtime           | Single 32MB binary                     |
+| **Desktop**      | None                                    | Tauri 2.0 native app                   |
+| **Maturity**     | 4+ months, 321K+ stars, proven          | 3 weeks, 14.9K stars, pre-1.0          |
+| **Ecosystem**    | Massive (1,075+ contributors, ClawHub)  | Growing (22 contributors, FangHub)     |
+| **Enterprise**   | AWS Lightsail managed, NemoClaw wrapper | Self-hosted only                       |
+| **Skill Format** | SKILL.md (originator)                   | SKILL.md (compatible) + HAND.toml      |
 
 **Choose OpenClaw if:**
+
 - Interactive chat is the primary use case
 - Production stability is required today
 - The npm ecosystem and quick setup matter
 - Enterprise integrations (NemoClaw, AWS Lightsail) are needed
 
 **Choose OpenFang if:**
+
 - Autonomous scheduled workflows are the goal
 - Security and audit trails are critical
 - Resource efficiency matters (edge, Raspberry Pi, VPS)
@@ -727,15 +751,15 @@ The release history shows intense development:
 
 NemoClaw (see [[02-NemoClaw-NVIDIA-Fork]]) is not a competitor to OpenFang -- it is a security wrapper around OpenClaw built by NVIDIA. The comparison is architectural:
 
-| Dimension | NemoClaw | OpenFang |
-|-----------|----------|----------|
-| **What it is** | Enterprise security wrapper for OpenClaw | Independent Agent Operating System |
-| **Relationship to OpenClaw** | Runs OpenClaw inside a sandbox | Inspired by, no shared code |
-| **Security approach** | Container-based isolation (OpenShell) | WASM-based isolation (kernel-level) |
-| **LLM support** | NVIDIA Nemotron models via cloud | 27 providers, 123+ models |
-| **License** | Apache 2.0 | Apache 2.0 |
-| **Runtime** | Docker + k3s + OpenShell | Single binary |
-| **Autonomy** | Inherits OpenClaw's reactive model | 7 built-in autonomous Hands |
+| Dimension                    | NemoClaw                                 | OpenFang                            |
+| ---------------------------- | ---------------------------------------- | ----------------------------------- |
+| **What it is**               | Enterprise security wrapper for OpenClaw | Independent Agent Operating System  |
+| **Relationship to OpenClaw** | Runs OpenClaw inside a sandbox           | Inspired by, no shared code         |
+| **Security approach**        | Container-based isolation (OpenShell)    | WASM-based isolation (kernel-level) |
+| **LLM support**              | NVIDIA Nemotron models via cloud         | 27 providers, 123+ models           |
+| **License**                  | Apache 2.0                               | Apache 2.0                          |
+| **Runtime**                  | Docker + k3s + OpenShell                 | Single binary                       |
+| **Autonomy**                 | Inherits OpenClaw's reactive model       | 7 built-in autonomous Hands         |
 
 OpenFang and NemoClaw solve different problems: NemoClaw makes OpenClaw safe for enterprise use; OpenFang provides a fundamentally different architecture for autonomous agent workloads.
 
@@ -765,16 +789,19 @@ OpenFang and NemoClaw solve different problems: NemoClaw makes OpenClaw safe for
 The OpenFang ecosystem is young but growing. Projects tagged with the `openfang` topic on GitHub:
 
 ### LibreFang
+
 - **Repository:** [librefang/librefang](https://github.com/librefang/librefang)
 - Another open-source agent OS written in Rust
 - Appears to be inspired by OpenFang's architecture
 
 ### openfang-auto-clip
+
 - **Repositories:** Multiple forks/variants exist
 - AI-driven automated video clipping pipeline
 - Built on top of OpenFang's Clip Hand concept
 
 ### ok-skills
+
 - **Repository:** [mxyhi/ok-skills](https://github.com/mxyhi/ok-skills)
 - Curated AI coding agent skills and AGENTS.md playbooks
 - Compatible with OpenClaw, OpenFang, Cursor, Claude Code, and other SKILL.md tools
@@ -938,6 +965,7 @@ No Meta Business account is required -- this uses the WhatsApp Web protocol dire
 ### v0.2.0 Roadmap (Published)
 
 Based on published roadmap information:
+
 - **Distributed agent scheduling** across multiple nodes
 - **GPU-accelerated WASM** for compute-intensive agent tasks
 - **Expanded tool marketplace** with community contribution model
@@ -946,6 +974,7 @@ Based on published roadmap information:
 ### v1.0 Target
 
 The project targets a "rock-solid v1.0 by mid-2026" with:
+
 - Stable API surface
 - Full documentation
 - Production deployment guides
@@ -966,47 +995,47 @@ From LinkedIn and HN discussions, several architectural questions remain open:
 
 ### Primary Sources
 
-| Source | URL |
-|--------|-----|
-| GitHub Repository | https://github.com/RightNow-AI/openfang |
-| Official Website | https://openfang.sh/ |
-| Documentation | https://openfang.sh/docs |
-| Alternative docs site | https://openfang.info/docs/overview |
-| Alternative landing page | https://openfang.one/ |
-| Alternative landing page | https://openfang.cc/ |
-| Changelog | https://github.com/RightNow-AI/openfang/blob/main/CHANGELOG.md |
-| Releases | https://github.com/RightNow-AI/openfang/releases |
+| Source                   | URL                                                            |
+| ------------------------ | -------------------------------------------------------------- |
+| GitHub Repository        | https://github.com/RightNow-AI/openfang                        |
+| Official Website         | https://openfang.sh/                                           |
+| Documentation            | https://openfang.sh/docs                                       |
+| Alternative docs site    | https://openfang.info/docs/overview                            |
+| Alternative landing page | https://openfang.one/                                          |
+| Alternative landing page | https://openfang.cc/                                           |
+| Changelog                | https://github.com/RightNow-AI/openfang/blob/main/CHANGELOG.md |
+| Releases                 | https://github.com/RightNow-AI/openfang/releases               |
 
 ### Analysis and Reviews
 
-| Source | URL |
-|--------|-----|
-| SitePoint benchmarks | https://www.sitepoint.com/openfang-rust-agent-os-performance-benchmarks/ |
-| i-SCOOP deep dive | https://www.i-scoop.eu/openfang/ |
-| OpenClaw comparison (openclawai.net) | https://openclawai.net/blog/openfang-vs-openclaw |
-| OpenClaw alternatives comparison | https://openclaw-install.com/alternatives/openfang |
-| Till Freitag deep dive (German) | https://till-freitag.com/blog/openfang-agent-operating-system |
-| Till Freitag alternatives overview | https://till-freitag.com/en/blog/openclaw-alternatives-en |
-| LinkedIn architecture post | https://www.linkedin.com/pulse/openfang-autonomous-agent-operating-system-features-narayanaswamy-5v6cc |
-| Shelldex FAQ | https://shelldex.com/faq/ |
-| NemoClaw vs OpenClaw comparison | https://www.secondtalent.com/resources/nemoclaw-vs-openclaw/ |
+| Source                               | URL                                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| SitePoint benchmarks                 | https://www.sitepoint.com/openfang-rust-agent-os-performance-benchmarks/                               |
+| i-SCOOP deep dive                    | https://www.i-scoop.eu/openfang/                                                                       |
+| OpenClaw comparison (openclawai.net) | https://openclawai.net/blog/openfang-vs-openclaw                                                       |
+| OpenClaw alternatives comparison     | https://openclaw-install.com/alternatives/openfang                                                     |
+| Till Freitag deep dive (German)      | https://till-freitag.com/blog/openfang-agent-operating-system                                          |
+| Till Freitag alternatives overview   | https://till-freitag.com/en/blog/openclaw-alternatives-en                                              |
+| LinkedIn architecture post           | https://www.linkedin.com/pulse/openfang-autonomous-agent-operating-system-features-narayanaswamy-5v6cc |
+| Shelldex FAQ                         | https://shelldex.com/faq/                                                                              |
+| NemoClaw vs OpenClaw comparison      | https://www.secondtalent.com/resources/nemoclaw-vs-openclaw/                                           |
 
 ### Community Discussions
 
-| Source | URL |
-|--------|-----|
-| Jaber LinkedIn announcement | https://www.linkedin.com/posts/osama-jaber-osama2001_we-open-sourced-an-operating-system-for-ai-activity-7432586734468743168-INtv |
-| Reddit r/AIDeveloperNews | https://www.reddit.com/r/AIDeveloperNews/comments/1rgq37a/ |
-| Medium: "I Ignored 30+ Alternatives Until OpenFang" | https://agentnativedev.medium.com/i-ignored-30-openclaw-alternatives-until-openfang-ff11851b83f1 |
-| YouTube: "This AI Works While You Sleep" | https://www.youtube.com/watch?v=CcnfD6GWIWQ |
-| YouTube: "Meet OpenFang" | https://www.youtube.com/watch?v=JX-MbP0qMCk |
+| Source                                              | URL                                                                                                                               |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Jaber LinkedIn announcement                         | https://www.linkedin.com/posts/osama-jaber-osama2001_we-open-sourced-an-operating-system-for-ai-activity-7432586734468743168-INtv |
+| Reddit r/AIDeveloperNews                            | https://www.reddit.com/r/AIDeveloperNews/comments/1rgq37a/                                                                        |
+| Medium: "I Ignored 30+ Alternatives Until OpenFang" | https://agentnativedev.medium.com/i-ignored-30-openclaw-alternatives-until-openfang-ff11851b83f1                                  |
+| YouTube: "This AI Works While You Sleep"            | https://www.youtube.com/watch?v=CcnfD6GWIWQ                                                                                       |
+| YouTube: "Meet OpenFang"                            | https://www.youtube.com/watch?v=JX-MbP0qMCk                                                                                       |
 
 ### Related Projects
 
-| Project | URL |
-|---------|-----|
-| OpenClaw | https://github.com/openclaw/openclaw |
-| NemoClaw | https://github.com/NVIDIA/NemoClaw |
+| Project             | URL                                       |
+| ------------------- | ----------------------------------------- |
+| OpenClaw            | https://github.com/openclaw/openclaw      |
+| NemoClaw            | https://github.com/NVIDIA/NemoClaw        |
 | DeepWiki (OpenFang) | https://deepwiki.com/RightNow-AI/openfang |
 
 ---

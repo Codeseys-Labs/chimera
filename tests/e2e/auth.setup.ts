@@ -1,7 +1,8 @@
 import { test as setup, expect } from '@playwright/test';
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'CHANGE_ME_BEFORE_USE';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD env var required');
 const AUTH_FILE = '.auth/user.json';
 
 /**
