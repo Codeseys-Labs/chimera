@@ -188,13 +188,17 @@ async function stackExists(client: CloudFormationClient, stackName: string): Pro
 async function waitForStackDelete(
   client: CloudFormationClient,
   stackName: string,
-  timeoutMs = 20 * 60 * 1000
+  onProgress?: (elapsed: string) => void,
+  timeoutMs = 15 * 60 * 1000 // 15 min per stack (was 20)
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    await new Promise<void>((r) => setTimeout(r, 15_000));
+    await new Promise<void>((r) => setTimeout(r, 10_000)); // 10s intervals
     const exists = await stackExists(client, stackName);
     if (!exists) return;
+    if (onProgress) {
+      onProgress(`${Math.floor((Date.now() - start) / 1000)}s`);
+    }
   }
   throw new Error(`Timed out waiting for ${stackName} to delete after ${timeoutMs / 60000}m`);
 }
@@ -357,13 +361,14 @@ async function startDestroyBuild(
 async function waitForBuild(
   cbClient: CodeBuildClient,
   buildId: string,
-  onStatus?: (phase: string, status: string) => void,
-  timeoutMs = 60 * 60 * 1000 // 60 min — CDK destroy can be slow
+  onStatus?: (phase: string, status: string, elapsed: string) => void,
+  timeoutMs = 45 * 60 * 1000 // 45 min max
 ): Promise<boolean> {
   const start = Date.now();
+  let lastPhase = '';
 
   while (Date.now() - start < timeoutMs) {
-    await new Promise<void>((r) => setTimeout(r, 15_000));
+    await new Promise<void>((r) => setTimeout(r, 10_000)); // Poll every 10s (was 15s)
 
     const resp = await cbClient.send(new BatchGetBuildsCommand({ ids: [buildId] }));
     const build = resp.builds?.[0];
@@ -371,8 +376,15 @@ async function waitForBuild(
 
     const phase = build.currentPhase ?? 'UNKNOWN';
     const status = build.buildStatus ?? 'IN_PROGRESS';
+    const elapsed = `${Math.floor((Date.now() - start) / 1000)}s`;
 
-    if (onStatus) onStatus(phase, status);
+    // Always report progress (not just with --monitor)
+    if (onStatus) onStatus(phase, status, elapsed);
+
+    // Log phase transitions even without a callback
+    if (phase !== lastPhase) {
+      lastPhase = phase;
+    }
 
     if (status === 'SUCCEEDED') return true;
     if (['FAILED', 'FAULT', 'TIMED_OUT', 'STOPPED'].includes(status)) {
@@ -585,9 +597,9 @@ Examples:
           spinner.start('Waiting for CDK destroy to complete (this may take 15-30 minutes)...');
         }
 
-        const buildSucceeded = await waitForBuild(cbClient, buildId, (phase, status) => {
-          if (!options.json && options.monitor) {
-            console.log(color.gray(`  [CodeBuild] Phase: ${phase}  Status: ${status}`));
+        const buildSucceeded = await waitForBuild(cbClient, buildId, (phase, status, elapsed) => {
+          if (!options.json) {
+            spinner.text = `Phase 1: CDK destroy in progress — ${phase} (${status}) [${elapsed}]`;
           }
         });
 
@@ -607,18 +619,21 @@ Examples:
             console.log(color.yellow('\nFalling back to direct CloudFormation stack deletion...'));
           }
           // Fallback: try direct DeleteStack on remaining app stacks
-          // This handles the case where CDK destroy fails (e.g., circular deps)
           for (const stackName of chimeraStacks) {
-            if (stackName === pipelineStackName) continue; // Skip Pipeline — deleted in Phase 2
+            if (stackName === pipelineStackName) continue;
             const exists = await stackExists(cfClient, stackName);
             if (!exists) continue;
+            if (!options.json) spinner.start(`  Fallback: deleting ${stackName}...`);
             try {
+              await disableDdbDeletionProtection(stackName, cfClient, ddbClient);
+              await emptyStackS3Buckets(stackName, cfClient, s3Client);
               await cfClient.send(new DeleteStackCommand({ StackName: stackName }));
-              await waitForStackDelete(cfClient, stackName);
+              await waitForStackDelete(cfClient, stackName, (elapsed) => {
+                if (!options.json) spinner.text = `  Deleting ${stackName}... [${elapsed}]`;
+              });
+              if (!options.json) spinner.succeed(color.green(`  ${stackName} deleted`));
             } catch (err: any) {
-              if (!options.json) {
-                console.log(color.red(`  Failed to delete ${stackName}: ${err.message}`));
-              }
+              if (!options.json) spinner.fail(color.red(`  ${stackName}: ${err.message}`));
             }
           }
         } else {
@@ -639,20 +654,10 @@ Examples:
         const pipelineStillExists = await stackExists(cfClient, pipelineStackName);
         if (pipelineStillExists) {
           await cfClient.send(new DeleteStackCommand({ StackName: pipelineStackName }));
-
-          if (options.monitor && !options.json) {
-            spinner.stop();
-            // Simple poll-based monitoring
-            const start = Date.now();
-            while (Date.now() - start < 20 * 60 * 1000) {
-              await new Promise<void>((r) => setTimeout(r, 15_000));
-              const exists = await stackExists(cfClient, pipelineStackName);
-              if (!exists) break;
-              console.log(color.gray(`  ${pipelineStackName}: DELETE_IN_PROGRESS...`));
-            }
-          } else {
-            await waitForStackDelete(cfClient, pipelineStackName);
-          }
+          await waitForStackDelete(cfClient, pipelineStackName, (elapsed) => {
+            if (!options.json)
+              spinner.text = `Phase 2: Deleting ${pipelineStackName}... [${elapsed}]`;
+          });
         }
 
         if (!options.json) {
