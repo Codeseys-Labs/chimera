@@ -4,7 +4,7 @@
 >
 > Self-evolutionary. Self-optimizing. Self-expanding.
 > A self-evolving, multi-tenant, AWS-native agent platform.
-> Built on Bedrock AgentCore, Strands Agents, and Vercel Chat SDK.
+> Built on Bedrock AgentCore, Strands Agents, and AI SDK v5 Data Stream Protocol.
 
 **Chimera** — the multi-formed creature of Greek mythology. Like its namesake,
 this platform is many things at once: multi-tenant, multi-agent, multi-platform,
@@ -20,48 +20,52 @@ Chimera is a **production-ready Agent-as-a-Service platform** where:
 - **Tenants** deploy AI agents with first-class AWS account access across multiple channels
 - **Agents** use 40 AWS tools, multi-modal processing, memory, and orchestration to build, deploy, and operate infrastructure autonomously
 - **The platform** self-evolves: auto-generates skills, optimizes model routing, A/B tests prompts, modifies its own infrastructure
-- **Everything** runs on AWS managed services with AgentCore MicroVM isolation and 11 production-grade CDK stacks
+- **Everything** runs on AWS managed services with AgentCore MicroVM isolation and 15 production-grade CDK stacks
 
 ### Heritage
 
 Chimera is an AWS-native rebuild inspired by:
 
-| Project | Inspiration |
-|---------|-------------|
+| Project                                            | Inspiration                                                                |
+| -------------------------------------------------- | -------------------------------------------------------------------------- |
 | [OpenClaw](https://github.com/anthropics/openclaw) | 4-tool minimalism, SKILL.md format, ClawHub marketplace, 23+ chat channels |
-| [NemoClaw](https://github.com/NVIDIA/NemoClaw) | Enterprise security (Landlock LSM, seccomp), deny-by-default policies |
-| [OpenFang](https://github.com/RightNowAI/OpenFang) | Rust Agent OS, 16-layer security, WASM sandbox, 180ms cold start |
+| [NemoClaw](https://github.com/NVIDIA/NemoClaw)     | Enterprise security (Landlock LSM, seccomp), deny-by-default policies      |
+| [OpenFang](https://github.com/RightNowAI/OpenFang) | Rust Agent OS, 16-layer security, WASM sandbox, 180ms cold start           |
 
 ### What Makes It Different
 
-| Capability | Implementation Status |
-|-----------|----------------------|
-| **AWS Account Intelligence** | ✅ **BUILT** — 40 AWS tools (19 TypeScript + 21 Python: EC2, S3, Lambda, CloudWatch, RDS, SageMaker, Athena, Step Functions, CodePipeline, etc.) • Discovery modules (Config, Resource Explorer, Cost analyzer, Stack inventory) • Well-Architected Framework tool for architecture review |
-| **Infrastructure as Capability** | ✅ **BUILT** — Infra-builder module generates CDK from requirements • CodeCommit/CodePipeline tools for git-based deployment • Self-modifying IaC with safety harness |
-| **Multi-Modal Processing** | ✅ **BUILT** — Auto-detection and routing for images, audio, video, documents • Rekognition, Transcribe, Textract tools integrated |
-| **Agent Runtime** | ✅ **BUILT** — Python agent with Strands SDK + AgentCore Runtime • ReAct loop with streaming • MicroVM isolation • AgentCore Memory integration (STM + LTM) |
-| **Autonomous Problem Solving** | ✅ **BUILT** — Swarm orchestration (task decomposer, role assigner, progressive refiner, blocker resolver, HITL gateway) • Multi-agent workflows via Step Functions |
-| **Self-Evolution** | ✅ **BUILT** — 7 evolution modules (auto-skill generator, experiment runner, IaC modifier, model router, prompt optimizer, safety harness) • A/B testing framework • Evolution stack (577 LOC) |
-| **Multi-Tenant Isolation** | ✅ **BUILT** — Tenant router, Cedar authorization engine, quota manager, rate limiter (token bucket) • Per-tenant KMS encryption • DynamoDB partition isolation with GSI FilterExpression enforcement |
-| **Enterprise Security** | ✅ **BUILT** — 7-stage skill security pipeline • Trust engine with 5-tier model • Cross-tenant isolation tests • Audit trail with CMK encryption |
-| **Observability** | ✅ **BUILT** — Activity logging with ADR/runbook generators • CloudWatch alarms with runbooks • X-Ray distributed tracing • Real-time cost tracking |
-| **Multi-Account Management** | ✅ **BUILT** — Multi-account orchestration module • AWS Organizations integration • Cross-account role assumption • SCP enforcement |
-| **Universal Skills** | ✅ **BUILT** — Skill registry, discovery, installer, validator, MCP gateway client • SKILL.md v2 parser • 5-tier trust model (Platform, Verified, Community, Private, Experimental) |
-| **Multi-Platform Chat** | ✅ **CODE COMPLETE** — Vercel Chat SDK integration • SSE bridge (760+ LOC, ship-ready) • Chimera identity + system prompt wired • Bedrock inference profile configured • Adapter stubs for Slack, Discord, Teams, Telegram |
-| **CLI Deploy Flow** | ✅ **BUILT** — 16 commands: deploy, monitor, chat, doctor, login (terminal + browser), session, skill, tenant, status, sync, init, setup, destroy, upgrade, connect, completion |
+| Capability                       | Implementation Status                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **AWS Account Intelligence**     | ✅ **BUILT** — 40 AWS tools (19 TypeScript + 21 Python: EC2, S3, Lambda, CloudWatch, RDS, SageMaker, Athena, Step Functions, CodePipeline, etc.) • Discovery modules (Config, Resource Explorer, Cost analyzer, Stack inventory) • Well-Architected Framework tool for architecture review |
+| **Infrastructure as Capability** | ✅ **BUILT** — Infra-builder module generates CDK from requirements • CodeCommit/CodePipeline tools for git-based deployment • Self-modifying IaC with safety harness                                                                                                                      |
+| **Multi-Modal Processing**       | ✅ **BUILT** — Auto-detection and routing for images, audio, video, documents • Rekognition, Transcribe, Textract tools integrated                                                                                                                                                         |
+| **Agent Runtime**                | ✅ **BUILT** — Python agent with Strands SDK + AgentCore Runtime • ReAct loop with streaming • MicroVM isolation • AgentCore Memory integration (STM + LTM)                                                                                                                                |
+| **Autonomous Problem Solving**   | ✅ **BUILT** — Swarm orchestration (task decomposer, role assigner, progressive refiner, blocker resolver, HITL gateway) • Multi-agent workflows via Step Functions                                                                                                                        |
+| **Self-Evolution**               | ✅ **BUILT** — 7 evolution modules (auto-skill generator, experiment runner, IaC modifier, model router, prompt optimizer, safety harness) • A/B testing framework • Evolution stack (577 LOC)                                                                                             |
+| **Multi-Tenant Isolation**       | ✅ **BUILT** — Tenant router, Cedar authorization engine, quota manager, rate limiter (token bucket) • Per-tenant KMS encryption • DynamoDB partition isolation with GSI FilterExpression enforcement                                                                                      |
+| **Enterprise Security**          | ✅ **BUILT** — 7-stage skill security pipeline • Trust engine with 5-tier model • Cross-tenant isolation tests • Audit trail with CMK encryption                                                                                                                                           |
+| **Observability**                | ✅ **BUILT** — Activity logging with ADR/runbook generators • CloudWatch alarms with runbooks • X-Ray distributed tracing • Real-time cost tracking                                                                                                                                        |
+| **Multi-Account Management**     | ✅ **BUILT** — Multi-account orchestration module • AWS Organizations integration • Cross-account role assumption • SCP enforcement                                                                                                                                                        |
+| **Universal Skills**             | ✅ **BUILT** — Skill registry, discovery, installer, validator, MCP gateway client • SKILL.md v2 parser • 5-tier trust model (Platform, Verified, Community, Private, Experimental)                                                                                                        |
+| **Multi-Platform Chat**          | ✅ **BUILT** — 5 platform adapters (Web, Slack, Discord, Teams, Telegram) • AI SDK v5 Data Stream Protocol • SSE bridge (760+ LOC) • Chimera identity + system prompt wired • Real Bedrock streaming via BedrockModel (ConverseStream) + MantleModel (OpenAI-compat)                       |
+| **CLI Deploy Flow**              | ✅ **BUILT** — 21 commands: deploy, monitor, chat, doctor, login (terminal + browser), session, skill, tenant, status, sync, init, setup, destroy, upgrade, connect, completion, endpoints, config, logs, version, help                                                                    |
 
 ## Architecture
 
 ```
-Users (Slack/Teams/Discord/Telegram/WhatsApp/Web)
+Platform Adapters (Web, Slack, Discord, Teams, Telegram)
          │
-    Vercel Chat SDK (ECS Fargate)
-         │ Data Stream Protocol
+    Hono on ECS Fargate (chat-gateway)
+         │ AI SDK v5 Data Stream Protocol
+    ┌─────┴──────────────────────────┐
+    │  BedrockModel (ConverseStream) │
+    │  MantleModel (OpenAI-compat)   │
+    └─────┬──────────────────────────┘
     API Gateway (HTTP API, WebSocket)
          │
     Tenant Router (Cognito JWT → DynamoDB)
          │
-    ┌────┴────────────────────────────────┐
+    ┌────┴────────────────────────────┐
     │       AgentCore Runtime             │
     │  ┌─────────┐ ┌─────────┐ ┌───────┐ │
     │  │Tenant A │ │Tenant B │ │ Cron  │ │
@@ -79,45 +83,60 @@ Users (Slack/Teams/Discord/Telegram/WhatsApp/Web)
 
 ## AWS Services
 
-| Service | Role |
-|---------|------|
-| **AgentCore Runtime** | Agent execution (MicroVM isolation) |
-| **AgentCore Memory** | Session + long-term memory |
-| **AgentCore Gateway** | MCP tool routing |
-| **AgentCore Identity** | Auth (inbound + outbound) |
-| **AgentCore Code Interpreter** | Safe code execution (OpenSandbox) |
-| **AgentCore Browser** | Web browsing (Playwright CDP) |
-| **DynamoDB** | State (6 tables: tenants, sessions, skills, rate-limits, cost-tracking, audit) |
-| **S3** | Storage (skills, tenant data, artifacts, workspace archives) |
-| **EFS** | Agent workspaces (POSIX filesystem, ephemeral) |
-| **CodeCommit** | Git-backed workspaces (version control for agent sessions) |
-| **CodePipeline** | CI/CD for agent-generated infrastructure |
-| **Cognito** | Tenant authentication |
-| **API Gateway** | API layer (HTTP + WebSocket) |
-| **ECS Fargate** | Chat gateway + SSE bridge |
-| **EventBridge** | Cron scheduling |
-| **Step Functions** | Workflow orchestration |
-| **Cedar** | Policy engine (IAM-style authorization) |
-| **KMS** | Per-tenant encryption keys |
-| **AWS Organizations** | Multi-account management + consolidated billing |
-| **CloudWatch + X-Ray** | Observability + distributed tracing |
-| **AWS Config** | Resource discovery + compliance tracking |
-| **Resource Explorer** | Fast cross-region search |
+| Service                        | Role                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| **AgentCore Runtime**          | Agent execution (MicroVM isolation)                                            |
+| **AgentCore Memory**           | Session + long-term memory                                                     |
+| **AgentCore Gateway**          | MCP tool routing                                                               |
+| **AgentCore Identity**         | Auth (inbound + outbound)                                                      |
+| **AgentCore Code Interpreter** | Safe code execution (OpenSandbox)                                              |
+| **AgentCore Browser**          | Web browsing (Playwright CDP)                                                  |
+| **DynamoDB**                   | State (6 tables: tenants, sessions, skills, rate-limits, cost-tracking, audit) |
+| **S3**                         | Storage (skills, tenant data, artifacts, workspace archives)                   |
+| **EFS**                        | Agent workspaces (POSIX filesystem, ephemeral)                                 |
+| **CodeCommit**                 | Git-backed workspaces (version control for agent sessions)                     |
+| **CodePipeline**               | CI/CD for agent-generated infrastructure                                       |
+| **Cognito**                    | Tenant authentication                                                          |
+| **API Gateway**                | API layer (HTTP + WebSocket)                                                   |
+| **ECS Fargate**                | Chat gateway + SSE bridge                                                      |
+| **EventBridge**                | Cron scheduling                                                                |
+| **Step Functions**             | Workflow orchestration                                                         |
+| **Cedar**                      | Policy engine (IAM-style authorization)                                        |
+| **KMS**                        | Per-tenant encryption keys                                                     |
+| **AWS Organizations**          | Multi-account management + consolidated billing                                |
+| **CloudWatch + X-Ray**         | Observability + distributed tracing                                            |
+| **AWS Config**                 | Resource discovery + compliance tracking                                       |
+| **Resource Explorer**          | Fast cross-region search                                                       |
 
 ## Quick Start
 
 ```bash
-# Clone and install
-git clone <repo-url>
+# Install the CLI (download from GitHub releases)
+curl -L https://github.com/Codeseys-Labs/chimera/releases/latest/download/chimera-darwin-arm64.tar.gz | tar xz
+chmod +x chimera-darwin-arm64
+
+# Or build from source
+git clone https://github.com/Codeseys-Labs/chimera.git
 cd chimera
 bun install
 
-# Run tests
-bun test
+# Deploy to your AWS account
+chimera init                    # Configure AWS profile + region
+chimera deploy --source git \   # Deploy from GitHub
+  --remote https://github.com/Codeseys-Labs/chimera.git
+chimera setup                   # Create admin Cognito user
+chimera endpoints                # Fetch and save all URLs
 
-# Synthesize CDK infrastructure
-cd infra
-npx cdk synth --quiet
+# Verify
+chimera status                  # Check all 15 stack statuses
+chimera doctor                  # Run health checks
+
+# Chat with the agent
+chimera chat                    # Terminal chat
+# Or open the web UI at the Frontend URL from chimera.toml
+
+# Tear down everything
+chimera destroy --force
 ```
 
 ## Project Structure
@@ -137,7 +156,7 @@ chimera/
 │   └── constructs/           # L3 constructs
 ├── docs/                     # Documentation
 │   ├── architecture/         # ADRs and architecture docs
-│   │   └── decisions/        # 30 Architecture Decision Records
+│   │   └── decisions/        # 32 Architecture Decision Records
 │   ├── guide/                # Core guides
 │   ├── guides/               # Operational guides
 │   ├── research/             # Research documents
@@ -147,20 +166,20 @@ chimera/
 
 ## Current Status
 
-**Platform: 90% Complete** — All core infrastructure and agent capabilities are built, tested, and code-complete. First CDK deployment pending.
+**Platform: Production — v0.5.1** — All 15 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary.
 
-| Phase | Status | Key Deliverables |
-|-------|--------|------------------|
-| **0. Foundation** | ✅ **COMPLETE** | 15 CDK stacks (8,700+ LOC), 6-table DynamoDB design, VPC + networking, 30 ADRs, L3 constructs |
-| **1. Agent Runtime** | ✅ **COMPLETE** | Python agent with Strands SDK + AgentCore • 40 AWS tools • Multi-modal processing • Discovery modules • Gateway-based tool discovery |
-| **2. Chat Gateway** | ✅ **CODE COMPLETE** | SSE bridge ship-ready • Chimera identity + system prompt wired • Bedrock model corrected • DSP parser fixed • React frontend with Amplify auth • Needs first deploy |
+| Phase                  | Status          | Key Deliverables                                                                                                                                          |
+| ---------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0. Foundation**      | ✅ **COMPLETE** | 15 CDK stacks (8,700+ LOC), 6-table DynamoDB design, VPC + networking, 30 ADRs, L3 constructs                                                             |
+| **1. Agent Runtime**   | ✅ **COMPLETE** | Python agent with Strands SDK + AgentCore • 40 AWS tools • Multi-modal processing • Discovery modules • Gateway-based tool discovery                      |
+| **2. Chat Gateway**    | ✅ **COMPLETE** | SSE bridge ship-ready • Chimera identity + system prompt wired • Bedrock model corrected • DSP parser fixed • React frontend with Amplify auth • Deployed |
 | **3. Skill Ecosystem** | ✅ **COMPLETE** | Registry, discovery, installer, validator, MCP gateway • Trust engine • 7-stage security pipeline • SKILL.md v2 parser • MCP/instruction/hybrid providers |
-| **4. Multi-Tenant** | ✅ **COMPLETE** | Tenant router • Cedar authorization • Rate limiting • Quota management • Cost tracking • Per-tenant KMS |
-| **5. Orchestration** | ✅ **COMPLETE** | Swarm modules (5 components) • HITL DDB persistence • Multi-agent workflows • SQS/DDB/EventBridge stubs wired |
-| **6. Self-Evolution** | ✅ **COMPLETE** | 7 evolution modules • Prompt A/B testing • Auto-skill generation • Model routing • Self-modifying IaC with safety harness |
-| **7. Production** | 🚧 **DEPLOY PENDING** | 15 stacks synthesise cleanly • CI/CD pipeline stack complete • Canary env-aware bake • Frontend in CI • Needs `cdk deploy --all` |
+| **4. Multi-Tenant**    | ✅ **COMPLETE** | Tenant router • Cedar authorization • Rate limiting • Quota management • Cost tracking • Per-tenant KMS                                                   |
+| **5. Orchestration**   | ✅ **COMPLETE** | Swarm modules (5 components) • HITL DDB persistence • Multi-agent workflows • SQS/DDB/EventBridge stubs wired                                             |
+| **6. Self-Evolution**  | ✅ **COMPLETE** | 7 evolution modules • Prompt A/B testing • Auto-skill generation • Model routing • Self-modifying IaC with safety harness                                 |
+| **7. Production**      | ✅ **COMPLETE** | Verified: deploy from public repo → 15 stacks → E2E pass → destroy → clean account                                                                        |
 
-**Test Coverage:** 2206 passing / 38 failing (6 errors, 25 skip) = 2269 total tests across 120 test files. Failures are E2E tests requiring live AWS infra.
+**Test Coverage:** ~2,500 tests across 150+ test files (1,285 core, 60 web, 43 SSE bridge, 196 orchestration, 178 chat-gateway, 11 Playwright E2E specs).
 
 ## Documentation
 
@@ -175,7 +194,7 @@ chimera/
 
 - **[System Architecture](docs/architecture/system-architecture.md)** — 9 mermaid diagrams covering CDK stacks, request flows, auth, self-evolution, multi-tenant isolation, skill lifecycle, deploy pipeline, and session state
 - **[CLI Lifecycle](docs/architecture/cli-lifecycle.md)** — Command registry, 7-stage operator workflow, deploy internals, Cognito challenge loop, doctor health checks
-- **[Deployment Architecture](docs/architecture/deployment-architecture.md)** — 14-stack CDK topology, deployment order, CDK Nag compliance, custom aspects
+- **[Deployment Architecture](docs/architecture/deployment-architecture.md)** — 15-stack CDK topology, deployment order, CDK Nag compliance, custom aspects
 - **[Agent Architecture](docs/architecture/agent-architecture.md)** — Strands ReAct loop, AWS tool tiers, skill runtime, evolution engine, memory architecture
 - **[Canonical Data Model](docs/architecture/canonical-data-model.md)** — 6-table DynamoDB schema, GSI design, multi-tenant isolation patterns
 
@@ -183,21 +202,22 @@ chimera/
 
 **Production Implementation:**
 
-| Metric | Count |
-|--------|-------|
-| **Packages** | 7 (core, agents, shared, sse-bridge, chat-gateway, cli, web) |
-| **CDK Infrastructure Stacks** | 15 stacks (8,700+ LOC) |
-| **TypeScript LOC** | ~75,700 lines (packages/core/src/) |
-| **Python Agent Runtime** | 252 lines (chimera_agent.py) + ~9,200 total Python LOC |
-| **AWS Tool Implementations** | 40 tools (19 TypeScript + 21 Python) + 5 Cloud Map discovery tools |
-| **CLI Commands** | 16 (chat, completion, connect, deploy, destroy, doctor, init, login, monitor, session, setup, skill, status, sync, tenant, upgrade) |
-| **Core Modules** | 22 (activity, agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected) |
-| **Test Coverage** | 2269 tests (2206 pass, 38 fail, 6 errors, 25 skip) across 120 test files |
-| **Test Assertions** | 4,084 expect() calls |
-| **Architecture Decision Records** | 30 ADRs |
-| **Research Documentation** | 123 docs, 118,000+ lines |
+| Metric                            | Count                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Packages**                      | 7 (core, agents, shared, sse-bridge, chat-gateway, cli, web)                                                                                                                                                       |
+| **CDK Infrastructure Stacks**     | 15 stacks (8,700+ LOC)                                                                                                                                                                                             |
+| **TypeScript LOC**                | ~91,300 lines                                                                                                                                                                                                      |
+| **Python Agent Runtime**          | 252 lines (chimera_agent.py) + ~9,200 total Python LOC                                                                                                                                                             |
+| **AWS Tool Implementations**      | 40 tools (19 TypeScript + 21 Python) + 5 Cloud Map discovery tools                                                                                                                                                 |
+| **CLI Commands**                  | 21 (chat, completion, config, connect, deploy, destroy, doctor, endpoints, help, init, login, logs, monitor, session, setup, skill, status, sync, tenant, upgrade, version)                                        |
+| **Core Modules**                  | 22 (activity, agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected) |
+| **Test Coverage**                 | ~2,500 tests across 150+ test files                                                                                                                                                                                |
+| **Test Assertions**               | 4,084 expect() calls                                                                                                                                                                                               |
+| **Architecture Decision Records** | 32 ADRs                                                                                                                                                                                                            |
+| **Research Documentation**        | 123 docs, 118,000+ lines                                                                                                                                                                                           |
 
 **Key Components Built:**
+
 - ✅ Agent runtime (Strands + AgentCore in Python, 252 LOC + ~9,200 total)
 - ✅ 40 AWS service tools (19 TypeScript + 21 Python: EC2, S3, Lambda, RDS, SageMaker, Athena, Glue, Redshift, OpenSearch, Step Functions, CodePipeline, CodeCommit, CodeBuild, CloudWatch, Rekognition, Transcribe, Textract, SQS, Bedrock, etc.)
 - ✅ Discovery triad (AWS Config, Resource Explorer, Cost Explorer)
@@ -209,7 +229,11 @@ chimera/
 - ✅ Well-Architected Framework integration (6-pillar review tool)
 - ✅ Infrastructure-as-code builder (CDK generation from requirements)
 - ✅ Activity logging with ADR/runbook auto-generation
-- ✅ 14 production CDK stacks (8,700+ LOC) (Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration, Email, Frontend, GatewayRegistration)
+- ✅ 15 production CDK stacks (8,700+ LOC) (Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration, Email, Frontend, GatewayRegistration, Destroy)
+
+### Destroy Lifecycle
+
+`chimera destroy --force` runs a 3-phase CodeBuild-delegated teardown that removes all 15 stacks and leaves the AWS account clean. Phase 1 destroys application stacks (Chat, API, Frontend, etc.), Phase 2 removes data and security stacks (with S3 bucket auto-emptying and Cognito cleanup), and Phase 3 tears down the network foundation. See [ADR-032](docs/architecture/decisions/032-codebuild-delegated-destroy.md) for design details.
 
 ## License
 
@@ -217,4 +241,4 @@ Apache-2.0
 
 ---
 
-*Chimera — where agents are forged.*
+_Chimera — where agents are forged._
