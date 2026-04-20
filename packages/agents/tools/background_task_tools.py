@@ -14,6 +14,7 @@ import os
 import json
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from datetime import datetime, timezone
 from typing import Optional
 from strands.tools import tool
@@ -179,7 +180,7 @@ Status: queued
 The task is now running in the background. Use check_background_task(task_id="{task_id}") to check its status.
 You can continue our conversation while the task executes."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting background task: {str(e)}"
 
 
@@ -269,5 +270,5 @@ Queued at: {queued_at}"""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error checking background task status: {str(e)}"

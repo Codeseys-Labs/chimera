@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -72,7 +73,7 @@ Output Location: {output_location}
 
 Use get_athena_query_status() to check progress."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting Athena query: {str(e)}"
 
 
@@ -147,7 +148,7 @@ State: {state}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting query status: {str(e)}"
 
 
@@ -213,7 +214,7 @@ def get_athena_query_results(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting query results: {str(e)}"
 
 
@@ -242,7 +243,7 @@ def stop_athena_query(
 
         return f"Query {query_execution_id} has been stopped."
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error stopping query: {str(e)}"
 
 
@@ -291,7 +292,7 @@ def list_athena_databases(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing databases: {str(e)}"
 
 
@@ -360,5 +361,5 @@ def list_athena_tables(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing tables: {str(e)}"

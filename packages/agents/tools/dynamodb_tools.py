@@ -14,6 +14,7 @@ import os
 from typing import Optional
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
 
 from .tenant_context import TenantContextError, ensure_tenant_filter, require_tenant_id
@@ -92,7 +93,7 @@ def dynamodb_query(
             indent=2,
         )
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return f"DynamoDB query failed: {str(e)[:500]}"
 
 
@@ -126,7 +127,7 @@ def dynamodb_get_item(
 
         return json.dumps(item, default=str, indent=2)
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return f"DynamoDB GetItem failed: {str(e)[:500]}"
 
 
@@ -161,7 +162,7 @@ def dynamodb_put_item(
         table.put_item(**kwargs)
         return f"Item written to {table_name} successfully."
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return f"DynamoDB PutItem failed: {str(e)[:500]}"
 
 
@@ -206,7 +207,7 @@ def dynamodb_update_item(
         response = table.update_item(**kwargs)
         return json.dumps(response.get("Attributes", {}), default=str, indent=2)
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return f"DynamoDB UpdateItem failed: {str(e)[:500]}"
 
 
@@ -262,5 +263,5 @@ def dynamodb_scan(
             indent=2,
         )
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return f"DynamoDB Scan failed: {str(e)[:500]}"

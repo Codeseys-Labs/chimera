@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import List, Dict, Any
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -70,7 +71,7 @@ def list_ec2_instances(region: str = "us-east-1") -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing EC2 instances in {region}: {str(e)}"
 
 
@@ -148,5 +149,5 @@ Configuration:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting instance details for {instance_id}: {str(e)}"

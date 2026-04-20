@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 import tools.cloudmap_tools as cm
 from tools.cloudmap_tools import (
@@ -314,7 +315,10 @@ class TestDiscoverInfrastructure:
 
     def test_reports_error_on_exception(self, mocker):
         client = MagicMock()
-        client.get_paginator.side_effect = Exception('Connection refused')
+        client.get_paginator.side_effect = ClientError(
+            {'Error': {'Code': 'ConnectionError', 'Message': 'Connection refused'}},
+            'ListNamespaces',
+        )
         mocker.patch('tools.cloudmap_tools.boto3.client', return_value=client)
 
         result = discover_infrastructure(env_name='dev')
@@ -390,7 +394,10 @@ class TestGetServiceInstances:
 
     def test_reports_error_on_exception(self, mocker):
         client = MagicMock()
-        client.get_paginator.side_effect = Exception('Throttled')
+        client.get_paginator.side_effect = ClientError(
+            {'Error': {'Code': 'ThrottlingException', 'Message': 'Throttled'}},
+            'ListNamespaces',
+        )
         self._patch_client(mocker, client)
 
         result = get_service_instances(service_name='chat-gateway', env_name='dev')
@@ -491,7 +498,10 @@ class TestGetNamespaceSummary:
 
     def test_reports_error_on_exception(self, mocker):
         client = MagicMock()
-        client.get_paginator.side_effect = Exception('AccessDenied')
+        client.get_paginator.side_effect = ClientError(
+            {'Error': {'Code': 'AccessDeniedException', 'Message': 'AccessDenied'}},
+            'ListNamespaces',
+        )
         self._patch_client(mocker, client)
 
         result = get_namespace_summary(env_name='dev')

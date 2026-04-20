@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import List, Dict, Any
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -46,7 +47,7 @@ def list_s3_buckets() -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing S3 buckets: {str(e)}"
 
 
@@ -104,5 +105,5 @@ Total Size: {size_str}"""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting bucket info for {bucket_name}: {str(e)}"

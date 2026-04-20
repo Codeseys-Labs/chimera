@@ -15,6 +15,7 @@ import boto3
 import json
 import base64
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -88,7 +89,7 @@ def bedrock_invoke_model(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -162,7 +163,7 @@ def bedrock_invoke_model_stream(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -230,7 +231,7 @@ def bedrock_list_foundation_models(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -282,7 +283,7 @@ def bedrock_get_foundation_model(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -342,7 +343,7 @@ def bedrock_list_inference_profiles(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),

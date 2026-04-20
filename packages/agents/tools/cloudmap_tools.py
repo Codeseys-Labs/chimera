@@ -14,6 +14,7 @@ from typing import List, Optional
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
 
@@ -105,7 +106,7 @@ def discover_infrastructure(
 
         return result.rstrip()
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error discovering infrastructure: {str(e)}"
 
 
@@ -160,7 +161,7 @@ def get_service_instances(
 
         return result.rstrip()
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting instances for service '{service_name}': {str(e)}"
 
 
@@ -222,7 +223,7 @@ Services registered:\n"""
 
         return result.rstrip()
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting namespace summary: {str(e)}"
 
 

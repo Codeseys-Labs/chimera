@@ -6,6 +6,7 @@ analytics engine deployment and configuration.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
 
@@ -76,7 +77,7 @@ def describe_opensearch_domains(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError, ValueError) as e:
         return f"Error describing OpenSearch domains: {str(e)}"
 
 
@@ -143,7 +144,7 @@ Region: {region}
 
 Note: Domain creation takes 15-30 minutes. Use describe_opensearch_domains to check status."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating OpenSearch domain: {str(e)}"
 
 
@@ -180,7 +181,7 @@ Region: {region}
 
 Note: Deletion takes 10-15 minutes."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting OpenSearch domain: {str(e)}"
 
 
@@ -244,7 +245,7 @@ Region: {region}
 
 Note: Configuration changes take 15-30 minutes to apply."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error updating OpenSearch domain: {str(e)}"
 
 
@@ -284,7 +285,7 @@ def list_opensearch_domain_names(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing OpenSearch domains: {str(e)}"
 
 
@@ -334,5 +335,5 @@ def get_opensearch_compatible_versions(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting compatible versions: {str(e)}"
