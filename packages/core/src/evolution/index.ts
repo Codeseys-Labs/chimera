@@ -25,6 +25,8 @@ export {
 export {
   ModelRouter,
   createModelRouter,
+  enforceTierCeiling,
+  MODEL_TIER_ALLOWLIST,
 } from './model-router';
 
 // Prompt optimization

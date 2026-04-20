@@ -6,8 +6,13 @@
  * are tested with a mock send function injected via module-level spy.
  */
 
-import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { createModelRouter, addModelsToConfig } from '../model-router';
+import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
+import {
+  createModelRouter,
+  addModelsToConfig,
+  enforceTierCeiling,
+  MODEL_TIER_ALLOWLIST,
+} from '../model-router';
 import type { TenantModelConfig } from '@chimera/shared';
 
 // ---------------------------------------------------------------------------
@@ -172,5 +177,102 @@ describe('ModelRouter updateCostSensitivity validation', () => {
     await expect(
       router.updateCostSensitivity({ tenantId: 'tenant-1', costSensitivity: 1.5 })
     ).rejects.toThrow('between 0 and 1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enforceTierCeiling — terminal invoke-time gate
+// ---------------------------------------------------------------------------
+
+describe('enforceTierCeiling', () => {
+  const OPUS = 'us.anthropic.claude-opus-4-7';
+  const SONNET = 'us.anthropic.claude-sonnet-4-6-v1:0';
+  const HAIKU = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+  let warnSpy: ReturnType<typeof mock>;
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    originalWarn = console.warn;
+    warnSpy = mock(() => {});
+    console.warn = warnSpy as unknown as typeof console.warn;
+  });
+
+  afterEach(() => {
+    console.warn = originalWarn;
+  });
+
+  it('MODEL_TIER_ALLOWLIST has entries for every tier', () => {
+    expect(MODEL_TIER_ALLOWLIST.basic.length).toBeGreaterThan(0);
+    expect(MODEL_TIER_ALLOWLIST.advanced.length).toBeGreaterThan(0);
+    // premium is an open allowlist (empty = no ceiling)
+    expect(MODEL_TIER_ALLOWLIST.premium).toBeDefined();
+  });
+
+  it('basic tenant requesting Opus falls back to a cheaper allowed model and warns', () => {
+    const result = enforceTierCeiling(OPUS, 'basic');
+
+    expect(result).not.toBe(OPUS);
+    expect(MODEL_TIER_ALLOWLIST.basic).toContain(result);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warnMsg = (warnSpy.mock.calls[0] ?? [])[0] as string;
+    expect(warnMsg).toContain('basic');
+    expect(warnMsg).toContain(OPUS);
+  });
+
+  it('advanced tenant requesting a non-allowlisted model falls back and warns', () => {
+    // Opus 4-6 is not in the advanced allowlist (only Opus 4-7 is).
+    const result = enforceTierCeiling('us.anthropic.claude-opus-4-6-v1:0', 'advanced');
+
+    expect(MODEL_TIER_ALLOWLIST.advanced).toContain(result);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('advanced tenant requesting Opus 4-7 succeeds (allowlisted)', () => {
+    const result = enforceTierCeiling(OPUS, 'advanced');
+
+    expect(result).toBe(OPUS);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('premium tenant requesting Opus succeeds (empty allowlist = no ceiling)', () => {
+    const result = enforceTierCeiling(OPUS, 'premium');
+
+    expect(result).toBe(OPUS);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('premium tenant requesting an unknown model is not blocked', () => {
+    // Premium has no ceiling — even unknown models pass through.
+    const result = enforceTierCeiling('unknown-vendor.model-x-v1', 'premium');
+
+    expect(result).toBe('unknown-vendor.model-x-v1');
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('basic tenant requesting Sonnet succeeds (explicitly allowed)', () => {
+    const result = enforceTierCeiling(SONNET, 'basic');
+
+    expect(result).toBe(SONNET);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('basic tenant requesting Haiku succeeds (cheapest)', () => {
+    const result = enforceTierCeiling(HAIKU, 'basic');
+
+    expect(result).toBe(HAIKU);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('fallback for basic tier is the cheapest model in the allowlist', () => {
+    const fallback = enforceTierCeiling(OPUS, 'basic');
+    // Cheapest in the basic allowlist is Haiku.
+    expect(fallback).toBe(HAIKU);
+  });
+
+  it('fallback for advanced tier is the cheapest model in the allowlist', () => {
+    const fallback = enforceTierCeiling('not-allowed-model', 'advanced');
+    // Cheapest in the advanced allowlist is Haiku.
+    expect(fallback).toBe(HAIKU);
   });
 });

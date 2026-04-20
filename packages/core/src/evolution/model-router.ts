@@ -18,7 +18,12 @@ import {
   PutCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import type { TenantModelConfig, ModelWithCost, ModelRoutingMode } from '@chimera/shared';
+import type {
+  TenantModelConfig,
+  ModelWithCost,
+  ModelRoutingMode,
+  TenantTier,
+} from '@chimera/shared';
 import type {
   TaskCategory,
   ModelId,
@@ -29,13 +34,116 @@ import type {
 
 /**
  * Default model costs (fallback if not in tenant config)
+ *
+ * Also used by {@link enforceTierCeiling} to pick the cheapest allowed
+ * model when a requested model isn't in the tier's allowlist.
  */
 const DEFAULT_MODEL_COSTS: Record<string, number> = {
   'us.amazon.nova-micro-v1:0': 0.000088,
   'us.amazon.nova-lite-v1:0': 0.00024,
+  'us.anthropic.claude-haiku-4-5-20251001-v1:0': 0.0008,
   'us.anthropic.claude-sonnet-4-6-v1:0': 0.009,
   'us.anthropic.claude-opus-4-6-v1:0': 0.045,
+  'us.anthropic.claude-opus-4-7': 0.045,
 };
+
+/**
+ * Per-tier model allowlist — the terminal gate enforced at invoke time.
+ *
+ * This is separate from `TenantModelConfig.allowedModels` (which can be
+ * misconfigured or missing). {@link enforceTierCeiling} uses this table as
+ * the last line of defense so a Basic tenant cannot land on Opus even if
+ * their tier config is incomplete.
+ *
+ * - `basic`    — cheap models only (Haiku, Sonnet). Sonnet allowed but costly.
+ * - `advanced` — Haiku, Sonnet, Opus.
+ * - `premium`  — all models (empty array = no ceiling).
+ */
+export const MODEL_TIER_ALLOWLIST: Record<TenantTier, readonly string[]> = {
+  basic: [
+    'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    'us.anthropic.claude-sonnet-4-6-v1:0', // allowed but costly
+  ] as const,
+  advanced: [
+    'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    'us.anthropic.claude-sonnet-4-6-v1:0',
+    'us.anthropic.claude-opus-4-7',
+  ] as const,
+  premium: [] as const, // empty = all models allowed
+} as const;
+
+/**
+ * Cheapest fallback model per tier — used when `enforceTierCeiling` needs
+ * to downgrade a disallowed request. Chosen to be a universally available
+ * inference profile for that tier.
+ */
+const TIER_FALLBACK_MODEL: Record<TenantTier, string> = {
+  basic: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  advanced: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  premium: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+};
+
+/**
+ * Pick the cheapest model from the tier's allowlist. Falls back to
+ * {@link TIER_FALLBACK_MODEL} if the tier's allowlist is empty (premium)
+ * or if no cost data is available for any allowlisted model.
+ */
+function cheapestAllowedForTier(tier: TenantTier): string {
+  const allowlist = MODEL_TIER_ALLOWLIST[tier];
+  const first = allowlist[0];
+  if (first === undefined) {
+    // Empty allowlist (premium): no ceiling, but we still need a concrete
+    // fallback if the enforcement path is somehow reached with an unknown
+    // model.
+    return TIER_FALLBACK_MODEL[tier];
+  }
+
+  let cheapest = first;
+  let cheapestCost = DEFAULT_MODEL_COSTS[cheapest] ?? Number.POSITIVE_INFINITY;
+  for (const modelId of allowlist) {
+    const cost = DEFAULT_MODEL_COSTS[modelId];
+    if (cost !== undefined && cost < cheapestCost) {
+      cheapest = modelId;
+      cheapestCost = cost;
+    }
+  }
+  return cheapest;
+}
+
+/**
+ * Terminal tier-ceiling enforcement for model selection.
+ *
+ * Called at invoke time — after `ModelRouter.selectModel()` and any other
+ * selection logic — as the LAST gate before the request hits Bedrock.
+ * Returns `modelId` if the tier permits it; otherwise returns the cheapest
+ * allowed model for that tier and logs a warning so the downgrade is
+ * observable.
+ *
+ * Premium tier has an empty allowlist, meaning all models are allowed.
+ *
+ * @param modelId  The requested Bedrock inference profile / model ID.
+ * @param tier     The tenant's subscription tier.
+ * @returns        Either `modelId` unchanged or a tier-appropriate fallback.
+ */
+export function enforceTierCeiling(modelId: string, tier: TenantTier): string {
+  const allowlist = MODEL_TIER_ALLOWLIST[tier];
+
+  // Premium (empty allowlist) = no ceiling.
+  if (allowlist.length === 0) {
+    return modelId;
+  }
+
+  if (allowlist.includes(modelId)) {
+    return modelId;
+  }
+
+  const fallback = cheapestAllowedForTier(tier);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[model-router] Tier ceiling enforcement: tier='${tier}' requested modelId='${modelId}' is not in the tier allowlist. Falling back to cheapest allowed model '${fallback}'.`
+  );
+  return fallback;
+}
 
 /**
  * Bayesian model router with Thompson Sampling
