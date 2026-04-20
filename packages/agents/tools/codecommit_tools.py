@@ -8,6 +8,7 @@ import boto3
 import os
 import subprocess
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -51,7 +52,7 @@ def list_codecommit_repos(region: str = "us-east-1") -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing CodeCommit repositories in {region}: {str(e)}"
 
 
@@ -107,7 +108,7 @@ Last Modified: {last_modified_str}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting repository info for {repo_name}: {str(e)}"
 
 
@@ -163,7 +164,7 @@ def git_clone_repo(
 
     except subprocess.TimeoutExpired:
         return f"Error: Clone operation timed out after 5 minutes"
-    except Exception as e:
+    except (ClientError, BotoCoreError, OSError, subprocess.SubprocessError) as e:
         return f"Error cloning repository {repo_name}: {str(e)}"
 
 
@@ -260,7 +261,7 @@ def git_commit_push(
     except subprocess.TimeoutExpired:
         os.chdir(original_dir)
         return "Error: Push operation timed out after 1 minute"
-    except Exception as e:
+    except (ClientError, BotoCoreError, OSError, subprocess.SubprocessError) as e:
         if original_dir:
             os.chdir(original_dir)
         return f"Error committing and pushing changes: {str(e)}"
@@ -330,5 +331,5 @@ def get_commit_history(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting commit history for {repo_name}: {str(e)}"

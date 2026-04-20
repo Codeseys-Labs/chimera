@@ -10,6 +10,7 @@ import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
 import {
   createModelRouter,
   addModelsToConfig,
+  emitEmfMetric,
   enforceTierCeiling,
   MODEL_TIER_ALLOWLIST,
 } from '../model-router';
@@ -274,5 +275,126 @@ describe('enforceTierCeiling', () => {
     const fallback = enforceTierCeiling('not-allowed-model', 'advanced');
     // Cheapest in the advanced allowlist is Haiku.
     expect(fallback).toBe(HAIKU);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EMF metric emission — tier_violation_count
+// ---------------------------------------------------------------------------
+
+describe('enforceTierCeiling EMF metric emission', () => {
+  const OPUS = 'us.anthropic.claude-opus-4-7';
+  const SONNET = 'us.anthropic.claude-sonnet-4-6-v1:0';
+
+  let logSpy: ReturnType<typeof mock>;
+  let warnSpy: ReturnType<typeof mock>;
+  let originalLog: typeof console.log;
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    originalLog = console.log;
+    originalWarn = console.warn;
+    logSpy = mock(() => {});
+    warnSpy = mock(() => {});
+    console.log = logSpy as unknown as typeof console.log;
+    console.warn = warnSpy as unknown as typeof console.warn;
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+
+  const parseEmfCalls = (): Array<Record<string, unknown>> => {
+    const payloads: Array<Record<string, unknown>> = [];
+    for (const call of logSpy.mock.calls) {
+      const first = (call as unknown[])[0];
+      if (typeof first === 'string') {
+        try {
+          const parsed = JSON.parse(first);
+          if (parsed && typeof parsed === 'object' && '_aws' in parsed) {
+            payloads.push(parsed);
+          }
+        } catch {
+          // non-JSON console.log output — ignore
+        }
+      }
+    }
+    return payloads;
+  };
+
+  it('emits an EMF metric line when a disallowed model falls back', () => {
+    enforceTierCeiling(OPUS, 'basic', 'tenant-leak');
+
+    const payloads = parseEmfCalls();
+    expect(payloads).toHaveLength(1);
+    const payload = payloads[0] as Record<string, unknown>;
+
+    // EMF envelope has the documented shape.
+    const aws = payload['_aws'] as {
+      Timestamp: number;
+      CloudWatchMetrics: Array<{
+        Namespace: string;
+        Dimensions: string[][];
+        Metrics: Array<{ Name: string; Unit: string }>;
+      }>;
+    };
+    expect(aws.CloudWatchMetrics[0]?.Namespace).toBe('Chimera/Agent');
+    expect(aws.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe('tier_violation_count');
+    expect(aws.CloudWatchMetrics[0]?.Metrics[0]?.Unit).toBe('Count');
+    // Dimension names match the audit spec: tenant_id, tier, model_requested.
+    const dimNames = aws.CloudWatchMetrics[0]?.Dimensions[0] ?? [];
+    expect(dimNames).toContain('tenant_id');
+    expect(dimNames).toContain('tier');
+    expect(dimNames).toContain('model_requested');
+
+    // Dimension values + metric value are attached as top-level keys.
+    expect(payload['tenant_id']).toBe('tenant-leak');
+    expect(payload['tier']).toBe('basic');
+    expect(payload['model_requested']).toBe(OPUS);
+    expect(payload['tier_violation_count']).toBe(1);
+  });
+
+  it('falls back tenant_id to "unknown" when none is supplied', () => {
+    enforceTierCeiling(OPUS, 'basic');
+
+    const payloads = parseEmfCalls();
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.['tenant_id']).toBe('unknown');
+  });
+
+  it('does NOT emit a metric when the requested model is already allowed', () => {
+    const result = enforceTierCeiling(SONNET, 'basic', 'tenant-ok');
+
+    expect(result).toBe(SONNET);
+    expect(parseEmfCalls()).toHaveLength(0);
+  });
+
+  it('does NOT emit a metric for premium tier (empty allowlist = no ceiling)', () => {
+    const result = enforceTierCeiling(OPUS, 'premium', 'tenant-premium');
+
+    expect(result).toBe(OPUS);
+    expect(parseEmfCalls()).toHaveLength(0);
+  });
+
+  it('emitEmfMetric helper produces a well-formed EMF line', () => {
+    emitEmfMetric(
+      'Chimera/Agent',
+      'some_metric',
+      42,
+      'Milliseconds',
+      { dim_a: 'A', dim_b: 'B' }
+    );
+
+    const payloads = parseEmfCalls();
+    expect(payloads).toHaveLength(1);
+    const payload = payloads[0] as Record<string, unknown>;
+    expect(payload['some_metric']).toBe(42);
+    expect(payload['dim_a']).toBe('A');
+    expect(payload['dim_b']).toBe('B');
+    const aws = payload['_aws'] as {
+      CloudWatchMetrics: Array<{ Metrics: Array<{ Unit: string }> }>;
+    };
+    expect(aws.CloudWatchMetrics[0]?.Metrics[0]?.Unit).toBe('Milliseconds');
   });
 });

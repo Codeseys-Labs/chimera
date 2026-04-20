@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -53,7 +54,7 @@ def list_pipelines(region: str = "us-east-1") -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing pipelines in {region}: {str(e)}"
 
 
@@ -104,7 +105,7 @@ Stages ({len(pipeline['stages'])}):
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting pipeline details for {pipeline_name}: {str(e)}"
 
 
@@ -170,7 +171,7 @@ def check_pipeline_status(pipeline_name: str, region: str = "us-east-1") -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error checking pipeline status for {pipeline_name}: {str(e)}"
 
 
@@ -207,7 +208,7 @@ Use check_pipeline_status('{pipeline_name}') to monitor progress."""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error triggering pipeline {pipeline_name}: {str(e)}"
 
 
@@ -272,7 +273,7 @@ Start Time: {start_time}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting execution details for {pipeline_name}/{execution_id}: {str(e)}"
 
 
@@ -384,7 +385,7 @@ Use trigger_pipeline('{pipeline_name}') to start the first execution."""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating pipeline {pipeline_name}: {str(e)}"
 
 
@@ -412,5 +413,5 @@ def delete_pipeline(pipeline_name: str, region: str = "us-east-1") -> str:
 
         return f"Pipeline '{pipeline_name}' deleted successfully."
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting pipeline {pipeline_name}: {str(e)}"

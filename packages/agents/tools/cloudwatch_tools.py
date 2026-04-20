@@ -7,6 +7,7 @@ alarms, and log queries.
 import boto3
 import json
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
@@ -74,7 +75,7 @@ Metric: {metric_name}
 Value: {value} {unit}
 Region: {region}"""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error publishing metric: {str(e)}"
 
 
@@ -124,7 +125,7 @@ Time Range: {datetime.fromtimestamp(start_time)} to {datetime.fromtimestamp(end_
 
 Use get_cloudwatch_query_results with this Query ID to retrieve results."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting query: {str(e)}"
 
 
@@ -179,7 +180,7 @@ def get_cloudwatch_query_results(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting query results: {str(e)}"
 
 
@@ -238,7 +239,7 @@ Condition: {statistic} {comparison_operator} {threshold}
 Evaluation: {evaluation_periods} period(s) of {period}s
 Region: {region}"""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating alarm: {str(e)}"
 
 
@@ -294,5 +295,5 @@ def describe_cloudwatch_alarms(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error describing alarms: {str(e)}"

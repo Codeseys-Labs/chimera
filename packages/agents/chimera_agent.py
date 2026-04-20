@@ -15,7 +15,17 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp, entrypoint
 from bedrock_agentcore.memory.integrations.strands import AgentCoreMemorySessionManager
 
 from gateway_config import GatewayToolDiscovery
+from observability import emit_emf_metric
 from system_prompt import CHIMERA_SYSTEM_PROMPT, wrap_untrusted_content
+
+
+# Hard ceiling for the Strands ReAct loop. Keep aligned with the
+# ``max_iterations`` kwarg passed to ``Agent(...)`` below — this value
+# becomes the emitted ``loop_iterations`` datapoint when Strands does
+# not surface the real runtime iteration count on the agent handle.
+# TODO(rabbithole-02): swap to a true per-session counter once Strands
+# exposes a post-iteration hook (see ``_emit_loop_iterations_metric``).
+_AGENT_MAX_ITERATIONS = 20
 
 
 # Initialize AgentCore app
@@ -71,14 +81,60 @@ async def handle(context) -> AsyncIterator[str]:
             system_prompt=system_prompt,
             tools=tools,
             session_manager=memory_manager,
-            max_iterations=20,  # ReAct loop limit
+            max_iterations=_AGENT_MAX_ITERATIONS,  # ReAct loop limit
         )
 
         # 8. Execute agent and stream response
-        async for chunk in agent.stream(context.input_text):
-            yield chunk
+        try:
+            async for chunk in agent.stream(context.input_text):
+                yield chunk
+        finally:
+            # Emit loop_iterations exactly once per session, including on
+            # error paths — runaway loops are most interesting when they
+            # exit with a failure. Resolve session_id lazily so callers
+            # outside the AgentCore Runtime (unit tests, local dev) still
+            # get a well-formed metric.
+            _emit_loop_iterations_metric(
+                agent=agent,
+                tenant_id=tenant_id,
+                session_id=_resolve_runtime_session_id(),
+            )
     finally:
         clear_tenant_context()
+
+
+def _emit_loop_iterations_metric(agent, tenant_id: str, session_id: str) -> None:
+    """Emit ``chimera:agent:loop_iterations`` for the current session.
+
+    Ideal behavior: report the true iteration count Strands used for this
+    request. Actual behavior: Strands does not yet expose the per-request
+    iteration count on the agent handle, so we fall back to the configured
+    ``max_iterations`` ceiling. That is an imperfect signal — it over-reports
+    for sessions that exit early — but the ceiling is still the primary
+    runaway-loop trigger, and a bounded-but-lossy metric is strictly better
+    than no metric at all.
+
+    TODO(rabbithole-02): replace the ceiling fallback with the real runtime
+    iteration count once Strands exposes a post-iteration hook or a
+    ``agent.iteration_count`` attribute on the handle. Tracked in the
+    rabbithole follow-up list; change is a two-liner once upstream ships.
+    """
+    iteration_count = getattr(agent, "iteration_count", None)
+    if not isinstance(iteration_count, (int, float)):
+        # Strands handle does not currently expose the counter — emit the
+        # ceiling so alarms on ``>= max_iterations`` still fire.
+        iteration_count = _AGENT_MAX_ITERATIONS
+
+    emit_emf_metric(
+        namespace="Chimera/Agent",
+        metric_name="loop_iterations",
+        value=float(iteration_count),
+        unit="Count",
+        dimensions={
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+        },
+    )
 
 
 def load_tenant_config(tenant_id: str) -> Dict[str, Any]:

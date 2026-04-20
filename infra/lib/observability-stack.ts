@@ -1174,12 +1174,12 @@ exports.handler = async () => {
     // Any dual-write failure indicates Registry adapter breakage or IAM gap
     // and must be investigated before Phase 3 bulk migration can run.
     const registryWriteRunbook = props.runbookBaseUrl
-      ? `${props.runbookBaseUrl}registry-write-failure`
-      : 'See docs/MIGRATION-registry.md → "Known limitations" for rollback. Check skill-deployment Lambda logs for RegistryWriteFailure reason (missing registry ID, IAM denial, SDK load failure).';
+      ? `${props.runbookBaseUrl}registry-write-failure.md`
+      : 'See docs/runbooks/registry-write-failure.md for diagnosis and rollback. Check skill-deployment Lambda logs for RegistryWriteFailure reason (missing registry ID, IAM denial, SDK load failure).';
 
     const registryWriteFailureAlarm = new cloudwatch.Alarm(this, 'RegistryWriteFailureAlarm', {
       alarmName: `chimera-${envName}-registry-write-failure`,
-      alarmDescription: `Registry dual-write failed (Phase 1). RUNBOOK: ${registryWriteRunbook}`,
+      alarmDescription: `Registry dual-write failed (Phase 1). DDB remains canonical — disable REGISTRY_ENABLED flag if sustained. RUNBOOK: ${registryWriteRunbook}`,
       metric: registryWriteFailureMetric,
       threshold: 0,
       evaluationPeriods: 1,
@@ -1187,16 +1187,22 @@ exports.handler = async () => {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     registryWriteFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+    registryWriteFailureAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
 
     // --- Alarm B: RegistryReadError > 5 for 2 consecutive 5-min periods ---
     // Distinguishes genuine SDK/runtime errors from benign fallbacks. The
     // 2-period requirement suppresses single transient errors (cold starts,
     // momentary throttles) while catching sustained breakage.
+    const registryReadErrorRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}registry-read-error.md`
+      : 'See docs/runbooks/registry-read-error.md. Dual-read falls back to DDB automatically; escalate if sustained.';
+
     const registryReadErrorAlarm = new cloudwatch.Alarm(this, 'RegistryReadErrorAlarm', {
       alarmName: `chimera-${envName}-registry-read-error`,
       alarmDescription:
-        'Registry dual-read surfaced >5 errors in 2 consecutive 5-min windows. ' +
-        'See docs/MIGRATION-registry.md for Phase 2 troubleshooting.',
+        `Registry dual-read surfaced >5 errors in 2 consecutive 5-min windows. ` +
+        `DDB fallback path is serving reads — no user-visible impact unless fallback rate also alarms. ` +
+        `RUNBOOK: ${registryReadErrorRunbook}`,
       metric: registryReadErrorMetric,
       threshold: 5,
       evaluationPeriods: 2,
@@ -1204,6 +1210,7 @@ exports.handler = async () => {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     registryReadErrorAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+    registryReadErrorAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
 
     // --- Alarm C: Fallback rate > 50% for 3 consecutive 5-min periods ---
     // Informational during Phase 2 bake-in (routes to MEDIUM). A sustained
@@ -1226,12 +1233,16 @@ exports.handler = async () => {
       label: 'Registry fallback rate (%)',
     });
 
+    const registryFallbackRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}registry-fallback-rate.md`
+      : 'See docs/runbooks/registry-fallback-rate.md. Decision matrix: wait during bake-in vs. disable REGISTRY_PRIMARY_READ flag if Registry is unhealthy.';
+
     const registryFallbackRateAlarm = new cloudwatch.Alarm(this, 'RegistryFallbackRateAlarm', {
       alarmName: `chimera-${envName}-registry-fallback-rate`,
       alarmDescription:
-        'Registry dual-read fell back to DDB for >50% of reads across 3 consecutive ' +
-        '5-min windows. Informational during Phase 2 bake-in; escalate if sustained ' +
-        'beyond the planned cutover window. See docs/MIGRATION-registry.md.',
+        `Registry dual-read fell back to DDB for >50% of reads across 3 consecutive ` +
+        `5-min windows. Informational during Phase 2 bake-in; escalate if sustained ` +
+        `beyond the planned cutover window. RUNBOOK: ${registryFallbackRunbook}`,
       metric: registryFallbackRateExpression,
       threshold: 50,
       evaluationPeriods: 3,
@@ -1240,6 +1251,9 @@ exports.handler = async () => {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     registryFallbackRateAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.mediumAlarmTopic)
+    );
+    registryFallbackRateAlarm.addOkAction(
       new cloudwatch_actions.SnsAction(this.mediumAlarmTopic)
     );
 

@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -103,7 +104,7 @@ Created: {created}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating CodeBuild project {project_name}: {str(e)}"
 
 
@@ -161,7 +162,7 @@ Start Time: {start_time}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting CodeBuild build for {project_name}: {str(e)}"
 
 
@@ -256,7 +257,7 @@ Build Phases:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting build details: {str(e)}"
 
 
@@ -308,7 +309,7 @@ def list_codebuild_builds_for_project(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing builds for project {project_name}: {str(e)}"
 
 
@@ -343,7 +344,7 @@ Status: {build_status}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error stopping CodeBuild build {build_id}: {str(e)}"
 
 
@@ -369,5 +370,5 @@ def delete_codebuild_project(project_name: str, region: str = "us-east-1") -> st
 
         return f"Successfully deleted CodeBuild project: {project_name}"
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting CodeBuild project {project_name}: {str(e)}"

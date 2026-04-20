@@ -23,6 +23,9 @@
 | [chimera-*-ecs-high-cpu](#ecs-high-cpu-alarm) | SEV2 | 15 min | Yes (scale out) |
 | [chimera-*-ecs-high-memory](#ecs-high-memory-alarm) | SEV1 | 10 min | Yes (scale out) |
 | [chimera-*-bedrock-throttling](#bedrock-throttling-alarm) | SEV2 | 10 min | Yes (switch to cross-region profile) |
+| [chimera-*-registry-write-failure](#registry-write-failure-alarm) | SEV2 | 30 min | No (DDB remains canonical during Phase 1) |
+| [chimera-*-registry-read-error](#registry-read-error-alarm) | SEV2 | 30 min | Yes (automatic fallback to DDB read) |
+| [chimera-*-registry-fallback-rate](#registry-fallback-rate-alarm) | SEV3 | 60 min | N/A (informational during Phase 2 bake-in) |
 
 ---
 
@@ -831,6 +834,56 @@ aws support create-case \
 - Use cross-region inference profiles by default
 - Implement model routing (Haiku for simple queries)
 - Request AWS quota increase for production workload
+
+---
+
+## Registry (AgentCore) Migration Alarms
+
+These three alarms cover the flag-gated Registry dual-write (Phase 1) and dual-read (Phase 2) code paths added during the AgentCore Registry migration. With `REGISTRY_ENABLED` and `REGISTRY_PRIMARY_READ` both unset (the default), no metrics emit and all three alarms remain at INSUFFICIENT_DATA — no noise, no cost.
+
+See [Registry Migration Operator Guide](../MIGRATION-registry.md) for flag semantics and phase ordering.
+
+### Registry Write Failure Alarm
+
+**Alarm Name:** `chimera-{env}-registry-write-failure`
+
+**Trigger:** Any `RegistryWriteFailure` emission in a 5-minute window (`>0`, 1 period)
+
+**Severity:** SEV2 (DDB remains canonical during Phase 1; no user-visible impact unless sustained past Phase 3 bulk migration)
+
+**Full runbook:** [registry-write-failure.md](./registry-write-failure.md)
+
+Failure reasons: `SDK_LOAD_FAILED`, `REGISTRY_ID_MISSING`, `ACCESS_DENIED`, `VALIDATION`, `THROTTLING`, `INTERNAL_FAILURE`, `TIMEOUT`.
+
+Fast rollback: unset `REGISTRY_ENABLED` on the `skill-deployment` Lambda (see runbook Option A).
+
+---
+
+### Registry Read Error Alarm
+
+**Alarm Name:** `chimera-{env}-registry-read-error`
+
+**Trigger:** `>5` errors in 5-minute window for 2 consecutive periods
+
+**Severity:** SEV2 (automatic fallback to DDB keeps reads flowing; promote to SEV1 if fallback-rate alarm also fires or API error rate degrades)
+
+**Full runbook:** [registry-read-error.md](./registry-read-error.md)
+
+Fast rollback: unset `REGISTRY_PRIMARY_READ` on the `skills-api` Lambda (see runbook Option A).
+
+---
+
+### Registry Fallback Rate Alarm
+
+**Alarm Name:** `chimera-{env}-registry-fallback-rate`
+
+**Trigger:** `(RegistryReadFallback / (RegistryReadFallback + RegistryReadSuccess)) * 100 > 50%` for 3 consecutive 5-minute windows
+
+**Severity:** SEV3 (informational during Phase 2 bake-in; promote to SEV2 past the planned cutover window)
+
+**Full runbook:** [registry-fallback-rate.md](./registry-fallback-rate.md)
+
+High fallback = Registry unhealthy or migration incomplete. Use the decision matrix in the full runbook to decide wait-vs-disable. Do NOT reflexively disable the flag on first firing.
 
 ---
 

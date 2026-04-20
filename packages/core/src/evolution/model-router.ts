@@ -33,6 +33,47 @@ import type {
 } from './types';
 
 /**
+ * Emit a CloudWatch EMF-formatted metric line to stdout.
+ *
+ * The Lambda runtime auto-publishes EMF metrics from stdout logs, so no
+ * IAM / PutMetricData is required. Failures here are swallowed — metric
+ * emission must never break the caller.
+ *
+ * See `infra/lambdas/skill-pipeline/skill-deployment/registry-writer.mjs`
+ * for the canonical JSON shape reference.
+ *
+ * Exported for unit-test introspection.
+ */
+export function emitEmfMetric(
+  namespace: string,
+  metricName: string,
+  value: number,
+  unit: string,
+  dimensions: Record<string, string>
+): void {
+  try {
+    const emf = {
+      _aws: {
+        Timestamp: Date.now(),
+        CloudWatchMetrics: [
+          {
+            Namespace: namespace,
+            Dimensions: [Object.keys(dimensions)],
+            Metrics: [{ Name: metricName, Unit: unit }],
+          },
+        ],
+      },
+      ...dimensions,
+      [metricName]: value,
+    };
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify(emf));
+  } catch {
+    // never throw from metric emission
+  }
+}
+
+/**
  * Default model costs (fallback if not in tenant config)
  *
  * Also used by {@link enforceTierCeiling} to pick the cheapest allowed
@@ -121,11 +162,24 @@ function cheapestAllowedForTier(tier: TenantTier): string {
  *
  * Premium tier has an empty allowlist, meaning all models are allowed.
  *
- * @param modelId  The requested Bedrock inference profile / model ID.
- * @param tier     The tenant's subscription tier.
- * @returns        Either `modelId` unchanged or a tier-appropriate fallback.
+ * On FALLBACK (requested modelId was not allowed), emits the CloudWatch
+ * `tier_violation_count` metric in the `Chimera/Agent` namespace so the
+ * downgrade is alarm-able. This is the cost-leak signal that drives the
+ * ~$360/mo/100-Basic-session alarm described in
+ * docs/reviews/cost-observability-audit.md.
+ *
+ * @param modelId   The requested Bedrock inference profile / model ID.
+ * @param tier      The tenant's subscription tier.
+ * @param tenantId  Optional tenant identifier for the metric dimension.
+ *                  Falls back to `"unknown"` so metric cardinality stays
+ *                  bounded when a caller lacks tenant context.
+ * @returns         Either `modelId` unchanged or a tier-appropriate fallback.
  */
-export function enforceTierCeiling(modelId: string, tier: TenantTier): string {
+export function enforceTierCeiling(
+  modelId: string,
+  tier: TenantTier,
+  tenantId?: string
+): string {
   const allowlist = MODEL_TIER_ALLOWLIST[tier];
 
   // Premium (empty allowlist) = no ceiling.
@@ -142,6 +196,21 @@ export function enforceTierCeiling(modelId: string, tier: TenantTier): string {
   console.warn(
     `[model-router] Tier ceiling enforcement: tier='${tier}' requested modelId='${modelId}' is not in the tier allowlist. Falling back to cheapest allowed model '${fallback}'.`
   );
+
+  // Emit observability signal so cost-leak alarms can fire.
+  // See docs/reviews/cost-observability-audit.md §"tier_violation_count".
+  emitEmfMetric(
+    'Chimera/Agent',
+    'tier_violation_count',
+    1,
+    'Count',
+    {
+      tenant_id: tenantId ?? 'unknown',
+      tier,
+      model_requested: modelId,
+    }
+  );
+
   return fallback;
 }
 
