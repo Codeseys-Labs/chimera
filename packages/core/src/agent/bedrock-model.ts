@@ -16,6 +16,8 @@ import {
   ContentBlock as BedrockContentBlock,
   Tool as BedrockTool,
 } from '@aws-sdk/client-bedrock-runtime';
+import type { TenantTier } from '@chimera/shared';
+import { enforceTierCeiling } from '../evolution/model-router';
 
 // Module-level singleton client cache per region
 // AWS SDK v3 clients are designed to be reused across requests
@@ -26,6 +28,96 @@ function getBedrockClient(region: string): BedrockRuntimeClient {
     bedrockClientCache.set(region, new BedrockRuntimeClient({ region }));
   }
   return bedrockClientCache.get(region)!;
+}
+
+/**
+ * Retry-worthy transient error names/codes from Bedrock + network layer.
+ * Auth/validation errors (ValidationException, AccessDeniedException,
+ * ResourceNotFoundException, 4xx) are intentionally NOT retried.
+ */
+const RETRYABLE_ERROR_NAMES = new Set([
+  'ThrottlingException',
+  'ServiceUnavailable',
+  'ServiceUnavailableException',
+  'InternalServerError',
+  'InternalServerException',
+  'RequestTimeoutException',
+  'RequestTimeout',
+]);
+
+const RETRYABLE_NETWORK_MESSAGES = [
+  'fetch failed',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'EPIPE',
+  'EAI_AGAIN',
+];
+
+function isRetryableError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { name?: string; code?: string; $metadata?: { httpStatusCode?: number }; message?: string };
+
+  // Explicit allow-list by SDK error name/code
+  if (e.name && RETRYABLE_ERROR_NAMES.has(e.name)) return true;
+  if (e.code && RETRYABLE_ERROR_NAMES.has(e.code)) return true;
+
+  // Network-level errors surfaced through fetch/undici
+  if (e.message) {
+    for (const needle of RETRYABLE_NETWORK_MESSAGES) {
+      if (e.message.includes(needle)) return true;
+    }
+  }
+  if (e.code && RETRYABLE_NETWORK_MESSAGES.includes(e.code)) return true;
+
+  // 5xx transient (but not 4xx — those are deterministic client errors)
+  const status = e.$metadata?.httpStatusCode;
+  if (typeof status === 'number' && status >= 500 && status < 600) return true;
+
+  return false;
+}
+
+/**
+ * Sleep helper used by the manual retry loop.
+ * Exposed at module scope so tests can stub it out if they want.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Send a command with exponential-backoff retry on transient errors.
+ * - Max 3 attempts
+ * - Base delay 500ms, doubled each attempt, with full jitter
+ * - Only retries errors matched by {@link isRetryableError}
+ *
+ * This is intentionally scoped to the stream-OPEN path: once the stream
+ * is handed back to the caller we never retry mid-stream.
+ */
+async function sendWithRetry<T>(
+  send: () => Promise<T>,
+  opts: { maxAttempts?: number; baseDelayMs?: number } = {}
+): Promise<T> {
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const baseDelayMs = opts.baseDelayMs ?? 500;
+
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await send();
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= maxAttempts || !isRetryableError(err)) {
+        throw err;
+      }
+      // Exponential backoff with full jitter: sleep in [0, base * 2^(attempt-1))
+      const cap = baseDelayMs * Math.pow(2, attempt - 1);
+      const delay = Math.floor(Math.random() * cap);
+      await sleep(delay);
+    }
+  }
+  // Unreachable, but keeps TS happy
+  throw lastErr;
 }
 
 export interface BedrockModelConfig {
@@ -46,6 +138,21 @@ export interface BedrockModelConfig {
 
   /** Custom Bedrock client (optional, for testing or custom config) */
   client?: BedrockRuntimeClient;
+
+  /**
+   * Tenant subscription tier for terminal model ceiling enforcement.
+   *
+   * When provided, BedrockModel enforces the per-tier model allowlist via
+   * {@link enforceTierCeiling} as the LAST gate before a Bedrock invoke.
+   * A Basic tenant requesting Opus, for example, will be transparently
+   * downgraded to the cheapest allowed model for the tier (with a warning
+   * logged).
+   *
+   * When omitted, no tier-ceiling enforcement is applied — callers are
+   * responsible for upstream gating. This is primarily for tests and for
+   * internal, non-tenant-attributed invocations.
+   */
+  tier?: TenantTier;
 }
 
 export interface ConverseTurn {
@@ -128,11 +235,24 @@ export type BedrockStreamEvent =
  */
 export class BedrockModel {
   private client: BedrockRuntimeClient;
-  private config: Omit<Required<Omit<BedrockModelConfig, 'client'>>, 'topP'> & { topP?: number };
+  private tier: TenantTier | undefined;
+  private config: Omit<Required<Omit<BedrockModelConfig, 'client' | 'tier'>>, 'topP'> & {
+    topP?: number;
+  };
 
   constructor(config: BedrockModelConfig) {
+    this.tier = config.tier;
+
+    // Terminal tier-ceiling enforcement: if a tier is supplied, downgrade
+    // the configured modelId before it can be used anywhere else. This is
+    // the first of two gates (the second runs inside buildInput() to catch
+    // per-turn modelId overrides). Premium tier is a no-op.
+    const enforcedModelId = this.tier
+      ? enforceTierCeiling(config.modelId, this.tier)
+      : config.modelId;
+
     this.config = {
-      modelId: config.modelId,
+      modelId: enforcedModelId,
       region: config.region || 'us-east-1',
       maxTokens: config.maxTokens || 4096,
       temperature: config.temperature || 1.0,
@@ -254,10 +374,21 @@ export class BedrockModel {
 
   /**
    * Build Bedrock API input from a ConverseTurn.
+   *
+   * Terminal tier-ceiling enforcement: when a tenant tier is configured on
+   * this BedrockModel instance, the per-turn modelId override is gated by
+   * {@link enforceTierCeiling} before it is written to the outgoing
+   * ConverseCommand / ConverseStreamCommand. This is the LAST gate — no
+   * code path downstream bypasses it.
    */
   private buildInput(turn: ConverseTurn): ConverseCommandInput {
+    const requestedModelId = turn.modelId || this.config.modelId;
+    const finalModelId = this.tier
+      ? enforceTierCeiling(requestedModelId, this.tier)
+      : requestedModelId;
+
     const input: ConverseCommandInput = {
-      modelId: turn.modelId || this.config.modelId,
+      modelId: finalModelId,
       messages: turn.messages.map((msg) => this.convertMessage(msg)),
       inferenceConfig: {
         maxTokens: turn.maxTokens || this.config.maxTokens,
@@ -326,7 +457,13 @@ export class BedrockModel {
   ): AsyncGenerator<BedrockStreamEvent, ConverseResponse, unknown> {
     const input = this.buildInput(turn) as ConverseStreamCommandInput;
     const command = new ConverseStreamCommand(input);
-    const response = await this.client.send(command);
+    // Retry on transient 429/5xx/network errors at stream-open time only.
+    // AWS SDK v3's built-in retry strategy does NOT reliably retry
+    // streaming commands (ConverseStreamCommand), so we add a narrow
+    // manual retry around the initial `send()`. Once the stream is open
+    // we never retry mid-stream — downstream consumers get partial
+    // events and would need to restart the turn themselves.
+    const response = await sendWithRetry(() => this.client.send(command));
 
     if (!response.stream) {
       throw new Error('Invalid Bedrock response: missing stream');
@@ -421,6 +558,41 @@ export class BedrockModel {
 
       if (event.messageStop) {
         stopReason = event.messageStop.stopReason ?? 'end_turn';
+
+        // STATE-MACHINE RACE FIX: Bedrock can deliver `messageStop`
+        // before a preceding `contentBlockStop` for an in-flight tool
+        // block. If we only listened for `contentBlockStop` to flush
+        // the accumulated tool_use deltas, the tool call would be
+        // silently dropped — breaking multi-step ReAct loops.
+        //
+        // Before emitting `messageStop`, flush any pending partial
+        // block by (a) pushing it into `contentBlocks` and
+        // (b) emitting a synthetic `contentBlockStop` event so
+        // downstream consumers see a consistent start/stop sequence.
+        if (currentToolName) {
+          let parsedInput: Record<string, unknown> = {};
+          try {
+            parsedInput = JSON.parse(currentToolInput);
+          } catch {
+            /* invalid/partial JSON — leave empty */
+          }
+          contentBlocks.push({
+            toolUse: {
+              toolUseId: currentToolUseId,
+              name: currentToolName,
+              input: parsedInput,
+            },
+          });
+          yield { type: 'contentBlockStop', blockIndex: currentBlockIndex };
+          currentToolName = '';
+          currentToolUseId = '';
+          currentToolInput = '';
+        } else if (currentText) {
+          contentBlocks.push({ text: currentText });
+          yield { type: 'contentBlockStop', blockIndex: currentBlockIndex };
+          currentText = '';
+        }
+
         yield { type: 'messageStop', stopReason };
       }
 
@@ -455,7 +627,7 @@ export class BedrockModel {
    * Get the current configuration
    */
   getConfig(): Omit<BedrockModelConfig, 'client'> {
-    return { ...this.config };
+    return { ...this.config, tier: this.tier };
   }
 }
 

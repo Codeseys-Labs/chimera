@@ -10,6 +10,7 @@
 import { createHash, randomBytes } from 'crypto';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { writeSkillToRegistryIfEnabled } from './registry-writer.mjs';
 
 const ddb = new DynamoDBClient({});
 const s3  = new S3Client({});
@@ -109,13 +110,41 @@ export const handler = async (event) => {
     console.warn('skill-deployment: SKILLS_TABLE not set — skipping DynamoDB registration');
   }
 
+  // --- ADR-034 Phase 1: flag-gated Registry dual-write ---
+  // DDB is primary. Registry write is attempted only after DDB succeeds and
+  // NEVER causes the Lambda to fail (see registry-writer.mjs invariant).
+  let registryTarget = { attempted: false };
+  if (ddbRegistered) {
+    const skillDescriptor = {
+      skillId,
+      version,
+      deploymentId,
+      bundleHash,
+      s3Key,
+      s3Bucket: SKILLS_BUCKET ?? '',
+      platformSignature: event.platformSignature?.signature ?? '',
+      deployedAt: now,
+      manifest,
+    };
+    const registryResult = await writeSkillToRegistryIfEnabled(skillDescriptor);
+    registryTarget = { attempted: !registryResult.skipped, ...registryResult };
+    if (!registryResult.skipped && registryResult.error) {
+      console.error(
+        'skill-deployment: Registry dual-write failed (non-fatal): %s',
+        registryResult.error
+      );
+      // Non-fatal: DDB is source of truth in Phase 1. Metric already emitted
+      // via registry-writer.mjs. Continue to SUCCESS.
+    }
+  }
+
   return {
     ...event,
     deployment_result: 'SUCCESS',
     deploymentId,
     version,
     publishedAt: now,
-    targets: { s3: s3Uploaded, dynamodb: ddbRegistered },
+    targets: { s3: s3Uploaded, dynamodb: ddbRegistered, registry: registryTarget },
     rollbackAvailable: true,
     s3Key,
   };

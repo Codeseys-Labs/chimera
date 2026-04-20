@@ -1,3 +1,4 @@
+import { KeyRound, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -84,13 +86,19 @@ export function AdminPage() {
                   </div>
                   <div>
                     <p className="mb-2 text-sm font-medium">Features:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(tenant?.features ?? {}).map(([key, enabled]) => (
-                        <Badge key={key} variant={enabled ? 'default' : 'secondary'}>
-                          {key}: {enabled ? 'on' : 'off'}
-                        </Badge>
-                      ))}
-                    </div>
+                    {Object.keys(tenant?.features ?? {}).length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No feature flags configured for this tenant.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(tenant?.features ?? {}).map(([key, enabled]) => (
+                          <Badge key={key} variant={enabled ? 'default' : 'secondary'}>
+                            {key}: {enabled ? 'on' : 'off'}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -107,6 +115,12 @@ export function AdminPage() {
             <CardContent>
               {usersLoading ? (
                 <Skeleton className="h-40 w-full" />
+              ) : !usersData?.users.length ? (
+                <EmptyState
+                  icon={<Users className="h-8 w-8" />}
+                  title="No users yet"
+                  description="Invite teammates from the Cognito user pool to see them here."
+                />
               ) : (
                 <Table>
                   <TableHeader>
@@ -119,7 +133,7 @@ export function AdminPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {usersData?.users.map((u) => (
+                    {usersData.users.map((u) => (
                       <TableRow key={u.sub}>
                         <TableCell>{u.name}</TableCell>
                         <TableCell>{u.email}</TableCell>
@@ -164,6 +178,12 @@ export function AdminPage() {
             <CardContent>
               {keysLoading ? (
                 <Skeleton className="h-40 w-full" />
+              ) : !keysData?.keys.length ? (
+                <EmptyState
+                  icon={<KeyRound className="h-8 w-8" />}
+                  title="No API keys"
+                  description="Generate an API key to issue OpenAI-compatible requests against this tenant."
+                />
               ) : (
                 <Table>
                   <TableHeader>
@@ -176,7 +196,7 @@ export function AdminPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {keysData?.keys.map((k) => (
+                    {keysData.keys.map((k) => (
                       <TableRow key={k.id}>
                         <TableCell>{k.name}</TableCell>
                         <TableCell className="font-mono text-xs">{k.maskedKey}</TableCell>
@@ -191,13 +211,6 @@ export function AdminPage() {
                         </TableCell>
                       </TableRow>
                     ))}
-                    {!keysData?.keys.length && (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
-                          No API keys
-                        </TableCell>
-                      </TableRow>
-                    )}
                   </TableBody>
                 </Table>
               )}

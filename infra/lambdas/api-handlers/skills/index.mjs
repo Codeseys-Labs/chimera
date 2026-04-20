@@ -15,8 +15,17 @@
  *   SK = SKILL#{skillId}
  *
  * Env vars:
- *   SKILLS_TABLE — DynamoDB table name (required)
+ *   SKILLS_TABLE             — DynamoDB table name (required)
+ *   REGISTRY_ENABLED         — ADR-034 master switch (default: false)
+ *   REGISTRY_PRIMARY_READ    — Phase-2 dual-read flag (default: false)
+ *   REGISTRY_ID              — Bedrock AgentCore Registry identifier
+ *   REGISTRY_REGION          — Registry region (falls back to AWS_REGION)
+ *
+ * Behavior is unchanged from the DDB-only path unless BOTH REGISTRY_ENABLED
+ * and REGISTRY_PRIMARY_READ are "true" (see registry-reader.mjs).
  */
+
+import { trySearchRegistry, emitMetric } from './registry-reader.mjs';
 
 const SKILLS_TABLE = process.env.SKILLS_TABLE;
 const DEFAULT_PAGE_LIMIT = 50;
@@ -126,6 +135,37 @@ export const handler = async (event) => {
       100
     );
     const nextToken = event.queryStringParameters?.nextToken;
+    const query = event.queryStringParameters?.q ?? event.queryStringParameters?.query;
+
+    // ADR-034 Phase 2: flag-gated Registry dual-read. When REGISTRY_ENABLED and
+    // REGISTRY_PRIMARY_READ are both true we try the Bedrock AgentCore Registry
+    // first and fall back to DDB on any non-success outcome. Pagination via
+    // nextToken still hits DDB — Registry cursor propagation lands in Phase 4.
+    if (!nextToken) {
+      const registryResult = await trySearchRegistry({ query, tenantId, maxResults: limit });
+      if (
+        registryResult.attempted &&
+        !registryResult.error &&
+        registryResult.records &&
+        registryResult.records.length > 0
+      ) {
+        return ok({
+          skills: registryResult.records,
+          count: registryResult.records.length,
+          nextToken: registryResult.nextToken ?? null,
+          source: 'registry',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      if (registryResult.attempted) {
+        // Registry was tried but produced nothing usable — record why we're
+        // falling through so we can watch the ratio during rollout.
+        emitMetric(
+          'RegistryReadFallback',
+          registryResult.error ? 'ErrorFallback' : 'EmptyFallback',
+        );
+      }
+    }
 
     const params = {
       TableName: SKILLS_TABLE,

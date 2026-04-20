@@ -66,6 +66,47 @@ describe('findProjectRoot', () => {
       process.chdir(original);
     }
   });
+
+  it('walks past a sub-package package.json to the monorepo root with `workspaces`', () => {
+    // Simulate: <tmpDir>/package.json (with workspaces)
+    //          <tmpDir>/packages/core/package.json (no workspaces)
+    // Running from packages/core/ must resolve to <tmpDir>, not packages/core.
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'root', workspaces: ['packages/*'] }),
+    );
+    const subPkgDir = path.join(tmpDir, 'packages', 'core');
+    fs.mkdirSync(subPkgDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(subPkgDir, 'package.json'),
+      JSON.stringify({ name: 'core' }),
+    );
+    const original = process.cwd();
+    process.chdir(subPkgDir);
+    try {
+      const root = findProjectRoot();
+      expect(root).toBe(tmpDir);
+    } finally {
+      process.chdir(original);
+    }
+  });
+
+  it('accepts yarn-berry style workspaces object { packages: [...] }', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'root', workspaces: { packages: ['packages/*'] } }),
+    );
+    const subPkgDir = path.join(tmpDir, 'packages', 'core');
+    fs.mkdirSync(subPkgDir, { recursive: true });
+    fs.writeFileSync(path.join(subPkgDir, 'package.json'), JSON.stringify({ name: 'core' }));
+    const original = process.cwd();
+    process.chdir(subPkgDir);
+    try {
+      expect(findProjectRoot()).toBe(tmpDir);
+    } finally {
+      process.chdir(original);
+    }
+  });
 });
 
 // ─── git ─────────────────────────────────────────────────────────────────────

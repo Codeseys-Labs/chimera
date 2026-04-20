@@ -27,7 +27,13 @@ import type { VercelDSPStreamPart } from '@chimera/sse-bridge';
 import { StreamTee } from '@chimera/sse-bridge';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { ChatRequest, ChatResponse, ErrorResponse, TenantContext } from '../types';
+import {
+  ChatRequest,
+  ChatRequestSchema,
+  ChatResponse,
+  ErrorResponse,
+  TenantContext,
+} from '../types';
 import { getAdapter } from '../adapters';
 import { getConfig } from '../config';
 import { streamManager } from '../stream-manager';
@@ -230,6 +236,9 @@ async function* mapAgentStreamToStrands(
   }
 }
 
+/** How long to wait for the HTTP consumer to drain before giving up (ms) */
+const DRAIN_TIMEOUT_MS = 5_000;
+
 /**
  * Build a ReadableStream<Uint8Array> that replays a StreamTee's buffer then
  * follows the live tail, emitting keepalive pings at regular intervals.
@@ -237,32 +246,75 @@ async function* mapAgentStreamToStrands(
  * The register-then-replay pattern is race-free in JavaScript because
  * no await occurs between addListener() and the buffer replay loop —
  * the background consumer cannot advance during that synchronous window.
+ *
+ * Hardening (review C2):
+ *   - 15s keepalive (`setInterval`) prevents ALB/proxy idle timeouts.
+ *   - Optional `abortSignal` fires when the HTTP client disconnects; the
+ *     stream is drained and closed, the heartbeat cleared, and all tee
+ *     listeners removed. The background StreamTee.consume() deliberately
+ *     continues so a reconnecting client can replay missed content.
+ *   - Backpressure: if `controller.desiredSize` drops to 0 for longer than
+ *     DRAIN_TIMEOUT_MS, we treat the consumer as dead and detach. This
+ *     prevents a slow/stalled client from pinning memory indefinitely.
  */
-function createTeeSSEStream(tee: StreamTee<VercelDSPStreamPart>): ReadableStream<Uint8Array> {
+function createTeeSSEStream(
+  tee: StreamTee<VercelDSPStreamPart>,
+  abortSignal?: AbortSignal
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+  let drainStallSince: number | undefined;
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      let removeListener: () => void = () => {};
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      let removeComplete: () => void = () => {};
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      let removeError: () => void = () => {};
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      let removeAbortListener: () => void = () => {};
+
+      function cleanupListeners(): void {
+        removeListener();
+        removeComplete();
+        removeError();
+        removeAbortListener();
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = undefined;
+        }
+      }
 
       function enqueue(text: string): void {
         if (closed) return;
         try {
           controller.enqueue(encoder.encode(text));
+          // Track backpressure: once desiredSize hits 0, record when it
+          // started; if it stays negative for >DRAIN_TIMEOUT_MS we give up.
+          const desired = controller.desiredSize ?? 1;
+          if (desired <= 0) {
+            if (drainStallSince === undefined) {
+              drainStallSince = Date.now();
+            } else if (Date.now() - drainStallSince > DRAIN_TIMEOUT_MS) {
+              // Consumer has been unable to drain for >5s — assume dead.
+              close();
+            }
+          } else {
+            drainStallSince = undefined;
+          }
         } catch {
-          closed = true;
-          clearInterval(keepaliveTimer);
+          // Controller is already closed/errored (client disconnected).
+          close();
         }
       }
 
       function close(): void {
         if (closed) return;
         closed = true;
-        clearInterval(keepaliveTimer);
-        removeListener();
-        removeComplete();
-        removeError();
+        cleanupListeners();
         try {
           controller.close();
         } catch {
@@ -273,20 +325,34 @@ function createTeeSSEStream(tee: StreamTee<VercelDSPStreamPart>): ReadableStream
       // Subscribe to future parts BEFORE replaying the buffer.
       // Safe: JS single-threaded event loop means the background consumer
       // cannot run between addListener() and the for-loop below.
-      const removeListener = tee.addListener((part) => enqueue(formatSSEData(part)));
-      const removeComplete = tee.onComplete(() => {
+      removeListener = tee.addListener((part) => enqueue(formatSSEData(part)));
+      removeComplete = tee.onComplete(() => {
         enqueue(formatSSEDone());
         close();
       });
-      const removeError = tee.onError((err) => {
+      removeError = tee.onError((err) => {
         if (closed) return;
         closed = true;
-        clearInterval(keepaliveTimer);
-        removeListener();
-        removeComplete();
-        removeError();
-        controller.error(err);
+        cleanupListeners();
+        try {
+          controller.error(err);
+        } catch {
+          // ignore
+        }
       });
+
+      // Client-disconnect detection: when the HTTP request is aborted,
+      // tear down our side of the stream. The tee's background consumer
+      // keeps buffering for reconnection (see STREAM_TTL_MS in stream-manager).
+      if (abortSignal) {
+        if (abortSignal.aborted) {
+          close();
+          return;
+        }
+        const onAbort = () => close();
+        abortSignal.addEventListener('abort', onAbort, { once: true });
+        removeAbortListener = () => abortSignal.removeEventListener('abort', onAbort);
+      }
 
       // Replay all parts already in the buffer
       for (const part of tee.buffer) {
@@ -302,11 +368,12 @@ function createTeeSSEStream(tee: StreamTee<VercelDSPStreamPart>): ReadableStream
 
       if (tee.error) {
         closed = true;
-        clearInterval(keepaliveTimer);
-        removeListener();
-        removeComplete();
-        removeError();
-        controller.error(tee.error);
+        cleanupListeners();
+        try {
+          controller.error(tee.error);
+        } catch {
+          // ignore
+        }
         return;
       }
 
@@ -315,9 +382,13 @@ function createTeeSSEStream(tee: StreamTee<VercelDSPStreamPart>): ReadableStream
     },
 
     cancel() {
-      // HTTP client disconnected. The background StreamTee.consume() continues
-      // buffering so a reconnecting client can replay missed content.
-      clearInterval(keepaliveTimer);
+      // HTTP client disconnected or ReadableStream was cancelled by the
+      // framework. The background StreamTee.consume() deliberately continues
+      // so a reconnecting client can replay missed content.
+      if (keepaliveTimer) {
+        clearInterval(keepaliveTimer);
+        keepaliveTimer = undefined;
+      }
     },
   });
 }
@@ -347,10 +418,27 @@ router.post('/stream', async (c: Context) => {
     }
 
     // Parse request body
-    const body = await c.req.json();
+    const rawBody = await c.req.json();
+
+    // Validate request body schema BEFORE opening a stream. A malformed body
+    // that slips past this point corrupts the SSE pipeline mid-stream — clients
+    // have already been promised `text/event-stream` and cannot recover.
+    const parsed = ChatRequestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Request body failed schema validation',
+          details: parsed.error.flatten(),
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 400);
+    }
+    const body: ChatRequest = parsed.data;
 
     // Determine platform from request (default to 'web')
-    const platform = (body as { platform?: string }).platform || 'web';
+    const platform = body.platform || 'web';
 
     // Get platform-specific adapter
     let adapter;
@@ -417,7 +505,7 @@ router.post('/stream', async (c: Context) => {
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId,
-      sessionId: (body as ChatRequest).sessionId,
+      sessionId: body.sessionId,
       tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
       loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
       model: config.bedrock.enabled
@@ -443,7 +531,7 @@ router.post('/stream', async (c: Context) => {
     // Attach DynamoDB persistence listener — writes messages as the stream progresses.
     // The persistence listener accumulates text in-memory and writes the final message
     // on completion. Agent generation continues even if the HTTP client disconnects.
-    const sessionId = (body as ChatRequest).sessionId || `session_${Date.now()}`;
+    const sessionId = body.sessionId || `session_${Date.now()}`;
     const persistenceListener = createPersistenceListener({
       messageId,
       sessionId,
@@ -464,8 +552,13 @@ router.post('/stream', async (c: Context) => {
       },
     ]);
 
-    // Return SSE response: replays any immediately-buffered parts + follows live tail
-    const responseBody = createTeeSSEStream(tee);
+    // Return SSE response: replays any immediately-buffered parts + follows live tail.
+    // Pass the incoming request's abort signal so a client disconnect tears down
+    // our side of the SSE plumbing (heartbeat timer, tee listeners). The agent
+    // itself deliberately keeps generating in the background so reconnecting
+    // clients can resume via GET /chat/stream/:messageId.
+    const abortSignal = c.req.raw?.signal;
+    const responseBody = createTeeSSEStream(tee, abortSignal);
 
     return new Response(responseBody, {
       status: 200,
@@ -526,8 +619,10 @@ router.get('/stream/:messageId', async (c: Context) => {
       return c.json(error, 404);
     }
 
-    // Replay buffered content + follow live tail using the same helper as POST
-    const responseBody = createTeeSSEStream(record.tee);
+    // Replay buffered content + follow live tail using the same helper as POST.
+    // Abort signal tears down the SSE side if the reconnecting client disconnects.
+    const abortSignal = c.req.raw?.signal;
+    const responseBody = createTeeSSEStream(record.tee, abortSignal);
 
     return new Response(responseBody, {
       status: 200,
@@ -753,10 +848,26 @@ router.post('/message', async (c: Context) => {
     }
 
     // Parse request body
-    const body = await c.req.json();
+    const rawBody = await c.req.json();
+
+    // Validate request body schema. Non-streaming endpoint still benefits from
+    // a 400 at the edge rather than an opaque downstream failure.
+    const parsed = ChatRequestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Request body failed schema validation',
+          details: parsed.error.flatten(),
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 400);
+    }
+    const body: ChatRequest = parsed.data;
 
     // Determine platform from request (default to 'web')
-    const platform = (body as { platform?: string }).platform || 'web';
+    const platform = body.platform || 'web';
 
     // Get platform-specific adapter
     let adapter;
@@ -820,7 +931,7 @@ router.post('/message', async (c: Context) => {
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId,
-      sessionId: (body as ChatRequest).sessionId,
+      sessionId: body.sessionId,
       tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
       loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
       model: config.bedrock.enabled

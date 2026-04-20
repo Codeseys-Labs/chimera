@@ -37,15 +37,13 @@ export {
 } from './agent';
 
 // Runtime components
-export {
-  AgentCoreRuntime,
-  createRuntime,
-  MEMORY_STRATEGY_TIERS,
-  type RuntimeConfig,
-  type RuntimeSession,
-  type MemoryOperation,
-  type MemoryResult,
-} from './runtime';
+//
+// Runtime logic is owned by the Python agent container running on AgentCore
+// Runtime (see `packages/agents/chimera_agent.py`). The former
+// `AgentCoreRuntime` TypeScript class and its re-exports were removed in the
+// rabbithole audit — every method was a TODO placeholder or reinvented an
+// AgentCore primitive. See
+// `docs/research/agentcore-rabbithole/02-runtime-memory-deep-dive.md`.
 
 // Memory module
 export * from './memory';

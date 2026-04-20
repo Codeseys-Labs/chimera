@@ -80,7 +80,13 @@ export interface StrandsToolResultEvent {
   type: 'toolResult';
   toolUseId: string;
   result: unknown;
-  status?: 'success' | 'error';
+  /**
+   * Execution status of the tool call. Required so that tool failures cannot
+   * silently convert to success on the wire (review finding C3).
+   */
+  status: 'success' | 'error';
+  /** Optional human-readable error message when status === 'error' */
+  error?: string;
 }
 
 export interface StrandsToolStreamEvent {
@@ -180,6 +186,14 @@ export interface VercelDSPToolResultPart {
   type: 'tool-result';
   id: string;
   result: unknown;
+  /**
+   * Execution status of the tool call. Required so downstream consumers
+   * (web, Slack, Discord, persistence, etc.) can distinguish successful
+   * tool calls from errored ones and drive recovery/error UX correctly.
+   */
+  status: 'success' | 'error';
+  /** Optional human-readable error message when status === 'error' */
+  error?: string;
 }
 
 // Reasoning (chain-of-thought)

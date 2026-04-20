@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import TOML from 'smol-toml';
-import { loadCredentials, getBaseUrl, getUrlForPath, ChimeraAuthError, apiClient } from '../../lib/api-client';
+import { loadCredentials, getBaseUrl, getUrlForPath, ChimeraAuthError, apiClient, decodeJwtExp, isJwtExpired } from '../../lib/api-client';
 
 let tmpDir: string;
 let tmpCredFile: string;
@@ -146,6 +146,71 @@ describe('ChimeraAuthError', () => {
   it('accepts custom message', () => {
     const err = new ChimeraAuthError('Token expired');
     expect(err.message).toBe('Token expired');
+  });
+});
+
+// ─── JWT expiry helpers ──────────────────────────────────────────────────────
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const b64url = (s: string) =>
+    Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const header = b64url(JSON.stringify({ alg: 'none', typ: 'JWT' }));
+  const body = b64url(JSON.stringify(payload));
+  return `${header}.${body}.sig`;
+}
+
+describe('decodeJwtExp', () => {
+  it('returns null for non-JWT strings', () => {
+    expect(decodeJwtExp('not-a-jwt')).toBeNull();
+    expect(decodeJwtExp('')).toBeNull();
+    expect(decodeJwtExp('a.b')).toBeNull();
+  });
+
+  it('returns exp claim in milliseconds', () => {
+    const token = makeJwt({ exp: 1700000000 });
+    expect(decodeJwtExp(token)).toBe(1700000000 * 1000);
+  });
+
+  it('returns null when payload has no exp claim', () => {
+    const token = makeJwt({ sub: 'user' });
+    expect(decodeJwtExp(token)).toBeNull();
+  });
+});
+
+describe('isJwtExpired', () => {
+  it('is false when exp is in the future', () => {
+    const token = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    expect(isJwtExpired(token)).toBe(false);
+  });
+
+  it('is true when exp is in the past', () => {
+    const token = makeJwt({ exp: Math.floor(Date.now() / 1000) - 60 });
+    expect(isJwtExpired(token)).toBe(true);
+  });
+
+  it('is false (fail-open) for non-JWT tokens', () => {
+    expect(isJwtExpired('opaque-token')).toBe(false);
+  });
+});
+
+describe('apiClient JWT exp guard', () => {
+  it('rejects with ChimeraAuthError when JWT exp is in the past even if stored expiresAt is in the future', async () => {
+    const expiredToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 60 });
+    writeCredentials({
+      accessToken: expiredToken,
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+    });
+    await expect(apiClient.get('/test', tmpCredFile)).rejects.toBeInstanceOf(ChimeraAuthError);
+    await expect(apiClient.get('/test', tmpCredFile)).rejects.toThrow('Session expired');
+  });
+
+  it('includes "chimera login" hint in session-expired message', async () => {
+    const expiredToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 60 });
+    writeCredentials({
+      accessToken: expiredToken,
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+    });
+    await expect(apiClient.get('/test', tmpCredFile)).rejects.toThrow(/chimera login/);
   });
 });
 

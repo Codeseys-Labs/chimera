@@ -1,0 +1,21 @@
+{
+  "name": "@chimera/skill-deployment-lambda",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stage 7 of the Chimera skill security pipeline: publish scanned skill to S3 + DynamoDB. Phase 1 of ADR-034 adds flag-gated AgentCore Registry dual-write (registry-writer.mjs).",
+  "type": "module",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "_comment_runtime_deps": "The AWS Lambda Node.js 20.x runtime bundles @aws-sdk/client-dynamodb and @aws-sdk/client-s3. We do NOT list them here — the CDK asset (lambda.Code.fromAsset) copies this directory verbatim; bundling them would bloat the zip and diverge from the runtime's pinned versions.",
+  "peerDependencies": {
+    "_comment_agentcore_sdk_todo": "TODO(adr-034-phase-1): @aws-sdk/client-bedrock-agentcore-control is NOT present in the Node.js 20.x Lambda runtime. Install this package into the Lambda zip (add to skill-pipeline-stack.ts bundling OR copy node_modules into the asset) ONLY when Phase 1 is operationally enabled (REGISTRY_ENABLED=true). Until then, registry-writer.mjs dynamic-imports the SDK inside a try/catch and gracefully no-ops with reason='SDK not installed' if absent. Declared as peerDependency (not dependency) so `bun install` at the repo root does not fail — this folder is outside the package workspaces list, but peer-deps are intent-signalling not auto-installed.",
+    "@aws-sdk/client-bedrock-agentcore-control": "^3.1016.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-bedrock-agentcore-control": {
+      "optional": true
+    }
+  }
+}

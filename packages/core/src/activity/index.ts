@@ -15,6 +15,14 @@ export {
 } from './decision-logger';
 
 export {
+  AuditTrail,
+  calculateAuditTTL,
+  AUDIT_TTL_DAYS_BY_TIER,
+  type AuditTrailConfig,
+  type LogActionParams,
+} from './audit-trail';
+
+export {
   StatusDashboard,
   type StatusDashboardConfig,
   type SessionMetrics,

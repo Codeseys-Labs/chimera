@@ -28,6 +28,44 @@ export interface Credentials {
   expiresAt: string;
 }
 
+/**
+ * Decode a JWT's `exp` claim without verifying the signature. Returns the
+ * expiration as milliseconds since the epoch, or `null` if the token does
+ * not look like a JWT or has no `exp` claim.
+ *
+ * Note: this is NOT a signature-validating parse. The CLI doesn't have the
+ * signing key; we only use `exp` to fail fast before making a request that
+ * would return 401. The server still validates the signature.
+ */
+export function decodeJwtExp(token: string): number | null {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    // base64url → base64
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+    const json = Buffer.from(padded, 'base64').toString('utf8');
+    const claims = JSON.parse(json) as { exp?: number };
+    if (typeof claims.exp !== 'number') return null;
+    return claims.exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns true if the access token's JWT `exp` claim is in the past.
+ * Returns false if the token is not a decodable JWT (fail-open so we don't
+ * break non-JWT tokens or malformed payloads — the existing `expiresAt`
+ * check still guards that path).
+ */
+export function isJwtExpired(token: string, now: number = Date.now()): boolean {
+  const expMs = decodeJwtExp(token);
+  if (expMs === null) return false;
+  return expMs <= now;
+}
+
 export function loadCredentials(filePath = DEFAULT_CREDENTIALS_FILE): Credentials | null {
   const creds = wsLoadCredentials(filePath);
   if (!creds.auth?.access_token) {
@@ -91,11 +129,20 @@ async function getAuthHeaders(credentialsFile?: string): Promise<Record<string, 
     }
     throw new ChimeraAuthError();
   }
-  if (new Date(creds.expiresAt) <= new Date()) {
+  if (creds.expiresAt && new Date(creds.expiresAt) <= new Date()) {
     if (process.env.CHIMERA_DEBUG) {
       process.stderr.write(`[chimera debug] getAuthHeaders: token expired at ${creds.expiresAt}\n`);
     }
-    throw new ChimeraAuthError('Token expired. Run "chimera login" again.');
+    throw new ChimeraAuthError('Session expired. Run: chimera login');
+  }
+  // Fallback: the stored expiresAt may be missing or stale. Decode the JWT's
+  // own `exp` claim to catch clock-drift / dropped-expiresAt cases before
+  // firing a request that will 401.
+  if (isJwtExpired(creds.accessToken)) {
+    if (process.env.CHIMERA_DEBUG) {
+      process.stderr.write(`[chimera debug] getAuthHeaders: JWT exp claim in past\n`);
+    }
+    throw new ChimeraAuthError('Session expired. Run: chimera login');
   }
   return {
     'Content-Type': 'application/json',
@@ -122,8 +169,11 @@ export function guardAuth(credentialsFile?: string): void {
   if (!creds) {
     throw new ChimeraAuthError();
   }
-  if (new Date(creds.expiresAt) <= new Date()) {
-    throw new ChimeraAuthError('Token expired. Run "chimera login" again.');
+  if (creds.expiresAt && new Date(creds.expiresAt) <= new Date()) {
+    throw new ChimeraAuthError('Session expired. Run: chimera login');
+  }
+  if (isJwtExpired(creds.accessToken)) {
+    throw new ChimeraAuthError('Session expired. Run: chimera login');
   }
 }
 

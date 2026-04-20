@@ -19,6 +19,48 @@ import type {
   ScanCommandInput,
   ScanCommandOutput,
 } from '@aws-sdk/lib-dynamodb';
+import type { TenantTier } from '@chimera/shared';
+
+/**
+ * Tier-based audit retention in days.
+ *
+ * Compliance requirement (see security-review.md M3):
+ *   basic    -> 90 days
+ *   advanced -> 365 days (1 year)
+ *   premium  -> 2555 days (7 years)
+ *
+ * These values are the single source of truth for audit TTL. A caller
+ * MUST NOT override the TTL -- doing so defeats compliance (e.g. a basic
+ * tenant could write a 7-year TTL).
+ */
+export const AUDIT_TTL_DAYS_BY_TIER: Record<TenantTier, number> = {
+  basic: 90,
+  advanced: 365,
+  premium: 365 * 7,
+};
+
+/**
+ * Calculate the Unix epoch-seconds TTL for an audit event written now,
+ * based on the writing tenant's subscription tier.
+ *
+ * Using `Date.now()` + day-milliseconds ensures correctness across DST
+ * boundaries and avoids mutating a shared Date reference.
+ *
+ * @param tenantTier - Subscription tier of the tenant whose audit row is being written
+ * @returns Unix epoch seconds when DynamoDB TTL should expire the row
+ */
+export function calculateAuditTTL(tenantTier: TenantTier): number {
+  const days = AUDIT_TTL_DAYS_BY_TIER[tenantTier];
+  if (typeof days !== 'number') {
+    // Defensive: unknown tier falls back to the strictest retention so we
+    // never accidentally retain PII for longer than the basic policy allows.
+    const fallbackDays = AUDIT_TTL_DAYS_BY_TIER.basic;
+    const ms = Date.now() + fallbackDays * 24 * 60 * 60 * 1000;
+    return Math.floor(ms / 1000);
+  }
+  const ms = Date.now() + days * 24 * 60 * 60 * 1000;
+  return Math.floor(ms / 1000);
+}
 
 /**
  * DynamoDB client interface
@@ -41,7 +83,12 @@ export interface AuditTrailConfig {
   /** DynamoDB client */
   dynamodb: DynamoDBClient;
 
-  /** TTL in days for hot storage (default 90 days) */
+  /**
+   * DEPRECATED: TTL is now computed per-write from the tenant's subscription tier
+   * via {@link calculateAuditTTL}. Passing this value has no effect and will be
+   * removed in a future release. Kept temporarily for backwards compat with
+   * existing construction call sites.
+   */
   hotStorageTTLDays?: number;
 }
 
@@ -209,6 +256,12 @@ export interface LogActionParams {
   activityId: string;
   decisionId?: string;
   tenantId: string;
+  /**
+   * Subscription tier of the tenant whose audit row is being written.
+   * Drives TTL enforcement (90d basic / 1y advanced / 7y premium).
+   * Required: compliance retention cannot be determined without it.
+   */
+  tenantTier: TenantTier;
   agentId: string;
   sessionId: string;
 
@@ -236,6 +289,14 @@ export interface LogActionParams {
   tags?: Record<string, string>;
   result?: ActionResult;
   resultMessage?: string;
+
+  /**
+   * DO NOT SET. Reserved for internal invariant tests only. If provided,
+   * {@link AuditTrail.logAction} will throw -- audit TTL is strictly a function
+   * of tenant tier and cannot be overridden by callers. This field exists so
+   * a negative test can assert that overrides are rejected.
+   */
+  ttl?: never;
 }
 
 /**
@@ -274,7 +335,6 @@ export interface QueryByResourceParams {
  */
 export class AuditTrail {
   private config: AuditTrailConfig;
-  private readonly DEFAULT_TTL_DAYS = 90;
 
   constructor(config: AuditTrailConfig) {
     this.config = config;
@@ -292,27 +352,31 @@ export class AuditTrail {
   }
 
   /**
-   * Calculate TTL for action log
-   *
-   * @param days - Number of days from now (default 90)
-   * @returns Unix timestamp
-   */
-  private calculateTTL(days?: number): number {
-    const ttlDays = days || this.config.hotStorageTTLDays || this.DEFAULT_TTL_DAYS;
-    const ttlDate = new Date();
-    ttlDate.setUTCDate(ttlDate.getUTCDate() + ttlDays);
-    return Math.floor(ttlDate.getTime() / 1000);
-  }
-
-  /**
    * Log an AWS API action
    *
-   * Records action with full context to DynamoDB
+   * Records action with full context to DynamoDB. The DynamoDB TTL attribute
+   * is always computed from the tenant's subscription tier via
+   * {@link calculateAuditTTL}; any caller-supplied `ttl` on `params` is rejected.
    *
-   * @param params - Action logging parameters
+   * @param params - Action logging parameters (must include `tenantTier`)
    * @returns Action ID
    */
   async logAction(params: LogActionParams): Promise<string> {
+    // Enforce tier-driven TTL invariant. This guards against a caller (or a
+    // future refactor) smuggling in a longer retention than the tenant's tier
+    // allows. See security-review.md M3.
+    if (Object.prototype.hasOwnProperty.call(params, 'ttl')) {
+      throw new Error(
+        'AuditTrail.logAction: caller-supplied `ttl` is not permitted. ' +
+          'TTL is derived from tenantTier via calculateAuditTTL().'
+      );
+    }
+    if (!params.tenantTier) {
+      throw new Error(
+        'AuditTrail.logAction: `tenantTier` is required to compute compliance TTL.'
+      );
+    }
+
     const actionId = this.generateActionId();
     const timestamp = new Date().toISOString();
     const awsEventTime = timestamp;
@@ -407,8 +471,9 @@ export class AuditTrail {
       // Cost
       estimatedMonthlyCost: actionLog.cost.estimatedMonthly,
 
-      // TTL
-      ttl: this.calculateTTL(),
+      // TTL: tier-enforced (90d basic / 1y advanced / 7y premium).
+      // See calculateAuditTTL() and security-review.md M3.
+      ttl: calculateAuditTTL(params.tenantTier),
     };
 
     // Write to DynamoDB

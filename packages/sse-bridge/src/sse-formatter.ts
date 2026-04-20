@@ -185,6 +185,30 @@ export function createSSEResponseStream(res: {
 }
 
 /**
+ * Options for {@link createSSEReadableStream}.
+ */
+export interface SSEReadableStreamOptions {
+  /**
+   * Interval in milliseconds at which to emit SSE keepalive comments.
+   * Prevents idle-connection timeouts at proxies/load-balancers.
+   * Omit or set to 0 to disable heartbeats.
+   */
+  heartbeatIntervalMs?: number;
+  /**
+   * Abort signal from the HTTP request. When fired, the stream is cancelled,
+   * the heartbeat is cleared, and no further writes occur. The source iterable
+   * is NOT explicitly cancelled here — callers that want to cancel upstream
+   * work should handle that in their own abort listener.
+   */
+  signal?: AbortSignal;
+  /**
+   * Maximum time (ms) to wait for the stream to drain before treating the
+   * consumer as dead and aborting. Defaults to 5000.
+   */
+  drainTimeoutMs?: number;
+}
+
+/**
  * Create a ReadableStream for Web Streams API
  *
  * Usage with Fetch API / Next.js:
@@ -193,26 +217,140 @@ export function createSSEResponseStream(res: {
  *   headers: VERCEL_DSP_HEADERS
  * });
  * ```
+ *
+ * With heartbeat + abort:
+ * ```
+ * return new Response(createSSEReadableStream(events, {
+ *   heartbeatIntervalMs: 15_000,
+ *   signal: req.signal,
+ * }), { headers: VERCEL_DSP_HEADERS });
+ * ```
  */
 export function createSSEReadableStream(
-  source: AsyncIterable<VercelDSPStreamPart> | Iterable<VercelDSPStreamPart>
+  source: AsyncIterable<VercelDSPStreamPart> | Iterable<VercelDSPStreamPart>,
+  options: SSEReadableStreamOptions = {}
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
+  const { heartbeatIntervalMs, signal, drainTimeoutMs = 5000 } = options;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let aborted = false;
 
   return new ReadableStream({
     async start(controller) {
+      const enqueue = (text: string): boolean => {
+        if (aborted) return false;
+        try {
+          controller.enqueue(encoder.encode(text));
+          return true;
+        } catch {
+          // Controller is already closed/errored
+          aborted = true;
+          return false;
+        }
+      };
+
+      const cleanup = () => {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = undefined;
+        }
+      };
+
+      // Wire abort signal — on client disconnect, stop writing and cleanup.
+      if (signal) {
+        if (signal.aborted) {
+          aborted = true;
+          cleanup();
+          try {
+            controller.close();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            cleanup();
+            try {
+              controller.close();
+            } catch {
+              // ignore — already closed
+            }
+          },
+          { once: true }
+        );
+      }
+
+      // Start heartbeat pings (SSE comments are ignored by browsers but keep
+      // proxies from timing out idle connections).
+      if (heartbeatIntervalMs && heartbeatIntervalMs > 0) {
+        heartbeatTimer = setInterval(() => {
+          enqueue(formatSSEKeepalive());
+        }, heartbeatIntervalMs);
+      }
+
       try {
         for await (const part of source) {
+          if (aborted) break;
           const sseData = formatSSEData(part);
-          controller.enqueue(encoder.encode(sseData));
+          if (!enqueue(sseData)) break;
+
+          // Backpressure: if consumer isn't keeping up, wait for buffer to drain.
+          // If drain takes longer than drainTimeoutMs, abort the stream.
+          if ((controller.desiredSize ?? 1) <= 0) {
+            const drained = await waitForDrain(controller, drainTimeoutMs);
+            if (!drained) {
+              aborted = true;
+              break;
+            }
+            if (aborted) break;
+          }
         }
 
-        // Send terminator
-        controller.enqueue(encoder.encode(formatSSEDone()));
-        controller.close();
+        if (!aborted) {
+          enqueue(formatSSEDone());
+        }
+        cleanup();
+        try {
+          controller.close();
+        } catch {
+          // ignore
+        }
       } catch (error) {
-        controller.error(error);
+        cleanup();
+        try {
+          controller.error(error);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    cancel() {
+      aborted = true;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
       }
     },
   });
+}
+
+/**
+ * Wait for a ReadableStream controller's buffer to drain below its high
+ * watermark. Polls `desiredSize` at 25ms intervals up to `timeoutMs`.
+ * Returns true if drained, false if timed out.
+ */
+async function waitForDrain(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  timeoutMs: number
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if ((controller.desiredSize ?? 1) > 0) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
 }

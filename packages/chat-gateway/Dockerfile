@@ -9,6 +9,25 @@
 # Base: public.ecr.aws/debian/debian:bookworm-slim — ECR Public mirror of Docker Hub
 # debian:bookworm-slim. No rate limits in AWS CodeBuild.
 # Bun runtime installed via curl https://bun.sh/install to bypass Docker Hub entirely.
+#
+# ---- Supply-chain: base image pinning policy ----
+# The `FROM` line below SHOULD be pinned to a specific SHA256 digest so an
+# upstream retag cannot silently substitute a different image. Refresh the
+# digest quarterly (and any time a security patch is needed) by running:
+#
+#   docker pull public.ecr.aws/debian/debian:bookworm-slim
+#   docker inspect --format='{{index .RepoDigests 0}}' \
+#     public.ecr.aws/debian/debian:bookworm-slim
+#
+# Then replace the tag-only FROM below with the pinned form:
+#
+#   FROM public.ecr.aws/debian/debian:bookworm-slim@sha256:<digest>
+#
+# See packages/agents/CONTRIBUTING.md for the quarterly refresh policy and
+# rationale (the policy is shared across every Dockerfile in this repo).
+#
+# FIXME(supply-chain): replace the tag-only FROM with a digest-pinned form:
+# FROM public.ecr.aws/debian/debian:bookworm-slim@sha256:REPLACE_WITH_CURRENT_DIGEST
 
 FROM public.ecr.aws/debian/debian:bookworm-slim
 

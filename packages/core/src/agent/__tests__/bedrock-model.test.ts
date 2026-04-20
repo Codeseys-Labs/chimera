@@ -2,7 +2,7 @@
  * Tests for BedrockModel - AWS Bedrock Converse API adapter
  */
 
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BedrockModel } from '../bedrock-model';
 import type { BedrockRuntimeClient, ConverseCommandOutput } from '@aws-sdk/client-bedrock-runtime';
 
@@ -405,6 +405,332 @@ describe('BedrockModel', () => {
           messages: [{ role: 'user', content: [{ text: 'Test' }] }],
         })
       ).rejects.toThrow('Invalid Bedrock response');
+    });
+  });
+
+  describe('converseStream — messageStop flush race (H3)', () => {
+    it('should flush a pending tool_use block when messageStop arrives without contentBlockStop', async () => {
+      // Simulate the race: contentBlockStart(tool_use) + deltas + messageStop
+      // but NO contentBlockStop. Prior to the fix, the tool call would be
+      // silently lost because only `contentBlockStop` pushed into contentBlocks.
+      const streamEvents = [
+        { messageStart: { role: 'assistant' } },
+        {
+          contentBlockStart: {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: 'tool_race_1', name: 'get_weather' } },
+          },
+        },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: '{"location":' } },
+          },
+        },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: '"Seattle"}' } },
+          },
+        },
+        // NOTE: deliberately NO contentBlockStop here — this is the race.
+        { messageStop: { stopReason: 'tool_use' } },
+        {
+          metadata: { usage: { inputTokens: 50, outputTokens: 25, totalTokens: 75 } },
+        },
+      ];
+
+      async function* streamGen() {
+        for (const ev of streamEvents) yield ev;
+      }
+
+      const mockClient = {
+        send: async () => ({ stream: streamGen() }),
+      };
+
+      const model = new BedrockModel({
+        modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      const events: any[] = [];
+      const gen = model.converseStream({
+        messages: [{ role: 'user', content: [{ text: 'weather?' }] }],
+      });
+
+      let result: any;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+        events.push(next.value);
+      }
+
+      // The assembled response MUST include the tool_use block even though
+      // contentBlockStop never arrived.
+      expect(result.output.message.content).toHaveLength(1);
+      expect(result.output.message.content[0].toolUse).toBeDefined();
+      expect(result.output.message.content[0].toolUse.toolUseId).toBe('tool_race_1');
+      expect(result.output.message.content[0].toolUse.name).toBe('get_weather');
+      expect(result.output.message.content[0].toolUse.input).toEqual({ location: 'Seattle' });
+      expect(result.stopReason).toBe('tool_use');
+
+      // A synthetic contentBlockStop must be emitted BEFORE messageStop so
+      // downstream consumers see a consistent start/stop sequence.
+      const stopIdx = events.findIndex((e) => e.type === 'contentBlockStop');
+      const msgStopIdx = events.findIndex((e) => e.type === 'messageStop');
+      expect(stopIdx).toBeGreaterThanOrEqual(0);
+      expect(msgStopIdx).toBeGreaterThanOrEqual(0);
+      expect(stopIdx).toBeLessThan(msgStopIdx);
+    });
+  });
+
+  describe('converseStream — transient error retry (M3)', () => {
+    it('should retry a ThrottlingException once and succeed on second attempt', async () => {
+      let calls = 0;
+
+      async function* streamGen() {
+        yield { messageStart: { role: 'assistant' } };
+        yield {
+          contentBlockStart: { contentBlockIndex: 0, start: {} },
+        };
+        yield {
+          contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'hi' } },
+        };
+        yield { contentBlockStop: { contentBlockIndex: 0 } };
+        yield { messageStop: { stopReason: 'end_turn' } };
+        yield {
+          metadata: { usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } },
+        };
+      }
+
+      const throttlingErr = Object.assign(new Error('Rate exceeded'), {
+        name: 'ThrottlingException',
+      });
+
+      const mockClient = {
+        send: async () => {
+          calls++;
+          if (calls === 1) throw throttlingErr;
+          return { stream: streamGen() };
+        },
+      };
+
+      const model = new BedrockModel({
+        modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      const gen = model.converseStream({
+        messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+      });
+
+      let result: any;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      expect(calls).toBe(2);
+      expect(result.output.message.content[0].text).toBe('hi');
+      expect(result.stopReason).toBe('end_turn');
+    });
+
+    it('should NOT retry on ValidationException', async () => {
+      let calls = 0;
+      const validationErr = Object.assign(new Error('Bad input'), {
+        name: 'ValidationException',
+      });
+
+      const mockClient = {
+        send: async () => {
+          calls++;
+          throw validationErr;
+        },
+      };
+
+      const model = new BedrockModel({
+        modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      const gen = model.converseStream({
+        messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+      });
+
+      await expect(gen.next()).rejects.toThrow('Bad input');
+      expect(calls).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Tier-ceiling enforcement — terminal gate before Bedrock invoke
+  // -------------------------------------------------------------------------
+  describe('tier-ceiling enforcement', () => {
+    const OPUS = 'us.anthropic.claude-opus-4-7';
+    const SONNET = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    const HAIKU = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+    let warnSpy: ReturnType<typeof mock>;
+    let originalWarn: typeof console.warn;
+
+    beforeEach(() => {
+      originalWarn = console.warn;
+      warnSpy = mock(() => {});
+      console.warn = warnSpy as unknown as typeof console.warn;
+    });
+
+    afterEach(() => {
+      console.warn = originalWarn;
+    });
+
+    it('basic tenant requesting Opus falls back to a cheaper allowed model at construction', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      const model = new BedrockModel({
+        modelId: OPUS,
+        tier: 'basic',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      // modelId on the stored config must be downgraded.
+      expect(model.getModelId()).not.toBe(OPUS);
+      expect(model.getModelId()).toBe(HAIKU);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('basic tenant Opus request emits a warning mentioning the tier', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      new BedrockModel({
+        modelId: OPUS,
+        tier: 'basic',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      expect(warnSpy).toHaveBeenCalled();
+      const warnMsg = (warnSpy.mock.calls[0] ?? [])[0] as string;
+      expect(warnMsg).toContain('basic');
+      expect(warnMsg).toContain(OPUS);
+    });
+
+    it('advanced tenant requesting Opus 4-6 (not allowlisted) falls back and warns', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      const model = new BedrockModel({
+        modelId: 'us.anthropic.claude-opus-4-6-v1:0',
+        tier: 'advanced',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      expect(model.getModelId()).toBe(HAIKU);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('advanced tenant requesting Opus 4-7 succeeds (allowlisted)', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      const model = new BedrockModel({
+        modelId: OPUS,
+        tier: 'advanced',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      expect(model.getModelId()).toBe(OPUS);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('premium tenant requesting Opus succeeds (no ceiling)', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      const model = new BedrockModel({
+        modelId: OPUS,
+        tier: 'premium',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      expect(model.getModelId()).toBe(OPUS);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('basic tenant requesting Sonnet succeeds (explicitly allowed but costly)', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      const model = new BedrockModel({
+        modelId: SONNET,
+        tier: 'basic',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      expect(model.getModelId()).toBe(SONNET);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('no tier configured means no enforcement (legacy / internal callers)', () => {
+      const mockClient = new MockBedrockClient([]);
+
+      const model = new BedrockModel({
+        modelId: OPUS,
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      expect(model.getModelId()).toBe(OPUS);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('per-turn modelId override for a Basic tenant is downgraded before Bedrock invoke', async () => {
+      const mockClient = new MockBedrockClient([
+        mockBedrockResponse('ok'),
+      ]);
+
+      const model = new BedrockModel({
+        modelId: HAIKU, // config default is allowed
+        tier: 'basic',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      // Construction did not warn (HAIKU is allowed for basic).
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      await model.converse({
+        messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+        modelId: OPUS, // per-turn override tries to escalate to Opus
+      });
+
+      // The ConverseCommand MUST have been called with the enforced model,
+      // NOT the requested Opus. This is the terminal gate.
+      const calls = mockClient.getCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].input.modelId).not.toBe(OPUS);
+      expect(calls[0].input.modelId).toBe(HAIKU);
+      // Warning fires at invoke time for the per-turn override.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('per-turn modelId override for a Premium tenant is passed through unchanged', async () => {
+      const mockClient = new MockBedrockClient([
+        mockBedrockResponse('ok'),
+      ]);
+
+      const model = new BedrockModel({
+        modelId: HAIKU,
+        tier: 'premium',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      await model.converse({
+        messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+        modelId: OPUS,
+      });
+
+      const calls = mockClient.getCalls();
+      expect(calls[0].input.modelId).toBe(OPUS);
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });

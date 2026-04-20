@@ -41,14 +41,55 @@ export const EXCLUDED_PATTERNS = [
 ];
 
 /**
+ * A file that was excluded from the push because it was larger than the
+ * CodeCommit per-commit byte limit. Reported to the caller so the user can
+ * see which files were skipped.
+ */
+export interface SkippedLargeFile {
+  path: string;
+  fullPath: string;
+  size: number;
+  /**
+   * `iac` = infrastructure-as-code file under `infra/` (almost certainly a
+   *   caller bug — should never emit a 5MB CDK or config file).
+   * `other` = anything else (legitimate large artifact, binary-ish blob, etc).
+   */
+  kind: 'iac' | 'other';
+}
+
+const IAC_SUSPECT_EXTENSIONS = new Set(['.ts', '.json', '.yaml', '.yml']);
+
+function isIacFile(relativePath: string): boolean {
+  const parts = relativePath.split(path.sep);
+  if (parts[0] !== 'infra') return false;
+  const ext = path.extname(relativePath).toLowerCase();
+  return IAC_SUSPECT_EXTENSIONS.has(ext);
+}
+
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(2)} KB`;
+  return `${n} B`;
+}
+
+/**
  * Recursively collect files from directory, excluding specific paths
  * Reads file content to detect binaries and check size limits
+ *
+ * Files larger than BATCH_MAX_BYTES are skipped and appended to `skipped`
+ * so the caller can surface them to the user. IaC files under `infra/`
+ * are logged as errors (almost certainly a caller bug) while other large
+ * files are logged as warnings. Both are skipped either way.
  */
 export function collectFiles(
   dirPath: string,
   repoRoot: string,
   files: Array<{ path: string; fullPath: string; content: Buffer }> = [],
-): Array<{ path: string; fullPath: string; content: Buffer }> {
+  skipped: SkippedLargeFile[] = [],
+): {
+  files: Array<{ path: string; fullPath: string; content: Buffer }>;
+  skipped: SkippedLargeFile[];
+} {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -65,11 +106,31 @@ export function collectFiles(
     }
 
     if (entry.isDirectory()) {
-      collectFiles(fullPath, repoRoot, files);
+      collectFiles(fullPath, repoRoot, files, skipped);
     } else {
       const content = fs.readFileSync(fullPath);
 
       if (content.length > BATCH_MAX_BYTES) {
+        const iac = isIacFile(relativePath);
+        const kind: SkippedLargeFile['kind'] = iac ? 'iac' : 'other';
+        const sizeLabel = formatBytes(content.length);
+        if (iac) {
+          // IaC file > 5MB is almost certainly a bug in the caller — it
+          // should never be emitting CDK/config files that large. Log loudly
+          // but still skip (the CodeCommit API would reject it anyway).
+          console.error(
+            color.red(
+              `  ERROR: skipping IaC file >5MB: ${relativePath} (${sizeLabel}) — almost certainly a caller bug`,
+            ),
+          );
+        } else {
+          console.warn(
+            color.yellow(
+              `  WARN:  skipping large file >5MB: ${relativePath} (${sizeLabel})`,
+            ),
+          );
+        }
+        skipped.push({ path: relativePath, fullPath, size: content.length, kind });
         continue;
       }
 
@@ -90,7 +151,7 @@ export function collectFiles(
     }
   }
 
-  return files;
+  return { files, skipped };
 }
 
 /**
@@ -141,8 +202,22 @@ export async function pushToCodeCommit(
   commitMessage?: string,
 ): Promise<string | undefined> {
   console.log(color.gray('  Scanning repository files...'));
-  const allFiles = collectFiles(repoRoot, repoRoot);
+  const { files: allFiles, skipped } = collectFiles(repoRoot, repoRoot);
   console.log(color.gray(`  Found ${allFiles.length} files`));
+  if (skipped.length > 0) {
+    const iacCount = skipped.filter((s) => s.kind === 'iac').length;
+    const otherCount = skipped.length - iacCount;
+    console.log(
+      color.yellow(
+        `  Skipped ${skipped.length} file(s) >5MB (not pushed): ${otherCount} large file(s)` +
+          (iacCount > 0 ? `, ${iacCount} IaC file(s) [see ERROR above]` : ''),
+      ),
+    );
+    for (const s of skipped) {
+      const tag = s.kind === 'iac' ? 'ERROR' : 'WARN';
+      console.log(color.gray(`    - [${tag}] ${s.path} (${formatBytes(s.size)})`));
+    }
+  }
 
   const batches = batchFiles(allFiles);
   console.log(color.gray(`  Organized into ${batches.length} commit batch(es)`));

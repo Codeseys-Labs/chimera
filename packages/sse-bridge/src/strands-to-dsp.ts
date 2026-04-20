@@ -374,20 +374,48 @@ export class StrandsToDSPConverter {
 
   /**
    * Handle toolResult event (when tool execution completes)
+   *
+   * Propagates the required `status` and optional `error` fields so that tool
+   * failures cannot silently be interpreted as success downstream (review C3).
+   * If an upstream producer drops a malformed event without `status`, we
+   * default to `'error'` (fail-closed) and extract any error string from the
+   * result for diagnostics.
    */
   private handleToolResult(event: {
     type: 'toolResult';
     toolUseId: string;
     result: unknown;
     status?: 'success' | 'error';
+    error?: string;
   }): VercelDSPStreamPart[] {
+    // Fail-closed: if status is missing, treat as error so downstream
+    // consumers cannot confuse a malformed event with a successful tool call.
+    const status: 'success' | 'error' = event.status ?? 'error';
+    const errorMessage =
+      event.error ??
+      (status === 'error' ? this.extractErrorFromResult(event.result) : undefined);
+
     return [
       {
         type: 'tool-result',
         id: event.toolUseId,
         result: event.result,
+        status,
+        ...(errorMessage !== undefined ? { error: errorMessage } : {}),
       },
     ];
+  }
+
+  /**
+   * Best-effort extraction of an error string from a tool result payload.
+   * Tools typically return `{ error: '...' }` or `{ message: '...' }` on failure.
+   */
+  private extractErrorFromResult(result: unknown): string | undefined {
+    if (!result || typeof result !== 'object') return undefined;
+    const r = result as Record<string, unknown>;
+    if (typeof r.error === 'string') return r.error;
+    if (typeof r.message === 'string') return r.message;
+    return undefined;
   }
 
   /**
