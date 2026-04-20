@@ -13,14 +13,22 @@ Architecture:
 import os
 import json
 import boto3
+from botocore.config import Config
 from datetime import datetime, timezone
 from typing import Optional
 from strands.tools import tool
 
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 # Initialize AWS clients
-dynamodb = boto3.client('dynamodb')
-events = boto3.client('events')
+dynamodb = boto3.client('dynamodb', config=_BOTO_CONFIG)
+events = boto3.client('events', config=_BOTO_CONFIG)
 
 
 def _generate_task_id() -> str:
@@ -81,6 +89,10 @@ def start_background_task(
         )
     """
     try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
         # Get environment configuration
         region = os.environ.get('AWS_REGION', 'us-west-2')
         env_name = os.environ.get('CHIMERA_ENV', 'dev')
@@ -93,7 +105,7 @@ def start_background_task(
         session_id = os.environ.get('SESSION_ID', 'unknown-session')
 
         # Get AWS account ID for state machine ARN
-        sts = boto3.client('sts')
+        sts = boto3.client('sts', config=_BOTO_CONFIG)
         account_id = sts.get_caller_identity()['Account']
 
         # Validate task type
@@ -185,6 +197,10 @@ def check_background_task(task_id: str) -> str:
     Example:
         check_background_task(task_id="bg-task-1234567890-abc123")
     """
+    try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     try:
         # Get environment configuration
         env_name = os.environ.get('CHIMERA_ENV', 'dev')

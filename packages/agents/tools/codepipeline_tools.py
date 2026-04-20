@@ -5,8 +5,16 @@ Provides CI/CD pipeline management for agent self-evolution workflows.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import Optional
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -21,7 +29,11 @@ def list_pipelines(region: str = "us-east-1") -> str:
         A formatted string listing all pipelines with their status.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
         response = codepipeline_client.list_pipelines()
 
         pipelines = response.get('pipelines', [])
@@ -58,7 +70,11 @@ def get_pipeline_details(pipeline_name: str, region: str = "us-east-1") -> str:
         A formatted string with pipeline configuration and stage details.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
 
         # Get pipeline structure
         pipeline_response = codepipeline_client.get_pipeline(name=pipeline_name)
@@ -105,7 +121,11 @@ def check_pipeline_status(pipeline_name: str, region: str = "us-east-1") -> str:
         A formatted string with the latest pipeline execution status and stage details.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
 
         # Get pipeline state
         state_response = codepipeline_client.get_pipeline_state(name=pipeline_name)
@@ -167,7 +187,11 @@ def trigger_pipeline(pipeline_name: str, region: str = "us-east-1") -> str:
         A formatted string with the execution ID and status.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
 
         # Start pipeline execution
         response = codepipeline_client.start_pipeline_execution(name=pipeline_name)
@@ -205,7 +229,11 @@ def get_pipeline_execution_details(
         A formatted string with execution details including stage and action results.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
 
         # Get execution details
         response = codepipeline_client.get_pipeline_execution(
@@ -272,7 +300,11 @@ def create_pipeline(
         A formatted string with pipeline creation status.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
 
         # Define pipeline structure
         pipeline_structure = {
@@ -369,7 +401,11 @@ def delete_pipeline(pipeline_name: str, region: str = "us-east-1") -> str:
         A formatted string confirming deletion.
     """
     try:
-        codepipeline_client = boto3.client('codepipeline', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codepipeline_client = boto3.client('codepipeline', region_name=region, config=_BOTO_CONFIG)
 
         # Delete pipeline
         codepipeline_client.delete_pipeline(name=pipeline_name)

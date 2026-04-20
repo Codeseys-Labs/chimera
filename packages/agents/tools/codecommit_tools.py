@@ -7,8 +7,16 @@ All operations respect IAM policies enforced at the tenant level.
 import boto3
 import os
 import subprocess
+from botocore.config import Config
 from typing import Optional
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -23,7 +31,11 @@ def list_codecommit_repos(region: str = "us-east-1") -> str:
         A formatted string listing all CodeCommit repositories with their details.
     """
     try:
-        codecommit_client = boto3.client('codecommit', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codecommit_client = boto3.client('codecommit', region_name=region, config=_BOTO_CONFIG)
         response = codecommit_client.list_repositories()
 
         repos = response.get('repositories', [])
@@ -56,7 +68,11 @@ def get_repo_info(repo_name: str, region: str = "us-east-1") -> str:
         A formatted string with repository metadata and branch information.
     """
     try:
-        codecommit_client = boto3.client('codecommit', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codecommit_client = boto3.client('codecommit', region_name=region, config=_BOTO_CONFIG)
 
         # Get repository metadata
         repo_response = codecommit_client.get_repository(repositoryName=repo_name)
@@ -115,7 +131,11 @@ def git_clone_repo(
         A formatted string with clone operation status.
     """
     try:
-        codecommit_client = boto3.client('codecommit', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codecommit_client = boto3.client('codecommit', region_name=region, config=_BOTO_CONFIG)
 
         # Get repository info
         repo_response = codecommit_client.get_repository(repositoryName=repo_name)
@@ -166,6 +186,10 @@ def git_commit_push(
     Returns:
         A formatted string with commit and push operation status.
     """
+    try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     try:
         # Change to repo directory
         original_dir = os.getcwd()
@@ -262,7 +286,11 @@ def get_commit_history(
         A formatted string with commit history details.
     """
     try:
-        codecommit_client = boto3.client('codecommit', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codecommit_client = boto3.client('codecommit', region_name=region, config=_BOTO_CONFIG)
 
         # Get branch info
         branch_response = codecommit_client.get_branch(

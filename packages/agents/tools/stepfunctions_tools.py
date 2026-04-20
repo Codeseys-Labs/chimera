@@ -6,8 +6,16 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 import json
+from botocore.config import Config
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -22,7 +30,11 @@ def list_stepfunctions_state_machines(region: str = "us-east-1") -> str:
         A formatted string listing all state machines with their details.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
         response = sfn_client.list_state_machines()
 
         state_machines = response.get('stateMachines', [])
@@ -71,7 +83,11 @@ def create_stepfunctions_state_machine(
         A formatted string with the created state machine details.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
 
         # Validate state machine type
         if state_machine_type not in ['STANDARD', 'EXPRESS']:
@@ -116,7 +132,11 @@ def describe_stepfunctions_state_machine(state_machine_arn: str, region: str = "
         A formatted string with detailed state machine configuration.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
         response = sfn_client.describe_state_machine(stateMachineArn=state_machine_arn)
 
         name = response.get('name', 'N/A')
@@ -172,7 +192,11 @@ def start_stepfunctions_execution(
         A formatted string with the execution details.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
 
         # Build execution request
         start_config = {'stateMachineArn': state_machine_arn}
@@ -214,7 +238,11 @@ def describe_stepfunctions_execution(execution_arn: str, region: str = "us-east-
         A formatted string with execution status and details.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
         response = sfn_client.describe_execution(executionArn=execution_arn)
 
         name = response.get('name', 'N/A')
@@ -280,7 +308,11 @@ def list_stepfunctions_executions(
         A formatted string listing executions with their status.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
 
         # Build list request
         list_config = {'stateMachineArn': state_machine_arn}
@@ -344,7 +376,11 @@ def stop_stepfunctions_execution(
         A formatted string confirming the stop operation.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
 
         # Build stop request
         stop_config = {'executionArn': execution_arn}
@@ -397,7 +433,11 @@ def update_stepfunctions_state_machine(
         A formatted string with the update status.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
 
         # Build update configuration
         update_config = {'stateMachineArn': state_machine_arn}
@@ -444,7 +484,11 @@ def delete_stepfunctions_state_machine(state_machine_arn: str, region: str = "us
         A formatted string confirming deletion.
     """
     try:
-        sfn_client = boto3.client('stepfunctions', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sfn_client = boto3.client('stepfunctions', region_name=region, config=_BOTO_CONFIG)
         sfn_client.delete_state_machine(stateMachineArn=state_machine_arn)
 
         return f"Successfully deleted state machine: {state_machine_arn}"

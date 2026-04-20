@@ -5,8 +5,16 @@ Provides CI/CD build management operations with tenant-scoped access control.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -41,7 +49,11 @@ def create_codebuild_project(
         A formatted string with the created project details.
     """
     try:
-        codebuild_client = boto3.client('codebuild', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codebuild_client = boto3.client('codebuild', region_name=region, config=_BOTO_CONFIG)
 
         # Validate source type
         valid_source_types = ['CODECOMMIT', 'GITHUB', 'S3', 'NO_SOURCE']
@@ -115,7 +127,11 @@ def start_codebuild_build(
         A formatted string with the build execution details.
     """
     try:
-        codebuild_client = boto3.client('codebuild', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codebuild_client = boto3.client('codebuild', region_name=region, config=_BOTO_CONFIG)
 
         # Build start configuration
         start_config = {'projectName': project_name}
@@ -162,7 +178,11 @@ def get_codebuild_build_details(build_ids: List[str], region: str = "us-east-1")
         A formatted string with build details.
     """
     try:
-        codebuild_client = boto3.client('codebuild', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codebuild_client = boto3.client('codebuild', region_name=region, config=_BOTO_CONFIG)
 
         if not build_ids:
             return "Error: Must provide at least one build ID"
@@ -258,7 +278,11 @@ def list_codebuild_builds_for_project(
         A formatted string listing build IDs.
     """
     try:
-        codebuild_client = boto3.client('codebuild', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codebuild_client = boto3.client('codebuild', region_name=region, config=_BOTO_CONFIG)
 
         # Validate sort order
         if sort_order not in ['ASCENDING', 'DESCENDING']:
@@ -301,7 +325,11 @@ def stop_codebuild_build(build_id: str, region: str = "us-east-1") -> str:
         A formatted string confirming the stop operation.
     """
     try:
-        codebuild_client = boto3.client('codebuild', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codebuild_client = boto3.client('codebuild', region_name=region, config=_BOTO_CONFIG)
         response = codebuild_client.stop_build(id=build_id)
 
         build = response.get('build', {})
@@ -332,7 +360,11 @@ def delete_codebuild_project(project_name: str, region: str = "us-east-1") -> st
         A formatted string confirming deletion.
     """
     try:
-        codebuild_client = boto3.client('codebuild', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        codebuild_client = boto3.client('codebuild', region_name=region, config=_BOTO_CONFIG)
         codebuild_client.delete_project(name=project_name)
 
         return f"Successfully deleted CodeBuild project: {project_name}"

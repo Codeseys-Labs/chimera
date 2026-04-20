@@ -5,8 +5,16 @@ Provides RDS database instance management operations for launching,
 monitoring, and managing relational databases.
 """
 import boto3
+from botocore.config import Config
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -25,7 +33,11 @@ def describe_rds_db_instances(
         Formatted string with database instance details.
     """
     try:
-        rds = boto3.client('rds', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rds = boto3.client('rds', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {}
         if db_instance_identifier:
@@ -94,7 +106,11 @@ def create_rds_db_instance(
         Formatted string with creation status.
     """
     try:
-        rds = boto3.client('rds', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rds = boto3.client('rds', region_name=region, config=_BOTO_CONFIG)
 
         response = rds.create_db_instance(
             DBInstanceIdentifier=db_instance_identifier,
@@ -146,7 +162,11 @@ def delete_rds_db_instance(
         Confirmation message.
     """
     try:
-        rds = boto3.client('rds', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rds = boto3.client('rds', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {
             'DBInstanceIdentifier': db_instance_identifier,
@@ -187,7 +207,11 @@ def start_rds_db_instance(
         Confirmation message.
     """
     try:
-        rds = boto3.client('rds', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rds = boto3.client('rds', region_name=region, config=_BOTO_CONFIG)
 
         response = rds.start_db_instance(
             DBInstanceIdentifier=db_instance_identifier
@@ -222,7 +246,11 @@ def stop_rds_db_instance(
         Confirmation message.
     """
     try:
-        rds = boto3.client('rds', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rds = boto3.client('rds', region_name=region, config=_BOTO_CONFIG)
 
         response = rds.stop_db_instance(
             DBInstanceIdentifier=db_instance_identifier
@@ -263,7 +291,11 @@ def modify_rds_db_instance(
         Confirmation message.
     """
     try:
-        rds = boto3.client('rds', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rds = boto3.client('rds', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {
             'DBInstanceIdentifier': db_instance_identifier,

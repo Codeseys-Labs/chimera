@@ -5,8 +5,16 @@ Provides EC2 instance management operations with tenant-scoped access control.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import List, Dict, Any
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -21,7 +29,11 @@ def list_ec2_instances(region: str = "us-east-1") -> str:
         A formatted string listing all EC2 instances with their details.
     """
     try:
-        ec2_client = boto3.client('ec2', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        ec2_client = boto3.client('ec2', region_name=region, config=_BOTO_CONFIG)
         response = ec2_client.describe_instances()
 
         instances = []
@@ -75,7 +87,11 @@ def get_ec2_instance_details(instance_id: str, region: str = "us-east-1") -> str
         A formatted string with detailed instance information.
     """
     try:
-        ec2_client = boto3.client('ec2', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        ec2_client = boto3.client('ec2', region_name=region, config=_BOTO_CONFIG)
         response = ec2_client.describe_instances(InstanceIds=[instance_id])
 
         if not response.get('Reservations'):

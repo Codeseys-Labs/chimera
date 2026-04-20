@@ -32,7 +32,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 from strands.tools import tool
+
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +96,6 @@ _MAX_CDK_SIZE = 65_536  # 64 KB — matches TypeScript orchestrator limit
 def trigger_infra_evolution(
     capability_name: str,
     cdk_stack_code: str,
-    tenant_id: str,
     rationale: str,
     estimated_monthly_cost_usd: float = 0.0,
     target_repo: str = "chimera",
@@ -103,7 +111,6 @@ def trigger_infra_evolution(
         capability_name: Short slug for the new capability (e.g., 'media-ingestion').
                          Use lowercase letters, numbers, and hyphens only.
         cdk_stack_code: Complete CDK TypeScript stack class (must extend cdk.Stack).
-        tenant_id: Tenant initiating the evolution (from JWT claims).
         rationale: Human-readable explanation of why this capability is needed.
         estimated_monthly_cost_usd: Estimated incremental AWS cost per month in USD.
         target_repo: CodeCommit repository name (default: chimera).
@@ -112,6 +119,11 @@ def trigger_infra_evolution(
     Returns:
         Evolution request ID and pipeline status on success, or an error message.
     """
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+
     # 1. Kill switch — operator can disable all evolution
     kill = _check_kill_switch(region)
     if not kill["enabled"]:
@@ -269,12 +281,15 @@ def wait_for_evolution_deployment(
     start_time = time.time()
     elapsed = 0
     last_status = "unknown"
+    consecutive_errors = 0
+    max_consecutive_errors = 5
 
     while elapsed < max_wait_seconds:
         try:
             response = table.get_item(
                 Key={"PK": f"EVOLUTION#{evolution_id}", "SK": "REQUEST"}
             )
+            consecutive_errors = 0
 
             if "Item" not in response:
                 return (
@@ -329,7 +344,17 @@ def wait_for_evolution_deployment(
                 )
 
         except Exception as e:
-            logger.warning(f"Error polling evolution status: {e}")
+            consecutive_errors += 1
+            logger.warning(
+                f"Error polling evolution status "
+                f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+            )
+            if consecutive_errors >= max_consecutive_errors:
+                return (
+                    f"ABORTED: {max_consecutive_errors} consecutive polling errors "
+                    f"on evolution {evolution_id}. Last error: {str(e)[:200]}. "
+                    f"Check with check_evolution_status()."
+                )
 
         # Still deploying — wait and poll again
         time.sleep(poll_interval_seconds)
@@ -349,7 +374,6 @@ def register_capability(
     tool_names: list,
     tier: int,
     description: str,
-    tenant_id: str,
     region: str = "us-east-1",
 ) -> str:
     """
@@ -364,12 +388,16 @@ def register_capability(
         tool_names: List of exported tool function names in the module.
         tier: Minimum tenant tier required: 1 (basic+), 2 (advanced+), 3 (premium).
         description: Human-readable description shown in Gateway discovery.
-        tenant_id: Tenant registering the capability.
         region: AWS region (default: us-east-1).
 
     Returns:
         Confirmation message on success, or an error description.
     """
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+
     if tier not in (1, 2, 3):
         return (
             f"Invalid tier {tier}. Must be 1 (basic+), 2 (advanced+), or 3 (premium)."
@@ -444,7 +472,6 @@ def register_capability(
 
 @tool
 def list_evolution_history(
-    tenant_id: str,
     limit: int = 10,
     region: str = "us-east-1",
 ) -> str:
@@ -452,13 +479,17 @@ def list_evolution_history(
     List recent self-evolution requests for a tenant.
 
     Args:
-        tenant_id: Tenant whose evolution history to retrieve.
         limit: Maximum records to return (default: 10, max: 50).
         region: AWS region (default: us-east-1).
 
     Returns:
         Formatted list of evolution requests with status.
     """
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+
     limit = min(max(limit, 1), 50)
     env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
     dynamodb = boto3.resource("dynamodb", region_name=region)
@@ -508,7 +539,7 @@ def list_evolution_history(
 def _check_kill_switch(region: str = "us-east-1") -> dict:
     """Read SSM kill switch for self-evolution. Fails open if parameter is missing."""
     try:
-        ssm = boto3.client("ssm", region_name=region)
+        ssm = boto3.client("ssm", region_name=region, config=_BOTO_CONFIG)
         env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
         resp = ssm.get_parameter(
             Name=f"/chimera/evolution/self-modify-enabled/{env_name}"
@@ -542,7 +573,7 @@ def _validate_evolution_policy(
         return {"allowed": True, "reason": ""}
 
     try:
-        avp = boto3.client("verifiedpermissions", region_name=region)
+        avp = boto3.client("verifiedpermissions", region_name=region, config=_BOTO_CONFIG)
         response = avp.is_authorized(
             policyStoreId=policy_store_id,
             principal={"entityType": "Chimera::Agent", "entityId": tenant_id},
@@ -647,7 +678,7 @@ def _validate_cdk_code(cdk_code: str) -> dict:
     # Must contain a CDK Stack class definition (not just the words in a comment)
     import re
 
-    if not re.search(r"class\s+\w+\s+extends\s+\w*Stack", cdk_code):
+    if not re.search(r"class\s+\w+\s+extends\s+(?:\w+\.)?\w*Stack", cdk_code):
         return {
             "valid": False,
             "reason": "Code must contain a CDK Stack class definition (class XxxStack extends cdk.Stack)",
@@ -674,7 +705,7 @@ def _commit_to_codecommit(
     Uses the CodeCommit CreateCommit API (no local git required).
     """
     try:
-        codecommit = boto3.client("codecommit", region_name=region)
+        codecommit = boto3.client("codecommit", region_name=region, config=_BOTO_CONFIG)
 
         branch_resp = codecommit.get_branch(repositoryName=repo_name, branchName="main")
         parent_commit_id = branch_resp["branch"]["commitId"]
@@ -703,7 +734,7 @@ def _commit_to_codecommit(
 def _format_pipeline_status(pipeline_name: str, region: str) -> str:
     """Return a formatted summary of the latest CodePipeline execution."""
     try:
-        codepipeline = boto3.client("codepipeline", region_name=region)
+        codepipeline = boto3.client("codepipeline", region_name=region, config=_BOTO_CONFIG)
         state = codepipeline.get_pipeline_state(name=pipeline_name)
         stages = state.get("stageStates", [])
 

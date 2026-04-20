@@ -27,7 +27,16 @@ import os
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 from strands.tools import tool
+
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,26 +52,82 @@ class CodeInterpreterUnavailableError(Exception):
 
 def _get_agentcore_client():
     """
-    Get the Bedrock AgentCore Runtime client.
+    Get the Bedrock AgentCore data-plane client.
 
-    Note: As of 2026-04, the boto3 service name for AgentCore Code Interpreter
-    may not be available in all SDK versions. The correct service name is
-    'bedrock-agent-runtime' for GA Bedrock Agents, but 'bedrock-agentcore-runtime'
-    is only available if the AgentCore Code Interpreter SDK has been installed.
-    When the service is unavailable, callers should fall back to regex-based
-    CDK validation instead of sandbox execution.
+    Note: As of 2026-04, the correct boto3 service name for AgentCore Code
+    Interpreter is 'bedrock-agentcore' (the data plane), NOT the previously
+    used '<service>-runtime' variant. The rabbithole-04 deep dive confirmed
+    that the old service name was wrong, which caused every sandbox call to
+    fall through to regex validation in production. Callers should still
+    treat `CodeInterpreterUnavailableError` as a fallback signal for regions
+    or SDK versions that don't expose the AgentCore service model yet.
+
+    Operators can force the regex fallback path by setting
+    CODE_INTERPRETER_USE_AGENTCORE_SHIM=false — this is the kill-switch for
+    rolling out the service-name fix.
     """
+    shim_enabled = os.environ.get("CODE_INTERPRETER_USE_AGENTCORE_SHIM", "true").lower()
+    if shim_enabled in ("false", "0", "no", "off"):
+        raise CodeInterpreterUnavailableError(
+            "AgentCore Code Interpreter is disabled via "
+            "CODE_INTERPRETER_USE_AGENTCORE_SHIM=false. Falling back to "
+            "regex-based CDK validation."
+        )
+
     region = os.environ.get("AWS_REGION", "us-west-2")
     try:
-        return boto3.client("bedrock-agentcore-runtime", region_name=region)
+        return boto3.client("bedrock-agentcore", region_name=region, config=_BOTO_CONFIG)
     except Exception as e:
         raise CodeInterpreterUnavailableError(
-            f"AgentCore Code Interpreter service 'bedrock-agentcore-runtime' is not "
+            f"AgentCore Code Interpreter service 'bedrock-agentcore' is not "
             f"available in this environment. This may mean the service has not GA'd "
             f"in this region, or the boto3 version does not include the service model. "
             f"Use regex-based CDK validation (evolution_tools._validate_cdk_code) "
             f"as a fallback. Original error: {e}"
         ) from e
+
+
+# TODO(rabbithole-04): Remaining AgentCore Code Interpreter API-shape fixes
+# ------------------------------------------------------------------------
+# The boto3 service name was corrected to 'bedrock-agentcore' above (the
+# previous value had a '-runtime' suffix that did not match any real service).
+# However, the wire-shape bugs identified in
+# docs/research/agentcore-rabbithole/04-code-interpreter-browser-deep-dive.md
+# are NOT yet fixed, because fixing them without a dev tenant to verify
+# against risks replacing one silent failure with three new ones. The fix
+# is deliberately staged: land the service-name correction first (this
+# change), confirm the fallback still protects the hot path, then land
+# the API-shape corrections under a separate seeds issue once a dev
+# tenant is available to validate each call.
+#
+# Remaining corrections required in _ensure_session and the invoke_code_interpreter
+# call sites (validate_cdk_in_sandbox, execute_in_sandbox, fetch_url_content):
+#   1. Session creation: rename `create_code_interpreter_session(...)` to
+#      `start_code_interpreter_session(...)`. The boto3 method is `start_*`
+#      (the resource is "started" for a session, not "created").
+#   2. Invocation payload: `invoke_code_interpreter` does NOT accept a bare
+#      `code=` kwarg. It takes a `{name, arguments}` pattern, e.g.
+#          client.invoke_code_interpreter(
+#              sessionId=...,
+#              name="executeCode",
+#              arguments={"language": "python", "code": code},
+#          )
+#      The `name` identifies the tool action (executeCode, readFile, etc.)
+#      and `arguments` carries the parameters.
+#   3. Response parsing: responses are NOT `response["output"]`. They are a
+#      stream of events:
+#          response["stream"][i]["result"]["content"]
+#      Each chunk in the stream may carry stdout, stderr, or structured
+#      results. The parsing logic in validate_cdk_in_sandbox, execute_in_sandbox,
+#      and fetch_url_content must be rewritten to iterate response["stream"]
+#      and accumulate content from result.content entries.
+#
+# See: docs/research/agentcore-rabbithole/04-code-interpreter-browser-deep-dive.md
+# Tracking: file a follow-up seeds issue before enabling the shim by default
+# in production — the kill-switch CODE_INTERPRETER_USE_AGENTCORE_SHIM=false
+# above lets operators fall back to regex validation if the service-name fix
+# exposes these latent bugs during rollout.
+# ------------------------------------------------------------------------
 
 
 def _ensure_session(tenant_id: str, session_name: str = "default") -> dict:
@@ -101,7 +166,6 @@ def _ensure_session(tenant_id: str, session_name: str = "default") -> dict:
 def validate_cdk_in_sandbox(
     cdk_code: str,
     capability_name: str,
-    tenant_id: str,
 ) -> str:
     """
     Validate CDK TypeScript code by running cdk synth in a Code Interpreter sandbox.
@@ -115,12 +179,15 @@ def validate_cdk_in_sandbox(
     Args:
         cdk_code: Complete CDK TypeScript stack code (must extend cdk.Stack).
         capability_name: Name of the capability being validated.
-        tenant_id: Tenant ID for session management.
 
     Returns:
         Validation result: success with CloudFormation template summary,
         or failure with compilation errors for the agent to fix.
     """
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     try:
         session = _ensure_session(tenant_id, f"cdk-validate-{capability_name}")
         client = _get_agentcore_client()
@@ -277,7 +344,6 @@ else:
 def execute_in_sandbox(
     code: str,
     language: str = "python",
-    tenant_id: str = "",
     session_name: str = "default",
 ) -> str:
     """
@@ -295,14 +361,15 @@ def execute_in_sandbox(
     Args:
         code: The code to execute.
         language: Programming language (python, javascript, typescript). Default: python.
-        tenant_id: Tenant ID for session management.
         session_name: Session name for reuse (default: 'default').
 
     Returns:
         Execution output (stdout + stderr), or error message.
     """
-    if not tenant_id:
-        return "Error: tenant_id is required for sandbox execution."
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
 
     try:
         session = _ensure_session(tenant_id, session_name)
@@ -339,7 +406,6 @@ def execute_in_sandbox(
 @tool
 def fetch_url_content(
     url: str,
-    tenant_id: str,
     extract_text: bool = True,
 ) -> str:
     """
@@ -350,12 +416,15 @@ def fetch_url_content(
 
     Args:
         url: The URL to fetch.
-        tenant_id: Tenant ID for session management.
         extract_text: If True, extract readable text. If False, return raw HTML.
 
     Returns:
         Extracted content from the URL, or error message.
     """
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     try:
         session = _ensure_session(tenant_id, "browser")
         client = _get_agentcore_client()

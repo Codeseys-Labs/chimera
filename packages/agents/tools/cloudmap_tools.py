@@ -13,7 +13,15 @@ import os
 from typing import List, Optional
 
 import boto3
+from botocore.config import Config
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -35,11 +43,15 @@ def discover_infrastructure(
     Returns:
         Formatted string listing all registered infrastructure components grouped by stack.
     """
+    try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     env = env_name or os.environ.get('CHIMERA_ENV_NAME', 'dev')
     namespace_name = f'chimera-{env}'
 
     try:
-        client = boto3.client('servicediscovery')
+        client = boto3.client('servicediscovery', config=_BOTO_CONFIG)
 
         namespace_id = _find_namespace_id(client, namespace_name)
         if not namespace_id:
@@ -112,11 +124,15 @@ def get_service_instances(
     Returns:
         Formatted string with all instances and their attributes.
     """
+    try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     env = env_name or os.environ.get('CHIMERA_ENV_NAME', 'dev')
     namespace_name = f'chimera-{env}'
 
     try:
-        client = boto3.client('servicediscovery')
+        client = boto3.client('servicediscovery', config=_BOTO_CONFIG)
 
         namespace_id = _find_namespace_id(client, namespace_name)
         if not namespace_id:
@@ -159,11 +175,15 @@ def get_namespace_summary(env_name: Optional[str] = None) -> str:
     Returns:
         Formatted string with namespace metadata and per-service instance counts.
     """
+    try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
     env = env_name or os.environ.get('CHIMERA_ENV_NAME', 'dev')
     namespace_name = f'chimera-{env}'
 
     try:
-        client = boto3.client('servicediscovery')
+        client = boto3.client('servicediscovery', config=_BOTO_CONFIG)
 
         namespace_id = _find_namespace_id(client, namespace_name)
         if not namespace_id:

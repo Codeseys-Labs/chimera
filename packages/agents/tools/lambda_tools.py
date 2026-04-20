@@ -7,8 +7,16 @@ All operations respect IAM policies enforced at the tenant level.
 import boto3
 import json
 import base64
+from botocore.config import Config
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -23,7 +31,11 @@ def list_lambda_functions(region: str = "us-east-1") -> str:
         A formatted string listing all Lambda functions with their details.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
         response = lambda_client.list_functions()
 
         functions = response.get('Functions', [])
@@ -64,7 +76,11 @@ def get_lambda_function(function_name: str, region: str = "us-east-1") -> str:
         A formatted string with detailed function configuration.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
         response = lambda_client.get_function(FunctionName=function_name)
 
         config = response.get('Configuration', {})
@@ -152,7 +168,11 @@ def invoke_lambda_function(
         A formatted string with invocation results including response payload.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
 
         # Validate invocation type
         if invocation_type not in ['RequestResponse', 'Event', 'DryRun']:
@@ -235,7 +255,11 @@ def create_lambda_function(
         A formatted string with the created function details.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
 
         # Build code configuration
         code = {}
@@ -309,7 +333,11 @@ def update_lambda_function_code(
         A formatted string with the update status.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
 
         # Build update configuration
         update_config = {'FunctionName': function_name}
@@ -367,7 +395,11 @@ def update_lambda_function_config(
         A formatted string with the update status.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
 
         # Build update configuration
         update_config = {'FunctionName': function_name}
@@ -417,7 +449,11 @@ def delete_lambda_function(function_name: str, region: str = "us-east-1") -> str
         A formatted string confirming deletion.
     """
     try:
-        lambda_client = boto3.client('lambda', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
         lambda_client.delete_function(FunctionName=function_name)
 
         return f"Successfully deleted Lambda function: {function_name}"

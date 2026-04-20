@@ -5,8 +5,16 @@ Provides Redshift operations for data warehouse cluster management.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import Optional, List, Dict
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -27,7 +35,11 @@ def list_redshift_clusters(
         Formatted list of Redshift clusters with details.
     """
     try:
-        redshift_client = boto3.client('redshift', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        redshift_client = boto3.client('redshift', region_name=region, config=_BOTO_CONFIG)
 
         params = {'MaxRecords': max_records}
         if cluster_identifier:
@@ -120,7 +132,11 @@ def create_redshift_cluster(
         Cluster creation confirmation with endpoint information.
     """
     try:
-        redshift_client = boto3.client('redshift', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        redshift_client = boto3.client('redshift', region_name=region, config=_BOTO_CONFIG)
 
         params = {
             'ClusterIdentifier': cluster_identifier,
@@ -186,7 +202,11 @@ def delete_redshift_cluster(
         Deletion confirmation message.
     """
     try:
-        redshift_client = boto3.client('redshift', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        redshift_client = boto3.client('redshift', region_name=region, config=_BOTO_CONFIG)
 
         params = {
             'ClusterIdentifier': cluster_identifier,
@@ -236,7 +256,11 @@ def pause_redshift_cluster(
         Pause confirmation message.
     """
     try:
-        redshift_client = boto3.client('redshift', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        redshift_client = boto3.client('redshift', region_name=region, config=_BOTO_CONFIG)
 
         response = redshift_client.pause_cluster(
             ClusterIdentifier=cluster_identifier
@@ -275,7 +299,11 @@ def resume_redshift_cluster(
         Resume confirmation message.
     """
     try:
-        redshift_client = boto3.client('redshift', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        redshift_client = boto3.client('redshift', region_name=region, config=_BOTO_CONFIG)
 
         response = redshift_client.resume_cluster(
             ClusterIdentifier=cluster_identifier
@@ -321,7 +349,11 @@ def modify_redshift_cluster(
         Modification confirmation message.
     """
     try:
-        redshift_client = boto3.client('redshift', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        redshift_client = boto3.client('redshift', region_name=region, config=_BOTO_CONFIG)
 
         params = {'ClusterIdentifier': cluster_identifier}
 

@@ -12,8 +12,16 @@ Operations:
 """
 import boto3
 import json
+from botocore.config import Config
 from typing import Optional, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -44,7 +52,11 @@ def transcribe_start_job(
         JSON string with job details
     """
     try:
-        transcribe = boto3.client('transcribe', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        transcribe = boto3.client('transcribe', region_name=region, config=_BOTO_CONFIG)
 
         params = {
             'TranscriptionJobName': job_name,
@@ -104,7 +116,11 @@ def transcribe_get_job(
         JSON string with job status and transcript URI when complete
     """
     try:
-        transcribe = boto3.client('transcribe', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        transcribe = boto3.client('transcribe', region_name=region, config=_BOTO_CONFIG)
 
         response = transcribe.get_transcription_job(TranscriptionJobName=job_name)
 
@@ -161,7 +177,11 @@ def transcribe_list_jobs(
         JSON string with job summaries
     """
     try:
-        transcribe = boto3.client('transcribe', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        transcribe = boto3.client('transcribe', region_name=region, config=_BOTO_CONFIG)
 
         params = {}
         if status:
@@ -222,7 +242,11 @@ def transcribe_delete_job(
         JSON string confirming deletion
     """
     try:
-        transcribe = boto3.client('transcribe', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        transcribe = boto3.client('transcribe', region_name=region, config=_BOTO_CONFIG)
 
         transcribe.delete_transcription_job(TranscriptionJobName=job_name)
 

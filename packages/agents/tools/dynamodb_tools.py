@@ -16,6 +16,8 @@ from typing import Optional
 import boto3
 from strands.tools import tool
 
+from .tenant_context import TenantContextError, ensure_tenant_filter, require_tenant_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +54,13 @@ def dynamodb_query(
         JSON array of items, or error message.
     """
     try:
+        # Enforce tenant isolation: inject tenantId = :__chimera_tid into the
+        # filter expression unconditionally (regardless of whether the agent
+        # supplied a filter_expression).
+        filter_expression, expression_values = ensure_tenant_filter(
+            filter_expression, expression_values
+        )
+
         ddb = _get_ddb_client()
         table = ddb.Table(table_name)
         limit = min(limit, 100)
@@ -61,11 +70,10 @@ def dynamodb_query(
         kwargs = {
             "KeyConditionExpression": key_condition,
             "ExpressionAttributeValues": values,
+            "FilterExpression": filter_expression,
             "Limit": limit,
             "ScanIndexForward": scan_forward,
         }
-        if filter_expression:
-            kwargs["FilterExpression"] = filter_expression
         if index_name:
             kwargs["IndexName"] = index_name
 
@@ -224,16 +232,23 @@ def dynamodb_scan(
         JSON array of items.
     """
     try:
+        # Enforce tenant isolation on scans too — scans without a tenant filter
+        # are the worst offender for cross-tenant leakage.
+        filter_expression, expression_values = ensure_tenant_filter(
+            filter_expression, expression_values
+        )
+
         ddb = _get_ddb_client()
         table = ddb.Table(table_name)
         limit = min(limit, 50)
 
-        kwargs = {"Limit": limit}
-        if filter_expression:
-            kwargs["FilterExpression"] = filter_expression
-            values = json.loads(expression_values)
-            if values:
-                kwargs["ExpressionAttributeValues"] = values
+        kwargs = {
+            "Limit": limit,
+            "FilterExpression": filter_expression,
+        }
+        values = json.loads(expression_values)
+        if values:
+            kwargs["ExpressionAttributeValues"] = values
 
         response = table.scan(**kwargs)
         items = response.get("Items", [])

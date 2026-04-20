@@ -5,8 +5,17 @@ Provides OpenSearch domain management operations for search and
 analytics engine deployment and configuration.
 """
 import boto3
+from botocore.config import Config
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
+
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -25,8 +34,12 @@ def describe_opensearch_domains(
         Formatted string with domain details.
     """
     try:
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
         import json
-        opensearch = boto3.client('opensearch', region_name=region)
+        opensearch = boto3.client('opensearch', region_name=region, config=_BOTO_CONFIG)
 
         domains = json.loads(domain_names)
 
@@ -89,7 +102,11 @@ def create_opensearch_domain(
         Formatted string with creation status.
     """
     try:
-        opensearch = boto3.client('opensearch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        opensearch = boto3.client('opensearch', region_name=region, config=_BOTO_CONFIG)
 
         response = opensearch.create_domain(
             DomainName=domain_name,
@@ -146,7 +163,11 @@ def delete_opensearch_domain(
         Confirmation message.
     """
     try:
-        opensearch = boto3.client('opensearch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        opensearch = boto3.client('opensearch', region_name=region, config=_BOTO_CONFIG)
 
         response = opensearch.delete_domain(DomainName=domain_name)
 
@@ -185,7 +206,11 @@ def update_opensearch_domain_config(
         Confirmation message.
     """
     try:
-        opensearch = boto3.client('opensearch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        opensearch = boto3.client('opensearch', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {'DomainName': domain_name}
 
@@ -237,7 +262,11 @@ def list_opensearch_domain_names(
         Formatted string listing all domain names.
     """
     try:
-        opensearch = boto3.client('opensearch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        opensearch = boto3.client('opensearch', region_name=region, config=_BOTO_CONFIG)
 
         response = opensearch.list_domain_names()
 
@@ -275,7 +304,11 @@ def get_opensearch_compatible_versions(
         Formatted string with compatible upgrade versions.
     """
     try:
-        opensearch = boto3.client('opensearch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        opensearch = boto3.client('opensearch', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {}
         if domain_name:

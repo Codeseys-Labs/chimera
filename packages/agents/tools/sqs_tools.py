@@ -6,8 +6,16 @@ and background task coordination.
 """
 import boto3
 import json
+from botocore.config import Config
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -30,7 +38,11 @@ def create_sqs_queue(
         Formatted string with queue URL and configuration.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         attributes = {}
         if fifo_queue:
@@ -78,7 +90,11 @@ def send_sqs_message(
         Formatted string with message ID and metadata.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {
             'QueueUrl': queue_url,
@@ -119,7 +135,11 @@ def send_sqs_message_batch(
         Formatted string with successful and failed message details.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         # Parse messages JSON
         message_list = json.loads(messages)
@@ -178,7 +198,11 @@ def receive_sqs_messages(
         Formatted string with received messages and receipt handles.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         response = sqs.receive_message(
             QueueUrl=queue_url,
@@ -223,7 +247,11 @@ def delete_sqs_message(
         Confirmation message.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         sqs.delete_message(
             QueueUrl=queue_url,
@@ -252,7 +280,11 @@ def delete_sqs_queue(
         Confirmation message.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         sqs.delete_queue(QueueUrl=queue_url)
 
@@ -278,7 +310,11 @@ def get_sqs_queue_attributes(
         Formatted string with queue attributes.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         response = sqs.get_queue_attributes(
             QueueUrl=queue_url,
@@ -319,7 +355,11 @@ def list_sqs_queues(
         Formatted string listing all matching queue URLs.
     """
     try:
-        sqs = boto3.client('sqs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sqs = boto3.client('sqs', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {}
         if queue_name_prefix:

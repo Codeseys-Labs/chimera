@@ -14,8 +14,16 @@ Operations:
 import boto3
 import json
 import base64
+from botocore.config import Config
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -40,7 +48,11 @@ def bedrock_invoke_model(
         JSON string with model response
     """
     try:
-        bedrock_runtime = boto3.client('bedrock-runtime', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        bedrock_runtime = boto3.client('bedrock-runtime', region_name=region, config=_BOTO_CONFIG)
 
         # Use Converse API format (unified across models)
         request_body = {
@@ -106,7 +118,11 @@ def bedrock_invoke_model_stream(
         JSON string with accumulated streaming chunks
     """
     try:
-        bedrock_runtime = boto3.client('bedrock-runtime', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        bedrock_runtime = boto3.client('bedrock-runtime', region_name=region, config=_BOTO_CONFIG)
 
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
@@ -174,7 +190,11 @@ def bedrock_list_foundation_models(
         JSON string with list of available models
     """
     try:
-        bedrock = boto3.client('bedrock', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        bedrock = boto3.client('bedrock', region_name=region, config=_BOTO_CONFIG)
 
         params = {}
         if by_provider:
@@ -234,7 +254,11 @@ def bedrock_get_foundation_model(
         JSON string with model details
     """
     try:
-        bedrock = boto3.client('bedrock', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        bedrock = boto3.client('bedrock', region_name=region, config=_BOTO_CONFIG)
 
         response = bedrock.get_foundation_model(modelIdentifier=model_id)
 
@@ -284,7 +308,11 @@ def bedrock_list_inference_profiles(
         JSON string with inference profiles
     """
     try:
-        bedrock = boto3.client('bedrock', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        bedrock = boto3.client('bedrock', region_name=region, config=_BOTO_CONFIG)
 
         params = {'maxResults': max_results}
         if next_token:

@@ -13,8 +13,16 @@ Operations:
 import boto3
 import json
 import base64
+from botocore.config import Config
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 def _build_document_input(
@@ -57,7 +65,11 @@ def textract_detect_text(
         JSON string with extracted text blocks
     """
     try:
-        textract = boto3.client('textract', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        textract = boto3.client('textract', region_name=region, config=_BOTO_CONFIG)
 
         document = _build_document_input(document_bytes, s3_bucket, s3_key, s3_version)
 
@@ -119,7 +131,11 @@ def textract_analyze_document(
         JSON string with analyzed blocks including forms and tables
     """
     try:
-        textract = boto3.client('textract', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        textract = boto3.client('textract', region_name=region, config=_BOTO_CONFIG)
 
         document = _build_document_input(document_bytes, s3_bucket, s3_key, s3_version)
 
@@ -194,7 +210,11 @@ def textract_start_document_analysis(
         JSON string with job ID for polling
     """
     try:
-        textract = boto3.client('textract', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        textract = boto3.client('textract', region_name=region, config=_BOTO_CONFIG)
 
         document_location = {
             'S3Object': {
@@ -264,7 +284,11 @@ def textract_get_document_analysis(
         JSON string with job status and results
     """
     try:
-        textract = boto3.client('textract', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        textract = boto3.client('textract', region_name=region, config=_BOTO_CONFIG)
 
         params = {'JobId': job_id}
         if max_results:

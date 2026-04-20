@@ -5,8 +5,16 @@ Provides Glue operations for ETL jobs and data catalog management.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import Optional, Dict
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -27,7 +35,11 @@ def list_glue_databases(
         Formatted list of databases with metadata.
     """
     try:
-        glue_client = boto3.client('glue', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        glue_client = boto3.client('glue', region_name=region, config=_BOTO_CONFIG)
 
         params = {'MaxResults': max_results}
         if catalog_id:
@@ -82,7 +94,11 @@ def list_glue_tables(
         Formatted list of tables with metadata.
     """
     try:
-        glue_client = boto3.client('glue', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        glue_client = boto3.client('glue', region_name=region, config=_BOTO_CONFIG)
 
         params = {
             'DatabaseName': database_name,
@@ -161,7 +177,11 @@ def get_glue_table_schema(
         Detailed table schema with columns, partition keys, and storage info.
     """
     try:
-        glue_client = boto3.client('glue', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        glue_client = boto3.client('glue', region_name=region, config=_BOTO_CONFIG)
 
         params = {
             'DatabaseName': database_name,
@@ -259,7 +279,11 @@ def start_glue_job(
         Job run ID to track execution.
     """
     try:
-        glue_client = boto3.client('glue', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        glue_client = boto3.client('glue', region_name=region, config=_BOTO_CONFIG)
 
         params = {'JobName': job_name}
 
@@ -309,7 +333,11 @@ def get_glue_job_status(
         Formatted job run status with timing and error information.
     """
     try:
-        glue_client = boto3.client('glue', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        glue_client = boto3.client('glue', region_name=region, config=_BOTO_CONFIG)
 
         response = glue_client.get_job_run(
             JobName=job_name,
@@ -371,7 +399,11 @@ def get_glue_crawler_status(
         Crawler configuration, schedule, and last run details.
     """
     try:
-        glue_client = boto3.client('glue', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        glue_client = boto3.client('glue', region_name=region, config=_BOTO_CONFIG)
 
         response = glue_client.get_crawler(Name=crawler_name)
 

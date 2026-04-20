@@ -14,8 +14,16 @@ Operations:
 import boto3
 import json
 import base64
+from botocore.config import Config
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 def _build_image_input(
@@ -62,7 +70,11 @@ def rekognition_detect_labels(
         JSON string with detected labels and confidence scores
     """
     try:
-        rekognition = boto3.client('rekognition', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rekognition = boto3.client('rekognition', region_name=region, config=_BOTO_CONFIG)
 
         image = _build_image_input(image_bytes, s3_bucket, s3_key, s3_version)
 
@@ -130,7 +142,11 @@ def rekognition_detect_faces(
         JSON string with face details and attributes
     """
     try:
-        rekognition = boto3.client('rekognition', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rekognition = boto3.client('rekognition', region_name=region, config=_BOTO_CONFIG)
 
         image = _build_image_input(image_bytes, s3_bucket, s3_key, s3_version)
 
@@ -204,7 +220,11 @@ def rekognition_detect_text(
         JSON string with detected text and bounding boxes
     """
     try:
-        rekognition = boto3.client('rekognition', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rekognition = boto3.client('rekognition', region_name=region, config=_BOTO_CONFIG)
 
         image = _build_image_input(image_bytes, s3_bucket, s3_key, s3_version)
 
@@ -264,7 +284,11 @@ def rekognition_detect_moderation_labels(
         JSON string with moderation labels
     """
     try:
-        rekognition = boto3.client('rekognition', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rekognition = boto3.client('rekognition', region_name=region, config=_BOTO_CONFIG)
 
         image = _build_image_input(image_bytes, s3_bucket, s3_key, s3_version)
 
@@ -328,7 +352,11 @@ def rekognition_compare_faces(
         JSON string with face match results
     """
     try:
-        rekognition = boto3.client('rekognition', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        rekognition = boto3.client('rekognition', region_name=region, config=_BOTO_CONFIG)
 
         source_image = _build_image_input(
             source_image_bytes, source_s3_bucket, source_s3_key

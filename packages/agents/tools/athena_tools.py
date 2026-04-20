@@ -5,8 +5,16 @@ Provides Athena operations for querying data in S3 using SQL.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import Optional
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -33,7 +41,11 @@ def start_athena_query(
         Query execution ID to check status and retrieve results.
     """
     try:
-        athena_client = boto3.client('athena', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        athena_client = boto3.client('athena', region_name=region, config=_BOTO_CONFIG)
 
         params = {
             'QueryString': query_string,
@@ -80,7 +92,11 @@ def get_athena_query_status(
         Formatted string with query status, statistics, and timing information.
     """
     try:
-        athena_client = boto3.client('athena', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        athena_client = boto3.client('athena', region_name=region, config=_BOTO_CONFIG)
         response = athena_client.get_query_execution(QueryExecutionId=query_execution_id)
 
         execution = response['QueryExecution']
@@ -153,7 +169,11 @@ def get_athena_query_results(
         Formatted table with query results.
     """
     try:
-        athena_client = boto3.client('athena', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        athena_client = boto3.client('athena', region_name=region, config=_BOTO_CONFIG)
 
         # First check if query is complete
         exec_response = athena_client.get_query_execution(QueryExecutionId=query_execution_id)
@@ -213,7 +233,11 @@ def stop_athena_query(
         Confirmation message.
     """
     try:
-        athena_client = boto3.client('athena', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        athena_client = boto3.client('athena', region_name=region, config=_BOTO_CONFIG)
         athena_client.stop_query_execution(QueryExecutionId=query_execution_id)
 
         return f"Query {query_execution_id} has been stopped."
@@ -240,7 +264,11 @@ def list_athena_databases(
         Formatted list of databases with descriptions.
     """
     try:
-        athena_client = boto3.client('athena', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        athena_client = boto3.client('athena', region_name=region, config=_BOTO_CONFIG)
 
         response = athena_client.list_databases(
             CatalogName=catalog_name,
@@ -287,7 +315,11 @@ def list_athena_tables(
         Formatted list of tables with metadata.
     """
     try:
-        athena_client = boto3.client('athena', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        athena_client = boto3.client('athena', region_name=region, config=_BOTO_CONFIG)
 
         response = athena_client.list_table_metadata(
             CatalogName=catalog_name,

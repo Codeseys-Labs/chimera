@@ -26,7 +26,16 @@ import time
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 from strands.tools import tool
+
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +47,7 @@ def _get_ddb():
 
 def _get_eb():
     region = os.environ.get("AWS_REGION", "us-west-2")
-    return boto3.client("events", region_name=region)
+    return boto3.client("events", region_name=region, config=_BOTO_CONFIG)
 
 
 @tool
@@ -46,7 +55,6 @@ def decompose_and_execute(
     request: str,
     strategy: str = "plan-and-execute",
     max_subtasks: int = 10,
-    tenant_id: str = "",
     session_id: str = "",
 ) -> str:
     """
@@ -70,14 +78,15 @@ def decompose_and_execute(
         strategy: Decomposition strategy - "plan-and-execute" (default), "tree-of-thought",
                   "recursive", "goal-decomposition", "dependency-aware".
         max_subtasks: Maximum number of subtasks to create (default 10, max 20).
-        tenant_id: Tenant ID for isolation.
         session_id: Session ID for tracking.
 
     Returns:
         Swarm execution ID for monitoring progress, or error message.
     """
-    if not tenant_id:
-        return "Error: tenant_id is required for swarm execution."
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
 
     max_subtasks = min(max_subtasks, 20)
     execution_id = f"swarm_{int(time.time())}_{os.urandom(4).hex()}"
@@ -148,20 +157,20 @@ def decompose_and_execute(
 @tool
 def check_swarm_status(
     execution_id: str,
-    tenant_id: str = "",
 ) -> str:
     """
     Check the status of a multi-agent swarm execution.
 
     Args:
         execution_id: The swarm execution ID returned by decompose_and_execute.
-        tenant_id: Tenant ID for isolation.
 
     Returns:
         Current execution status with task progress details.
     """
-    if not tenant_id:
-        return "Error: tenant_id is required."
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
 
     table_name = os.environ.get("CHIMERA_SESSIONS_TABLE", "chimera-sessions-dev")
 
@@ -233,7 +242,6 @@ def check_swarm_status(
 @tool
 def wait_for_swarm(
     execution_id: str,
-    tenant_id: str = "",
     max_wait_seconds: int = 600,
     poll_interval_seconds: int = 15,
 ) -> str:
@@ -245,15 +253,16 @@ def wait_for_swarm(
 
     Args:
         execution_id: The swarm execution ID.
-        tenant_id: Tenant ID for isolation.
         max_wait_seconds: Maximum time to wait (default 600 = 10 minutes).
         poll_interval_seconds: Seconds between status checks (default 15).
 
     Returns:
         Final execution result with all task outcomes.
     """
-    if not tenant_id:
-        return "Error: tenant_id is required."
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
 
     table_name = os.environ.get("CHIMERA_SESSIONS_TABLE", "chimera-sessions-dev")
     ddb = _get_ddb()
@@ -261,6 +270,8 @@ def wait_for_swarm(
 
     start_time = time.time()
     terminal_statuses = {"completed", "partial", "failed", "cancelled"}
+    consecutive_errors = 0
+    max_consecutive_errors = 5
 
     while (time.time() - start_time) < max_wait_seconds:
         try:
@@ -270,6 +281,7 @@ def wait_for_swarm(
                     "SK": "EXECUTION",
                 }
             )
+            consecutive_errors = 0
 
             if "Item" not in response:
                 return f"Swarm execution '{execution_id}' not found."
@@ -289,7 +301,15 @@ def wait_for_swarm(
                 )
 
         except Exception as e:
-            logger.warning(f"Poll error: {e}")
+            consecutive_errors += 1
+            logger.warning(
+                f"Poll error ({consecutive_errors}/{max_consecutive_errors}): {e}"
+            )
+            if consecutive_errors >= max_consecutive_errors:
+                return (
+                    f"ABORTED: {max_consecutive_errors} consecutive polling errors. "
+                    f"Last error: {str(e)[:200]}"
+                )
 
         time.sleep(poll_interval_seconds)
 
@@ -304,7 +324,6 @@ def delegate_subtask(
     instruction: str,
     agent_role: str = "builder",
     priority: str = "normal",
-    tenant_id: str = "",
     parent_task_id: str = "",
 ) -> str:
     """
@@ -324,14 +343,15 @@ def delegate_subtask(
         instruction: Clear, specific instruction for the specialist agent.
         agent_role: Agent specialization to assign (default: "builder").
         priority: "low", "normal", "high", "urgent" (default: "normal").
-        tenant_id: Tenant ID for isolation.
         parent_task_id: Optional parent task/swarm ID for grouping.
 
     Returns:
         Task ID for monitoring, or error message.
     """
-    if not tenant_id:
-        return "Error: tenant_id is required."
+    try:
+        tenant_id = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
 
     task_id = f"task_{int(time.time())}_{os.urandom(4).hex()}"
     table_name = os.environ.get("CHIMERA_SESSIONS_TABLE", "chimera-sessions-dev")

@@ -14,8 +14,16 @@ Operations:
 """
 import boto3
 import json
+from botocore.config import Config
 from typing import Optional, List, Dict, Any
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -42,7 +50,11 @@ def sagemaker_create_model(
         JSON string with model ARN
     """
     try:
-        sagemaker = boto3.client('sagemaker', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sagemaker = boto3.client('sagemaker', region_name=region, config=_BOTO_CONFIG)
 
         primary_container = {
             'Image': primary_container_image,
@@ -98,7 +110,11 @@ def sagemaker_create_endpoint_config(
         JSON string with endpoint config ARN
     """
     try:
-        sagemaker = boto3.client('sagemaker', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sagemaker = boto3.client('sagemaker', region_name=region, config=_BOTO_CONFIG)
 
         formatted_variants = []
         for variant in production_variants:
@@ -152,7 +168,11 @@ def sagemaker_create_endpoint(
         JSON string with endpoint ARN
     """
     try:
-        sagemaker = boto3.client('sagemaker', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sagemaker = boto3.client('sagemaker', region_name=region, config=_BOTO_CONFIG)
 
         response = sagemaker.create_endpoint(
             EndpointName=endpoint_name,
@@ -193,7 +213,11 @@ def sagemaker_describe_endpoint(
         JSON string with endpoint details
     """
     try:
-        sagemaker = boto3.client('sagemaker', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sagemaker = boto3.client('sagemaker', region_name=region, config=_BOTO_CONFIG)
 
         response = sagemaker.describe_endpoint(EndpointName=endpoint_name)
 
@@ -248,7 +272,11 @@ def sagemaker_delete_endpoint(
         JSON string confirming deletion
     """
     try:
-        sagemaker = boto3.client('sagemaker', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sagemaker = boto3.client('sagemaker', region_name=region, config=_BOTO_CONFIG)
 
         sagemaker.delete_endpoint(EndpointName=endpoint_name)
 
@@ -294,7 +322,11 @@ def sagemaker_list_endpoints(
         JSON string with endpoint summaries
     """
     try:
-        sagemaker = boto3.client('sagemaker', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        sagemaker = boto3.client('sagemaker', region_name=region, config=_BOTO_CONFIG)
 
         params = {}
         if status_equals:

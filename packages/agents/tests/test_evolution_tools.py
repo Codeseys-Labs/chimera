@@ -17,6 +17,15 @@ from tools.evolution_tools import (
     register_capability,
     trigger_infra_evolution,
 )
+from tools.tenant_context import clear_tenant_context, set_tenant_context
+
+
+@pytest.fixture(autouse=True)
+def _tenant_context():
+    """Set a tenant context for every test (tools now require it)."""
+    set_tenant_context("tenant-abc", tier="premium", user_id="test-user")
+    yield
+    clear_tenant_context()
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -308,7 +317,6 @@ class TestTriggerInfraEvolution:
         result = trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code=VALID_CDK,
-            tenant_id="tenant-abc",
             rationale="Users requested S3 media pipeline",
         )
 
@@ -325,7 +333,6 @@ class TestTriggerInfraEvolution:
         result = trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code=VALID_CDK,
-            tenant_id="tenant-abc",
             rationale="test",
         )
 
@@ -345,7 +352,6 @@ class TestTriggerInfraEvolution:
         result = trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code=VALID_CDK,
-            tenant_id="tenant-abc",
             rationale="test",
         )
 
@@ -369,7 +375,6 @@ class TestTriggerInfraEvolution:
         result = trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code=VALID_CDK,
-            tenant_id="tenant-abc",
             rationale="test",
         )
 
@@ -393,7 +398,6 @@ class TestTriggerInfraEvolution:
         result = trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code="",  # empty
-            tenant_id="tenant-abc",
             rationale="test",
         )
 
@@ -409,7 +413,6 @@ class TestTriggerInfraEvolution:
         result = trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code=VALID_CDK,
-            tenant_id="tenant-abc",
             rationale="test",
         )
 
@@ -423,7 +426,6 @@ class TestTriggerInfraEvolution:
         trigger_infra_evolution(
             capability_name="media-ingestion",
             cdk_stack_code=VALID_CDK,
-            tenant_id="tenant-abc",
             rationale="test rationale",
         )
 
@@ -524,7 +526,6 @@ class TestRegisterCapability:
             tool_names=["ingest_media", "get_media_status"],
             tier=3,
             description="S3-based media ingestion pipeline",
-            tenant_id="tenant-abc",
         )
 
         assert "registered successfully" in result.lower()
@@ -539,7 +540,6 @@ class TestRegisterCapability:
             tool_names=["tool_a"],
             tier=4,  # invalid
             description="test",
-            tenant_id="tenant-abc",
         )
         assert "Invalid tier" in result
 
@@ -550,7 +550,6 @@ class TestRegisterCapability:
             tool_names=[],
             tier=1,
             description="test",
-            tenant_id="tenant-abc",
         )
         assert "non-empty" in result
 
@@ -567,7 +566,6 @@ class TestRegisterCapability:
             tool_names=["tool_a"],
             tier=1,
             description="test",
-            tenant_id="tenant-abc",
         )
         assert "Failed to register" in result
 
@@ -590,7 +588,6 @@ class TestRegisterCapability:
             tool_names=["cap_tool"],
             tier=tier,
             description="test",
-            tenant_id="tenant-abc",
         )
         assert expected_label in result
 
@@ -608,7 +605,7 @@ class TestListEvolutionHistory:
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
 
-        result = list_evolution_history(tenant_id="tenant-abc")
+        result = list_evolution_history()
 
         assert "No evolution history" in result
 
@@ -629,7 +626,7 @@ class TestListEvolutionHistory:
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
 
-        result = list_evolution_history(tenant_id="tenant-abc")
+        result = list_evolution_history()
 
         assert "evo-abc-media-20260327" in result
         assert "media-ingestion" in result
@@ -643,7 +640,7 @@ class TestListEvolutionHistory:
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
 
-        list_evolution_history(tenant_id="tenant-abc", limit=200)
+        list_evolution_history(limit=200)
 
         call_kwargs = mock_table.query.call_args.kwargs
         assert call_kwargs["Limit"] == 50
@@ -655,7 +652,7 @@ class TestListEvolutionHistory:
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
 
-        result = list_evolution_history(tenant_id="tenant-abc")
+        result = list_evolution_history()
 
         assert "Failed to query" in result
 

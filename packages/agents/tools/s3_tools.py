@@ -5,8 +5,16 @@ Provides basic S3 operations with tenant-scoped access control.
 All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
+from botocore.config import Config
 from typing import List, Dict, Any
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -18,7 +26,11 @@ def list_s3_buckets() -> str:
         A formatted string listing all S3 bucket names and creation dates.
     """
     try:
-        s3_client = boto3.client('s3')
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        s3_client = boto3.client('s3', config=_BOTO_CONFIG)
         response = s3_client.list_buckets()
 
         if not response.get('Buckets'):
@@ -50,7 +62,11 @@ def get_bucket_info(bucket_name: str) -> str:
         A formatted string with bucket region, versioning status, and object count.
     """
     try:
-        s3_client = boto3.client('s3')
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        s3_client = boto3.client('s3', config=_BOTO_CONFIG)
 
         # Get bucket location
         location_response = s3_client.get_bucket_location(Bucket=bucket_name)

@@ -6,9 +6,17 @@ alarms, and log queries.
 """
 import boto3
 import json
+from botocore.config import Config
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
+from .tenant_context import TenantContextError, require_tenant_id
+
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
 
 
 @tool
@@ -35,7 +43,11 @@ def put_cloudwatch_metric_data(
         Confirmation message.
     """
     try:
-        cloudwatch = boto3.client('cloudwatch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        cloudwatch = boto3.client('cloudwatch', region_name=region, config=_BOTO_CONFIG)
 
         metric_data = {
             'MetricName': metric_name,
@@ -88,7 +100,11 @@ def start_cloudwatch_query(
         Query ID to use with get_cloudwatch_query_results.
     """
     try:
-        logs = boto3.client('logs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        logs = boto3.client('logs', region_name=region, config=_BOTO_CONFIG)
 
         log_groups = json.loads(log_group_names)
 
@@ -128,7 +144,11 @@ def get_cloudwatch_query_results(
         Formatted string with query status and results.
     """
     try:
-        logs = boto3.client('logs', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        logs = boto3.client('logs', region_name=region, config=_BOTO_CONFIG)
 
         response = logs.get_query_results(queryId=query_id)
 
@@ -193,7 +213,11 @@ def put_cloudwatch_metric_alarm(
         Confirmation message.
     """
     try:
-        cloudwatch = boto3.client('cloudwatch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        cloudwatch = boto3.client('cloudwatch', region_name=region, config=_BOTO_CONFIG)
 
         cloudwatch.put_metric_alarm(
             AlarmName=alarm_name,
@@ -236,7 +260,11 @@ def describe_cloudwatch_alarms(
         Formatted string with alarm details.
     """
     try:
-        cloudwatch = boto3.client('cloudwatch', region_name=region)
+        _tid = require_tenant_id()
+    except TenantContextError as e:
+        return f"Error: {e}"
+    try:
+        cloudwatch = boto3.client('cloudwatch', region_name=region, config=_BOTO_CONFIG)
 
         kwargs = {}
         if alarm_names:
