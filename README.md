@@ -114,11 +114,15 @@ Platform Adapters (Web, Slack, Discord, Teams, Telegram)
 # Install the CLI (download from GitHub releases)
 curl -L https://github.com/Codeseys-Labs/chimera/releases/latest/download/chimera-darwin-arm64.tar.gz | tar xz
 chmod +x chimera-darwin-arm64
+sudo mv chimera-darwin-arm64 /usr/local/bin/chimera
+chimera --version   # should print v0.6.0
 
 # Or build from source
 git clone https://github.com/Codeseys-Labs/chimera.git
 cd chimera
 bun install
+bun run compile:cli              # produces packages/cli/chimera-<platform>
+sudo mv packages/cli/chimera-* /usr/local/bin/chimera
 
 # Deploy to your AWS account
 chimera init                    # Configure AWS profile + region
@@ -166,7 +170,9 @@ chimera/
 
 ## Current Status
 
-**Platform: Production — v0.5.1** — All 14 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary.
+**Platform: Production — v0.6.0** — All 14 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary.
+
+> **First-time deploy?** See [`docs/runbooks/first-deploy-baladita.md`](docs/runbooks/first-deploy-baladita.md) for a pre-flight checklist including Bedrock model approvals, service quota requirements, and the 7 risk items a Wave-10 code review flagged in `chimera deploy`.
 
 | Phase                  | Status          | Key Deliverables                                                                                                                                          |
 | ---------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
