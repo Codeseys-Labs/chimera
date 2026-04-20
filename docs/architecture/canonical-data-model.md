@@ -1,8 +1,8 @@
 ---
 title: "Canonical DynamoDB Data Model"
-version: 1.0.1
+version: 1.1.0
 status: canonical
-last_updated: 2026-03-21
+last_updated: 2026-04-17
 supersedes:
   - docs/research/architecture-reviews/Chimera-Architecture-Review-Platform-IaC.md (single-table design)
   - docs/research/architecture-reviews/Chimera-Final-Architecture-Plan.md (6-table overview)
@@ -316,6 +316,9 @@ Projection: ALL
 
 **Purpose:** Installed skills, versions, MCP server endpoints
 
+> [!note] Registry migration in flight
+> [ADR-034](decisions/ADR-034-agentcore-registry-adoption.md) proposes migrating the skill catalog to AWS AgentCore Registry. `chimera-skills` remains the canonical source of truth until the Phase-3 cutover; Phase-3 is blocked on the multi-tenancy spike (`docs/designs/agentcore-registry-spike.md`) resolving Pattern A (per-tenant registries) vs. Pattern B (shared registry with tenant-scoped records). Operator flows and flag gates are documented in [`docs/MIGRATION-registry.md`](../MIGRATION-registry.md). Phase-0/1 dual-write scaffolding (`packages/core/src/registry/`) is landed but default-off.
+
 #### Key Schema
 ```
 PK: TENANT#{tenantId}
@@ -513,7 +516,7 @@ Projection: ALL
 
 #### Table Configuration
 - **Capacity Mode:** On-demand (spiky write pattern during incidents)
-- **TTL:** Enabled on `ttl` attribute (tier-dependent: 90d/1yr/7yr)
+- **TTL:** Enabled on `ttl` attribute (tier-dependent: 90d/1yr/7yr) — **code-enforced** via `calculateAuditTTL(tenantTier)` in `packages/core/src/activity/audit-trail.ts`. `AuditTrail.logAction` rejects any caller-supplied `ttl` parameter and always computes TTL from `tenantTier`, so compliance retention is no longer merely schema-documented. Unknown tiers fall back to the strictest (basic/90d) retention.
 - **Encryption:** Customer-managed KMS key (CMK) **required** for compliance
 - **Backup:** Continuous backup to S3 Glacier Deep Archive (for 7-year retention beyond DynamoDB TTL)
 - **Streams:** Enabled (NEW_IMAGE_ONLY) for real-time SIEM integration
@@ -687,7 +690,12 @@ All tables use `TENANT#{id}` as partition key. IAM policies MUST use DynamoDB Le
 ```
 
 #### GSI Query Protection
-**CRITICAL:** All GSI queries (which span multiple tenants) MUST include `FilterExpression` to prevent cross-tenant data leakage:
+**CRITICAL:** All GSI queries (which span multiple tenants) MUST include `FilterExpression` to prevent cross-tenant data leakage. Enforcement is defense-in-depth, layered at two code boundaries:
+
+1. **TypeScript layer** — the shared DDB query wrappers in `packages/core/src/` inject `FilterExpression='tenantId = :tid'` on every GSI read.
+2. **Python layer** ([ADR-033](decisions/ADR-033-tenant-context-injection-for-python-tools.md)) — `packages/agents/tools/tenant_context.py::ensure_tenant_filter()` AND-s `tenantId = :__chimera_tid` into every tool-emitted `FilterExpression` and reads the tenant id from a per-invocation `ContextVar` rather than accepting it as a tool argument. Tools **cannot** issue an unfiltered GSI query without tripping the anti-pattern guard test.
+
+Neither layer replaces the other; both must hold.
 
 ```typescript
 // ❌ WRONG: GSI query without tenant filter (returns data from ALL tenants)
@@ -983,8 +991,8 @@ auditTable.addGlobalSecondaryIndex({
 
 ---
 
-**Version:** 1.0.0
-**Last Updated:** 2026-03-19
+**Version:** 1.1.0
+**Last Updated:** 2026-04-17
 **Status:** Canonical (authoritative)
 **Owner:** AWS Chimera Platform Team
 **Review Cycle:** Quarterly or on major schema change proposals

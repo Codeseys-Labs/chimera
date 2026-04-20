@@ -206,6 +206,29 @@ export class ApiStack extends cdk.Stack {
       });
       props.skillsTable.grantReadWriteData(skillsHandler);
 
+      // TODO(spike): narrow resources once RegistryStack emits a concrete registry ARN.
+      // Conditions currently limit blast radius to the deploy region only.
+      // These permissions are additive and inert: skillsHandler only invokes
+      // bedrock-agentcore (data plane) when the Registry feature flag is flipped
+      // per-tenant. With the flag off (default), the handler serves results from
+      // the existing DynamoDB skills table and these API calls are never made.
+      // Note: bedrock-agentcore:InvokeRegistryMcp is intentionally withheld until
+      // the skills-api wires through to the MCP endpoint (see spike design doc).
+      // See ADR-034 and docs/designs/agentcore-registry-spike.md.
+      skillsHandler.addToRolePolicy(new iam.PolicyStatement({
+        actions: [
+          'bedrock-agentcore:SearchRegistryRecords',
+          // 'bedrock-agentcore:InvokeRegistryMcp', // withheld: grant only when skills-api wires MCP
+        ],
+        resources: ['*'], // Registry-specific ARNs not yet known (spike output)
+        conditions: {
+          // Prevent any accidental cross-region / cross-account blast radius
+          StringEquals: {
+            'aws:RequestedRegion': cdk.Stack.of(this).region,
+          },
+        },
+      }));
+
       // Agents are stored in the tenants table (SK prefix AGENT#)
       agentsHandler = new lambda.Function(this, 'AgentsHandler', {
         ...handlerDefaults,

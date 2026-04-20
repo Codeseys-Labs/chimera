@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **ADR-033** — Tenant context injection for Python tools (`ContextVar` + `require_tenant_id()` + `ensure_tenant_filter()`)
+- **ADR-034** — AgentCore Registry adoption (partial — Phase 0/1 only)
+- Registry adapter code (`packages/core/src/registry/*` — client, feature flags, skill-to-registry mapper, types, tests)
+- Registry dual-write scaffolding (flag-gated, default off)
+- Registry dual-read scaffolding (flag-gated, default off)
+- Registry observability alarms (3 alarms + dashboard panel; INSUFFICIENT_DATA until flags flip)
+- Context-gated `RegistryStack` (synthesise with `-c deployRegistry=true`)
+- `docs/MIGRATION-registry.md` — operator migration guide
+- `docs/research/agentcore-rabbithole/` — 7 operator-grade deep-dive docs (~3,900 lines)
+- `packages/agents/tools/tenant_context.py` — canonical tenant-context module with anti-pattern guard test
+- `packages/agents/tests/conftest.py` — autouse fixture sets default tenant context for every agents test
+- `packages/agents/CONTRIBUTING.md` — Docker supply-chain digest-refresh playbook
+- `packages/web/src/components/{error-boundary,empty-state}.tsx` — root error boundary + shared empty state
+- `packages/core/src/activity/audit-trail.ts` — `calculateAuditTTL(tier)` + `AUDIT_TTL_DAYS_BY_TIER` (single enforcement point)
+
+### Changed
+
+- Memory namespace format → canonical AgentCore `/strategy/{s}/actor/{a}/session/{s}/`
+- Memory strategy identifiers → real SDK names
+- Code Interpreter service name: `bedrock-agentcore-runtime` → `bedrock-agentcore`
+- 25 Python tool files now enforce tenant context via `require_tenant_id()` (swarm, code_interpreter, evolution, and 21 AWS-service tools)
+- DynamoDB query/scan tools auto-inject tenant filter expression (`ensure_tenant_filter()`)
+- `chat-gateway` routes validated via Zod schemas (`ChatRequestSchema`) — reject 400 before streaming
+- SSE: 15s heartbeat + client-abort via `AbortSignal` + 5s drain watchdog
+- Bedrock: `sendWithRetry()` (3 attempts, 500ms base, jitter) on ThrottlingException / 5xx / network errors (never on ValidationException/AccessDenied); tier-ceiling enforcement gate at `buildInput`
+- Model router: `MODEL_TIER_ALLOWLIST` + `enforceTierCeiling()` + `cheapestAllowedForTier()`
+- CLI: JWT `exp` decode (expired → `ChimeraAuthError`), 5MB file skip WARN (ERROR for IaC under `infra/`), monorepo-aware `findProjectRoot()`
+- CDK: WAF → CloudWatch Logs wired; AWS Config managed rule `DYNAMODB_PITR_ENABLED` + composite alarm; dedicated chat-task security group; ALB access-log suppression gated by `isProd`
+- Audit TTL enforced per tenant tier (was schema-only) — 90d / 1y / 7y
+- Python deps: all upper-bounded in `pyproject.toml`; pytest `integration` marker registered
+- CI: Python step split — unit tests fail CI (no `|| echo`), integration tests conditional on real AWS env vars (non-blocking)
+
+### Fixed
+
+- `ConverseStream` `messageStop` race (pending tool blocks previously lost before finish)
+- Python `_validate_cdk_code` regex was rejecting valid `class X extends cdk.Stack` code
+- Tenant-boundary leaks in Python tool layer (5 `@tool` signatures exposed `tenant_id` as argument; DDB tools had optional filters)
+- DAX security-group fallback comment documented (true fix blocked on NetworkStack refactor)
+- ALB access-log suppression now gated by `isProd`
+- Gateway proxy: 5.5 MB payload cap, iterative stack-safe 32-level depth walker, tool-error envelope with `[TOOL ERROR BEGIN]…[TOOL ERROR END]` truncation
+- System prompt: `wrap_untrusted_content()` + delimiter markers around SOUL.md / AGENTS.md / tenant config
+
+### Removed
+
+- `packages/core/src/runtime/agentcore-runtime.ts` (370 LOC dead code — every method TODO-stubbed or reinventing AgentCore primitives)
+- `packages/core/src/runtime/__tests__/runtime.test.ts` (tests for the deleted module)
+
+### Security
+
+- All flag-gated migration paths require `assertFlagsConsistent()` at boot — misconfigured env now fails fast at Lambda init instead of silent-skipping (Registry bootstrap fail-fast)
+- Grep-based anti-pattern test: every tool importing `boto3` must also import `tenant_context` (`test_no_tool_imports_boto3_without_tenant_context`)
+- Cross-tenant data leakage: Python layer closes the gap left by CDK/TS-only enforcement — `ContextVar`-based 3-layer model (CDK + TypeScript Cedar + Python `require_tenant_id()`)
+
 ## [0.5.1] - 2026-04-14
 
 ### Security

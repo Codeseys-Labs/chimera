@@ -21,7 +21,9 @@ import { EvolutionStack } from '../lib/evolution-stack';
 import { EmailStack } from '../lib/email-stack';
 import { FrontendStack } from '../lib/frontend-stack';
 import { DiscoveryStack } from '../lib/discovery-stack';
+import { RegistryStack } from '../lib/registry-stack';
 import {
+  applyCommonSuppressions,
   applyNetworkStackSuppressions,
   applyDataStackSuppressions,
   applySecurityStackSuppressions,
@@ -44,6 +46,7 @@ const app = new cdk.App();
 Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
 
 const envName = app.node.tryGetContext('environment') ?? 'dev';
+const isProd = envName === 'prod';
 
 // Custom Aspects: cross-cutting compliance enforcement
 Aspects.of(app).add(new TenantIsolationAspect());
@@ -171,6 +174,12 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   vpc: networkStack.vpc,
   albSecurityGroup: networkStack.albSecurityGroup,
   ecsSecurityGroup: networkStack.ecsSecurityGroup,
+  // DAX SG narrowing deferred: passing `daxSecurityGroup` here creates a
+  // circular dependency (DataStack -> ChatStack SG -> DataStack tables).
+  // Resolution requires moving `chatGatewayTaskSecurityGroup` ownership to
+  // NetworkStack (which has no ChatStack deps). Tracked as an infra follow-up
+  // in docs/reviews/wave4-cdk-audit.md §"DAX SG not wired". DataStack keeps
+  // the fallback rule (DAX ingress from broad ECS SG) until that refactor lands.
   tenantsTable: dataStack.tenantsTable,
   sessionsTable: dataStack.sessionsTable,
   skillsTable: dataStack.skillsTable,
@@ -178,7 +187,7 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   cognitoUserPoolId: securityStack.userPool.userPoolId,
   cognitoUserPoolClientId: securityStack.userPoolClient.userPoolClientId,
 });
-applyChatStackSuppressions(chatStack);
+applyChatStackSuppressions(chatStack, isProd);
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 chatStack.addDependency(pipelineStack);
@@ -314,8 +323,29 @@ discoveryStack.addDependency(dataStack);
 discoveryStack.addDependency(pipelineStack);
 discoveryStack.addDependency(frontendStack);
 
+// --- Stack 15 (OPTIONAL): AgentCore Registry ---
+// PLACEHOLDER — synthesized ONLY when `deployRegistry` CDK context flag is true:
+//   npx cdk synth -c deployRegistry=true
+// With the flag unset (default), the stack is not created and synth yields 14 stacks.
+// This ends the "no Registry resource exists" blocker for future operators without
+// risking accidental provisioning. Accepts both boolean `true` and string `"true"`
+// because `-c flag=true` on the CLI is parsed as a string.
+// See: docs/designs/agentcore-registry-spike.md, ADR-034.
+const deployRegistryCtx = app.node.tryGetContext('deployRegistry');
+const deployRegistry = deployRegistryCtx === true || deployRegistryCtx === 'true';
+
+let registryStack: RegistryStack | undefined;
+if (deployRegistry) {
+  registryStack = new RegistryStack(app, `${prefix}-Registry`, {
+    env: envConfig,
+    description: 'Chimera AgentCore Registry (spike — not yet production)',
+    envName,
+  });
+  applyCommonSuppressions(registryStack);
+}
+
 // Apply tags to all stacks
-for (const stack of [
+const stacksToTag: cdk.Stack[] = [
   networkStack,
   dataStack,
   securityStack,
@@ -330,7 +360,11 @@ for (const stack of [
   emailStack,
   frontendStack,
   discoveryStack,
-]) {
+];
+if (registryStack) {
+  stacksToTag.push(registryStack);
+}
+for (const stack of stacksToTag) {
   for (const [key, value] of Object.entries(projectTags)) {
     cdk.Tags.of(stack).add(key, value);
   }

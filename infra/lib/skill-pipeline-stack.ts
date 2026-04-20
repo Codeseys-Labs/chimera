@@ -187,6 +187,30 @@ export class SkillPipelineStack extends cdk.Stack {
     props.skillsTable.grantReadWriteData(skillDeploymentChimera.fn);
     props.skillsBucket.grantReadWrite(skillDeploymentChimera.fn);
 
+    // TODO(spike): narrow resources once RegistryStack emits a concrete registry ARN.
+    // Conditions currently limit blast radius to the deploy region only.
+    // These permissions are additive and inert: the skill-deployment Lambda only
+    // invokes bedrock-agentcore-control when the Registry feature flag is flipped
+    // in the tenant config (chimera-tenants table, FEATURE_FLAG items). With the
+    // flag off (default), none of these API calls are made.
+    // See ADR-034 and docs/designs/agentcore-registry-spike.md.
+    skillDeploymentChimera.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'bedrock-agentcore-control:CreateRegistryRecord',
+        'bedrock-agentcore-control:UpdateRegistryRecord',
+        'bedrock-agentcore-control:UpdateRegistryRecordStatus',
+        'bedrock-agentcore-control:SubmitRegistryRecordForApproval',
+        'bedrock-agentcore-control:GetRegistryRecord',
+      ],
+      resources: ['*'], // Registry-specific ARNs not yet known (spike output)
+      conditions: {
+        // Prevent any accidental cross-region / cross-account blast radius
+        StringEquals: {
+          'aws:RequestedRegion': cdk.Stack.of(this).region,
+        },
+      },
+    }));
+
     props.skillsTable.grantReadWriteData(scanFailureChimera.fn);
     failureNotificationTopic.grantPublish(scanFailureChimera.fn);
 

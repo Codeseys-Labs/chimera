@@ -1,8 +1,8 @@
 ---
 title: "Chimera Agent Architecture"
-version: 1.0.0
+version: 1.1.0
 status: canonical
-last_updated: 2026-03-21
+last_updated: 2026-04-17
 task: chimera-29c6
 ---
 
@@ -20,11 +20,11 @@ task: chimera-29c6
 
 ### Full Execution Flow
 
-User Message -> [1] API Gateway WebSocket/REST -> [2] Tenant Router Lambda (extract tenantId/userId/tier from Cognito JWT, load config from DynamoDB, resolve AgentCore endpoint pool/silo, check rate limits) -> [3] AgentCore Runtime MicroVM (session hydrated, JWT claims via context.auth.claims) -> [4] Chimera Agent Entrypoint (extract tenant context, load tier-gated tools + custom skills, configure memory namespace tenant-{id}-user-{id}, build system prompt, create Strands Agent) -> [5] Strands ReAct Loop (FM decides respond or call tools, Cedar policy check per call, max 20 iterations) -> [6] Response Streaming SSE/WebSocket -> [7] Post-Turn async (STM persist, LTM extract, cost track, audit log).
+User Message -> [1] API Gateway WebSocket/REST -> [2] Tenant Router Lambda (extract tenantId/userId/tier from Cognito JWT, load config from DynamoDB, resolve AgentCore endpoint pool/silo, check rate limits) -> [3] AgentCore Runtime MicroVM (session hydrated, JWT claims via context.auth.claims) -> [4] Chimera Agent Entrypoint (extract tenant context, `set_tenant_context()` for the Python tool layer, load tier-gated tools + custom skills, configure canonical memory namespace `/strategy/{strategy}/actor/tenant-{id}-user-{id}/session/{sid}/`, build system prompt, create Strands Agent) -> [5] Strands ReAct Loop (FM decides respond or call tools, Cedar policy check per call, max 20 iterations) -> [6] Response Streaming SSE/WebSocket -> [7] Post-Turn async (STM persist, LTM extract, cost track, audit log) -> [8] `clear_tenant_context()` in `finally` so reused workers cannot leak context.
 
 ### Session Serialization
 
-AgentCore Runtime guarantees concurrent invocations for same runtimeSessionId are serialized — replaces OpenClaw Lane Queue. Session ID: tenant-{tenantId}-user-{userId}-{uuid}. Context: Strands max_iterations(20), AgentCore STM window (Basic=10, Advanced=50, Premium=200), LTM SUMMARY compression.
+AgentCore Runtime guarantees concurrent invocations for same runtimeSessionId are serialized — replaces OpenClaw Lane Queue. Runtime session id comes from the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header and flows into the canonical memory namespace (see Section 6). Context: Strands max_iterations(20), AgentCore STM window (Basic=10, Advanced=50, Premium=200), LTM `summaryStrategy` compression.
 
 ---
 
@@ -43,6 +43,18 @@ Tools are Strands @tool decorated functions wrapping boto3 SDK calls. Loading pi
 ### Permission Model
 
 Tier gating -> Cedar policy eval -> IAM role (STS AssumeRole with ExternalId for confused deputy prevention). Tier roles: Basic=read-only T1, Advanced=read+write T1-3, Premium=full T1-4.
+
+### Python Tenant-Context Layer (ADR-033)
+
+Python `@tool` functions **never** accept `tenant_id` as an argument — the LLM picks tool arguments, so a user-settable `tenant_id` is a tenancy-spoofing primitive. Instead, `tenant_id` is injected once per invocation by the entrypoint and read from a module-level `ContextVar`.
+
+- **Module:** `packages/agents/tools/tenant_context.py`. Exposes `set_tenant_context(tenant_id, tier, user_id)`, `clear_tenant_context()`, `require_tenant_id()` (raises `TenantContextError` if unset), and `ensure_tenant_filter(filter_expression, expression_values)` for DDB queries.
+- **Entrypoint contract:** `chimera_agent.py::handle` calls `set_tenant_context(...)` immediately after extracting JWT claims and calls `clear_tenant_context()` in a `finally` block so a reused worker task cannot leak one tenant's context into the next invocation.
+- **Tool contract:** every `@tool` function calls `require_tenant_id()` at the top before touching AWS. Declaring `tenant_id: str` on a tool signature is a review-blocking defect.
+- **DDB auto-scoping:** query/scan tools route every `FilterExpression` through `ensure_tenant_filter()`, which AND-s `tenantId = :__chimera_tid` into the expression and injects the placeholder value. The placeholder name is reserved to avoid collisions with user-supplied expression values.
+- **Anti-pattern guard:** `packages/agents/tests/test_tenant_context.py::test_no_tool_imports_boto3_without_tenant_context` fails CI when a tool file imports `boto3` without importing from `tenant_context`, so forgetting `require_tenant_id()` cannot land.
+
+See [ADR-033](decisions/ADR-033-tenant-context-injection-for-python-tools.md) for the full decision record, alternatives considered, and risk analysis.
 
 ---
 
@@ -84,9 +96,19 @@ User-Team-Org hierarchy. Identity: Cognito -> JWT (tenantId, tier, role) -> API 
 
 ## Section 6: Memory Architecture
 
-Three layers: STM (AgentCore sliding window, Basic=10/Advanced=50/Premium=200), LTM (3 strategies: SUMMARY all tiers, USER_PREFERENCE advanced+, SEMANTIC_MEMORY premium), Structured State (DynamoDB: sessions 24h TTL, tenants, cost-tracking 2yr, audit 90d CMK).
+Three layers: STM (AgentCore sliding window, Basic=10/Advanced=50/Premium=200), LTM (3 strategies: `summaryStrategy` all tiers, `userPreferenceMemoryStrategy` advanced+, `semanticMemoryStrategy` premium), Structured State (DynamoDB: sessions 24h TTL, tenants, cost-tracking 2yr, audit 90d/1yr/7yr CMK tier-enforced).
 
-Namespace isolation: tenant-{tenantId}-user-{userId}, immutable per session. Integration via AgentCoreMemorySessionManager passed as session_manager to Strands Agent.
+**Strategy identifiers are the real SDK names** (`summaryStrategy`, `userPreferenceMemoryStrategy`, `semanticMemoryStrategy`), not the uppercase constants (`SUMMARY`, `USER_PREFERENCE`, `SEMANTIC_MEMORY`) Chimera previously passed. The old strings were silently accepted by the Strands integration but never matched a real strategy, so LTM extraction and IAM `strategy/{strategyId}` conditions both broke. `episodicMemoryStrategy` and `customMemoryStrategy` are available as future options; the latter is the self-managed S3+SNS pipeline escape hatch. See `docs/research/agentcore-rabbithole/02-runtime-memory-deep-dive.md` for the strategy matrix.
+
+**Canonical namespace** (required by AgentCore — trailing slash is load-bearing):
+
+```
+/strategy/{strategy}/actor/tenant-{tenantId}-user-{userId}/session/{sessionId}/
+```
+
+Previously Chimera emitted flat strings like `tenant-{id}-user-{id}`, which do not match `bedrock-agentcore:namespace` IAM condition keys, leaving tenancy enforced only at the application layer. The canonical format lets IAM `StringLike` conditions such as `/strategy/*/actor/tenant-{id}-*/` enforce tenancy at the service boundary. `summaryStrategy` requires the `session/{sessionId}/` segment; actor-scoped strategies ignore the extra segment harmlessly. Construction lives in `chimera_agent.py::_build_agentcore_namespace`; the runtime session id is resolved via `BedrockAgentCoreContext.get_session_id()` with an `AGENTCORE_SESSION_ID` env fallback for local/test execution.
+
+Integration via `AgentCoreMemorySessionManager` passed as `session_manager` to the Strands `Agent`. One pre-computed namespace per enabled strategy is passed alongside the primary (summary) namespace; a follow-up task (`TODO(rabbithole-02)` in `chimera_agent.py`) will replace the flat kwargs with the SDK's `AgentCoreMemoryConfig` dataclass.
 
 ---
 
@@ -186,6 +208,35 @@ permit(
 ```
 
 **Content moderation:** Rekognition moderation labels checked before storing results. Policy violation triggers audit event + blocks result from session context.
+
+---
+
+## Section 10: AgentCore Primitives — Managed vs Custom
+
+The AgentCore rabbithole research (`docs/research/agentcore-rabbithole/`) inventoried which Chimera responsibilities are delegated to AgentCore primitives versus which remain hand-rolled. Wave 7 deleted `packages/core/src/runtime/` session-management placeholders (`agentcore-runtime.ts` + callers); sessions are fully owned by AgentCore Runtime via the `@entrypoint` decorator in `packages/agents/chimera_agent.py`.
+
+| Primitive | Chimera status | Notes |
+|-----------|----------------|-------|
+| Runtime (MicroVM, sessions) | Managed — `@entrypoint` + `BedrockAgentCoreApp` | Dead TS session-lifecycle layer removed in Wave 7; runtime session id flows from `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` into memory namespaces |
+| Memory (STM events + LTM strategies) | Managed — `AgentCoreMemorySessionManager` | Namespace format now canonical (see Section 6); `TODO(rabbithole-02)` remains for `AgentCoreMemoryConfig` migration |
+| Gateway (MCP/Lambda/OpenAPI targets) | **Hand-rolled** via `gateway_proxy.py` | Phase-0/1 migration scaffolding landed this session as `packages/core/src/gateway/` (tool-loader, tool-registry, tier-config) — tier gating + prompt-injection envelope stay Chimera-owned |
+| Code Interpreter | **Stub (fix in progress)** | Service-name bug fixed (`bedrock-agentcore-runtime` -> `bedrock-agentcore`); three API-shape TODOs remain (see below) |
+| Browser | Not integrated | `fetch_url_content` is a `urllib` script inside Code Interpreter, not the real Browser service; see `docs/research/agentcore-rabbithole/04-code-interpreter-browser-deep-dive.md` opportunity #2 |
+| Registry | Phase-0/1 dual-write scaffolding | `packages/core/src/registry/`, flag-gated default-off; `chimera-skills` DDB remains canonical until Phase-2 spike closes — see [ADR-034](decisions/ADR-034-agentcore-registry-adoption.md) and `docs/MIGRATION-registry.md` |
+| Observability | Mixed | Vended `bedrock-agentcore` CloudWatch namespace consumed directly; ADOT wrapper for Strands span export not yet enabled |
+| Cedar authorization, rate limiting, cost attribution, self-evolution, budget enforcement, prompt-injection fencing | Hand-rolled | No AgentCore equivalent |
+
+### Code Interpreter — current state
+
+`packages/agents/tools/code_interpreter_tools.py` provides `validate_cdk_in_sandbox`, `execute_in_sandbox`, and `fetch_url_content`. Wave 7 fixed the boto3 service name from the non-existent `bedrock-agentcore-runtime` to the real data-plane `bedrock-agentcore`; prior to this fix every sandbox call raised `UnknownServiceError` and the tool silently fell through to the regex validator. A kill-switch env var `CODE_INTERPRETER_USE_AGENTCORE_SHIM=false` forces the regex fallback path during rollout.
+
+Three API-shape TODOs remain (tracked at `TODO(rabbithole-04)` in `code_interpreter_tools.py`), staged deliberately so each can be verified on a dev tenant before landing:
+
+1. Rename `create_code_interpreter_session(...)` -> `start_code_interpreter_session(...)` (the resource is "started", not "created").
+2. `invoke_code_interpreter` takes `{name, arguments}` (e.g. `name="executeCode", arguments={"language": "python", "code": ...}`), not a bare `code=` kwarg.
+3. Responses are a stream — `response["stream"][i]["result"]["content"]` — not `response["output"]`; the parsing in all three call sites must iterate the stream and accumulate content entries.
+
+See `docs/research/agentcore-rabbithole/04-code-interpreter-browser-deep-dive.md` for the full API reference and opportunity ranking.
 
 ---
 

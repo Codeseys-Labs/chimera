@@ -12,7 +12,23 @@ import { ChimeraBucket } from '../constructs/chimera-bucket';
 export interface DataStackProps extends cdk.StackProps {
   envName: string;
   vpc: ec2.IVpc;
+  /**
+   * Legacy shared ECS security group. Used ONLY as a fallback when
+   * `chatGatewayTaskSecurityGroup` is not supplied; see DAX security group
+   * block below for rationale. Prefer wiring `chatGatewayTaskSecurityGroup`
+   * explicitly from ChatStack so DAX ingress is scoped to the single task
+   * family that actually needs it (ref: docs/reviews/infra-review.md §1).
+   */
   ecsSecurityGroup: ec2.ISecurityGroup;
+  /**
+   * Preferred: a task-scoped security group used exclusively by the chat
+   * gateway Fargate service. When provided, DAX ingress on port 8111 is
+   * restricted to this SG only, closing the broader ECS-SG blast radius.
+   * ChatStack creates and exports this via its `chatGatewayTaskSecurityGroup`
+   * property. When omitted, DAX falls back to the legacy `ecsSecurityGroup`
+   * (backwards-compatible path for test fixtures and un-migrated wiring).
+   */
+  chatGatewayTaskSecurityGroup?: ec2.ISecurityGroup;
 }
 
 /**
@@ -196,16 +212,25 @@ export class DataStack extends cdk.Stack {
     // Environment-aware sizing: 1 node dev (dax.t3.small) / 3 nodes prod (dax.r5.large)
     // ======================================================================
 
-    // DAX Security Group - allow inbound on port 8111 from ECS tasks
+    // DAX Security Group - allow inbound on port 8111 from the chat-gateway
+    // task family only (never from the shared ECS SG), so a compromise of any
+    // other ECS task cannot pivot laterally to DAX + DynamoDB.
+    // (ref: docs/reviews/infra-review.md §1 -- "DAX SG Allows Any ECS Task")
     this.daxSecurityGroup = new ec2.SecurityGroup(this, 'DaxSecurityGroup', {
       vpc: props.vpc,
       description: 'Security group for DAX cluster (DynamoDB Accelerator)',
       allowAllOutbound: true,
     });
+
+    const daxIngressSg =
+      props.chatGatewayTaskSecurityGroup ?? props.ecsSecurityGroup;
+    const daxIngressReason = props.chatGatewayTaskSecurityGroup
+      ? 'Allow DAX access from chat-gateway task SG (tight scope)'
+      : 'Allow DAX access from shared ECS SG (fallback; prefer chatGatewayTaskSecurityGroup)';
     this.daxSecurityGroup.addIngressRule(
-      props.ecsSecurityGroup,
+      daxIngressSg,
       ec2.Port.tcp(8111),
-      'Allow DAX access from ECS tasks'
+      daxIngressReason
     );
 
     // DAX Subnet Group - use isolated subnets (no internet access needed)

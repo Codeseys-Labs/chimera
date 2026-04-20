@@ -444,6 +444,8 @@ Learned from ClawHavoc incident (1184 malicious skills, 3 CVEs):
 
 Chimera agents **create their own skills, tools, and subagents**.
 
+> **Implementation status (2026-04-18):** The 7 evolution modules (`auto-skill-gen`, `experiment-runner`, `iac-modifier`, `model-router`, `prompt-optimizer`, `safety-harness`, `types`) are all code-complete and tested. However, per [rabbithole deep-dive #06](research/agentcore-rabbithole/06-self-evolution-architectures.md), the **P1 prompt-variant gate is currently weak** — it uses keyword-overlap scoring, not an LLM-as-judge. A flag-gated Evaluations path was added this cycle to enable true LLM-judged winner detection; it remains off by default until the ADR-034 Registry spike resolves and the eval harness is wired to live traffic. Auto-skill generation and canary deployment remain design-intent until Phase-3 Registry adoption lands.
+
 ### Auto-Skill Generation
 
 When agents encounter repetitive patterns, they auto-generate skills:
@@ -814,14 +816,16 @@ User queries task status anytime: `agent("What's the status of task-abc123?")`
 
 ### Status
 
-**Platform 85% complete. Phases 0-6 delivered. Phase 7 in progress.**
+**Platform 90% complete. Phases 0-6 delivered. Phase 7 in progress.**
 
 - Phases 0-6: COMPLETE (Foundation, Agent Runtime, Chat Gateway framework, Skill Ecosystem, Multi-Tenant, Orchestration, Self-Evolution)
+- Phase 3 has a gating spike: ADR-034 Registry-adoption multi-tenancy decision (Phase-0/1 scaffolding landed; Phase-2+ blocked on spike)
 - Phase 7: IN PROGRESS (Production Hardening)
-- **962 tests** across 64 files (860 passing)
-- **48,300+ TypeScript LOC** across 21 core modules
-- **25 AWS tools** (19 TypeScript + 6 Python)
-- **11 CDK stacks** (5,800+ LOC)
+- **2269 tests** across 120 files (2206 passing, 38 E2E failures pending live AWS infra)
+- **~75,700 TypeScript LOC** across 22 core modules + ~9,200 Python LOC
+- **40 AWS tools** (19 TypeScript + 21 Python) + 5 Cloud Map discovery tools
+- **14 CDK stacks** (8,700+ LOC) + context-gated RegistryStack (ADR-034)
+- **34 ADRs** (ADR-001 through ADR-034, incl. ADR-033 tenant-context injection and ADR-034 Registry adoption)
 
 See [ROADMAP.md](ROADMAP.md) for detailed phase status.
 
@@ -835,4 +839,4 @@ See [docs/research/agentcore-strands/10-Chimera-Integration-Guide.md](research/a
 
 **Chimera: where agents operate AWS accounts, not computers.**
 
-Last Updated: 2026-03-22
+Last Updated: 2026-04-18

@@ -68,12 +68,33 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run Python agent tests
+      - name: Install Python agent test deps
         working-directory: packages/agents
         run: |
           pip install -r requirements.txt 2>/dev/null || true
-          pip install pytest pytest-cov
-          python -m pytest tests/ -v --tb=short --junitxml=../../test-results/agents.xml 2>&1 || echo "Python tests completed (some may require AWS credentials)"
+          pip install pytest pytest-cov pytest-asyncio pytest-mock moto
+
+      - name: Run Python agent unit tests
+        working-directory: packages/agents
+        run: |
+          mkdir -p ../../test-results
+          python -m pytest tests/ \
+            -v --tb=short \
+            -m 'not integration' \
+            --junitxml=../../test-results/agents-unit.xml
+
+      - name: Run Python agent integration tests
+        if: env.AWS_ROLE_ARN != '' || env.AWS_ACCESS_KEY_ID_REAL != ''
+        continue-on-error: true
+        working-directory: packages/agents
+        env:
+          AWS_REGION: us-east-1
+        run: |
+          mkdir -p ../../test-results
+          python -m pytest tests/ \
+            -v --tb=short \
+            -m 'integration' \
+            --junitxml=../../test-results/agents-integration.xml
 
       - name: Run lint
         run: bun run lint

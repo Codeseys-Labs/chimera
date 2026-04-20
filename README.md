@@ -20,7 +20,7 @@ Chimera is a **production-ready Agent-as-a-Service platform** where:
 - **Tenants** deploy AI agents with first-class AWS account access across multiple channels
 - **Agents** use 40 AWS tools, multi-modal processing, memory, and orchestration to build, deploy, and operate infrastructure autonomously
 - **The platform** self-evolves: auto-generates skills, optimizes model routing, A/B tests prompts, modifies its own infrastructure
-- **Everything** runs on AWS managed services with AgentCore MicroVM isolation and 15 production-grade CDK stacks
+- **Everything** runs on AWS managed services with AgentCore MicroVM isolation and 14 production-grade CDK stacks
 
 ### Heritage
 
@@ -128,7 +128,7 @@ chimera setup                   # Create admin Cognito user
 chimera endpoints                # Fetch and save all URLs
 
 # Verify
-chimera status                  # Check all 15 stack statuses
+chimera status                  # Check all 14 stack statuses
 chimera doctor                  # Run health checks
 
 # Chat with the agent
@@ -166,18 +166,18 @@ chimera/
 
 ## Current Status
 
-**Platform: Production — v0.5.1** — All 15 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary.
+**Platform: Production — v0.5.1** — All 14 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary.
 
 | Phase                  | Status          | Key Deliverables                                                                                                                                          |
 | ---------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0. Foundation**      | ✅ **COMPLETE** | 15 CDK stacks (8,700+ LOC), 6-table DynamoDB design, VPC + networking, 30 ADRs, L3 constructs                                                             |
+| **0. Foundation**      | ✅ **COMPLETE** | 14 CDK stacks (8,700+ LOC), 6-table DynamoDB design, VPC + networking, 34 ADRs, L3 constructs                                                             |
 | **1. Agent Runtime**   | ✅ **COMPLETE** | Python agent with Strands SDK + AgentCore • 40 AWS tools • Multi-modal processing • Discovery modules • Gateway-based tool discovery                      |
 | **2. Chat Gateway**    | ✅ **COMPLETE** | SSE bridge ship-ready • Chimera identity + system prompt wired • Bedrock model corrected • DSP parser fixed • React frontend with Amplify auth • Deployed |
 | **3. Skill Ecosystem** | ✅ **COMPLETE** | Registry, discovery, installer, validator, MCP gateway • Trust engine • 7-stage security pipeline • SKILL.md v2 parser • MCP/instruction/hybrid providers |
 | **4. Multi-Tenant**    | ✅ **COMPLETE** | Tenant router • Cedar authorization • Rate limiting • Quota management • Cost tracking • Per-tenant KMS                                                   |
 | **5. Orchestration**   | ✅ **COMPLETE** | Swarm modules (5 components) • HITL DDB persistence • Multi-agent workflows • SQS/DDB/EventBridge stubs wired                                             |
 | **6. Self-Evolution**  | ✅ **COMPLETE** | 7 evolution modules • Prompt A/B testing • Auto-skill generation • Model routing • Self-modifying IaC with safety harness                                 |
-| **7. Production**      | ✅ **COMPLETE** | Verified: deploy from public repo → 15 stacks → E2E pass → destroy → clean account                                                                        |
+| **7. Production**      | ✅ **COMPLETE** | Verified: deploy from public repo → 14 stacks → E2E pass → destroy → clean account                                                                        |
 
 **Test Coverage:** ~2,500 tests across 150+ test files (1,285 core, 60 web, 43 SSE bridge, 196 orchestration, 178 chat-gateway, 11 Playwright E2E specs).
 
@@ -205,7 +205,7 @@ chimera/
 | Metric                            | Count                                                                                                                                                                                                              |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Packages**                      | 7 (core, agents, shared, sse-bridge, chat-gateway, cli, web)                                                                                                                                                       |
-| **CDK Infrastructure Stacks**     | 15 stacks (8,700+ LOC)                                                                                                                                                                                             |
+| **CDK Infrastructure Stacks**     | 14 stacks (8,700+ LOC)                                                                                                                                                                                             |
 | **TypeScript LOC**                | ~91,300 lines                                                                                                                                                                                                      |
 | **Python Agent Runtime**          | 252 lines (chimera_agent.py) + ~9,200 total Python LOC                                                                                                                                                             |
 | **AWS Tool Implementations**      | 40 tools (19 TypeScript + 21 Python) + 5 Cloud Map discovery tools                                                                                                                                                 |
@@ -213,7 +213,7 @@ chimera/
 | **Core Modules**                  | 22 (activity, agent, auth, aws-tools, billing, discovery, events, evolution, gateway, infra-builder, media, memory, multi-account, orchestration, runtime, skills, stream, swarm, tenant, tools, well-architected) |
 | **Test Coverage**                 | ~2,500 tests across 150+ test files                                                                                                                                                                                |
 | **Test Assertions**               | 4,084 expect() calls                                                                                                                                                                                               |
-| **Architecture Decision Records** | 32 ADRs                                                                                                                                                                                                            |
+| **Architecture Decision Records** | 34 ADRs                                                                                                                                                                                                            |
 | **Research Documentation**        | 123 docs, 118,000+ lines                                                                                                                                                                                           |
 
 **Key Components Built:**
@@ -229,11 +229,11 @@ chimera/
 - ✅ Well-Architected Framework integration (6-pillar review tool)
 - ✅ Infrastructure-as-code builder (CDK generation from requirements)
 - ✅ Activity logging with ADR/runbook auto-generation
-- ✅ 15 production CDK stacks (8,700+ LOC) (Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration, Email, Frontend, GatewayRegistration, Destroy)
+- ✅ 14 production CDK stacks (8,700+ LOC) (Network, Data, Security, Observability, API, Chat, Tenant Onboarding, Pipeline, Skill Pipeline, Evolution, Orchestration, Email, Frontend, GatewayRegistration, Destroy)
 
 ### Destroy Lifecycle
 
-`chimera destroy --force` runs a 3-phase CodeBuild-delegated teardown that removes all 15 stacks and leaves the AWS account clean. Phase 1 destroys application stacks (Chat, API, Frontend, etc.), Phase 2 removes data and security stacks (with S3 bucket auto-emptying and Cognito cleanup), and Phase 3 tears down the network foundation. See [ADR-032](docs/architecture/decisions/032-codebuild-delegated-destroy.md) for design details.
+`chimera destroy --force` runs a 3-phase CodeBuild-delegated teardown that removes all 14 stacks and leaves the AWS account clean. Phase 1 destroys application stacks (Chat, API, Frontend, etc.), Phase 2 removes data and security stacks (with S3 bucket auto-emptying and Cognito cleanup), and Phase 3 tears down the network foundation. See [ADR-032](docs/architecture/decisions/032-codebuild-delegated-destroy.md) for design details.
 
 ## License
 

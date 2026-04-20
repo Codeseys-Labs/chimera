@@ -44,8 +44,22 @@ export class SecurityStack extends cdk.Stack {
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    // Grant CloudWatch Logs permission to use this key for LogGroup encryption
-    // CloudWatch Logs can ONLY access KMS via key policy, not IAM policies
+    // Grant CloudWatch Logs permission to use this key for LogGroup encryption.
+    // CloudWatch Logs can ONLY access KMS via key policy, not IAM policies (ref: ADR-022).
+    //
+    // Race-condition guard: this statement is added BEFORE any cross-stack
+    // consumer (ObservabilityStack, etc.) references `platformKey`. Synthesis
+    // order is enforced two ways:
+    //   1. `addToResourcePolicy` runs synchronously in this constructor, so
+    //      the resulting CFN template has the permission baked into the
+    //      initial key policy — not an async `AWS::KMS::KeyPolicy` update.
+    //   2. `observabilityStack.addDependency(securityStack)` in bin/chimera.ts
+    //      (and the implicit `platformKey` prop passthrough) enforces that
+    //      SecurityStack reaches CREATE_COMPLETE — key + policy together —
+    //      before any KMS-encrypted log group is provisioned.
+    // Do not move this block below `new kms.Key(...)`'s consumers; removing
+    // either guarantee can produce silently-unencrypted log groups.
+    // (ref: docs/reviews/infra-review.md §3)
     this.platformKey.addToResourcePolicy(
       new iam.PolicyStatement({
         sid: 'AllowCloudWatchLogs',
@@ -275,7 +289,22 @@ exports.handler = async (event) => {
     // 1. AWS Managed Common Rules -- blocks common exploits (XSS, SQLi, etc.)
     // 2. Rate limiting -- 2000 requests per 5-min window per IP
     // 3. AWS Managed Known Bad Inputs -- blocks known malicious payloads
+    //
+    // Logging: WebACL logs are sent to a dedicated CloudWatch LogGroup
+    // (encrypted with platformKey) so blocked requests are auditable. Without
+    // this, only aggregate metrics would be visible — no per-request forensics
+    // for attack pattern investigation or false-positive review.
+    // (ref: docs/reviews/infra-review.md §2)
     // ======================================================================
+
+    // WAFv2 requires log group names to begin with 'aws-waf-logs-'.
+    const wafLogGroup = new logs.LogGroup(this, 'WafLogGroup', {
+      logGroupName: `aws-waf-logs-chimera-api-${props.envName}`,
+      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      encryptionKey: this.platformKey,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
     this.webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
       name: `chimera-api-waf-${props.envName}`,
       scope: 'REGIONAL',
@@ -336,6 +365,27 @@ exports.handler = async (event) => {
         },
       ],
     });
+
+    // Attach the CloudWatch LogGroup to the WebACL for request logging.
+    // WAFv2 `LogDestinationConfigs` requires the log-group ARN *without* the
+    // trailing ':*' that CloudWatch Logs appends, so we construct it from the
+    // log-group name instead of re-parsing `wafLogGroup.logGroupArn`.
+    const wafLogGroupArnForWaf = cdk.Stack.of(this).formatArn({
+      service: 'logs',
+      resource: 'log-group',
+      resourceName: wafLogGroup.logGroupName,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    });
+    const wafLoggingConfiguration = new wafv2.CfnLoggingConfiguration(
+      this,
+      'WebAclLogging',
+      {
+        logDestinationConfigs: [wafLogGroupArnForWaf],
+        resourceArn: this.webAcl.attrArn,
+      }
+    );
+    wafLoggingConfiguration.node.addDependency(this.webAcl);
+    wafLoggingConfiguration.node.addDependency(wafLogGroup);
 
     // --- Stack outputs ---
     new cdk.CfnOutput(this, 'UserPoolId', {

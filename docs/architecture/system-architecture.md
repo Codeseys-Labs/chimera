@@ -2,7 +2,7 @@
 title: 'Chimera System Architecture'
 version: 2.0.0
 status: canonical
-last_updated: 2026-04-10
+last_updated: 2026-04-18
 task: chimera-17ef
 ---
 
@@ -12,9 +12,11 @@ Comprehensive architecture diagrams for the AWS Chimera multi-tenant agent platf
 
 ---
 
-## 1. System Overview — 15 CDK Stacks
+## 1. System Overview — 14 CDK Stacks (+ optional Registry)
 
-The full infrastructure is expressed as 15 CloudFormation stacks synthesized under the `Chimera-{env}` prefix. Arrows represent explicit `addDependency()` edges.
+The default synthesis produces **14** CloudFormation stacks under the `Chimera-{env}` prefix. A 15th stack — `Registry` — is context-gated and only synthesized when `npx cdk synth -c deployRegistry=true` is passed (ADR-034 Phase 0/1 scaffolding). Arrows represent explicit `addDependency()` edges.
+
+<!-- TODO(wave7+): this diagram shows 13 nodes but the current stack set is 14 + gated Registry + Frontend + Discovery consolidation. Full rework tracked in docs/reviews/wave7-doc-drift-audit.md §system-architecture.md — deeper restructure still pending. -->
 
 ```mermaid
 flowchart TD
@@ -32,6 +34,7 @@ flowchart TD
     EMAIL["Email<br/>SES receipt rules · S3<br/>Parser / Sender Lambdas"]
     FRONT["Frontend<br/>React 19 + Vite 6 + shadcn/ui<br/>S3 + CloudFront OAC"]
     GW["GatewayRegistration<br/>AgentCore Gateway targets<br/>MCP endpoint registry"]
+    REG["Registry<br/>AgentCore Registry scaffold<br/>[gated: -c deployRegistry=true]<br/>[ADR-034 Phase 0/1]"]
 
     NET --> DATA
     NET --> CHAT
@@ -68,6 +71,7 @@ flowchart TD
 | Frontend            | React 19 + Vite 6 + shadcn/ui (14 components), @ai-sdk/react v2 useChat with DefaultChatTransport, AWS Amplify v6 Cognito auth, 5 pages (Login, Dashboard, Chat, Admin, Settings), model selector in Settings (Converse + Mantle backends), S3 + CloudFront OAC hosting                                                                                                                                                                                                            |
 | GatewayRegistration | 4-tier Lambda tool targets: **Tier 1** (Lambda, EC2, S3, CloudWatch, SQS — all tenants), **Tier 2** (RDS, Redshift, Athena, Glue, OpenSearch — advanced+), **Tier 3** (StepFunctions, Bedrock, SageMaker, Rekognition, Textract, Transcribe, CodeBuild, CodeCommit, CodePipeline — premium), **Discovery** (Config, Cost Explorer, Tags, Resource Explorer, CloudFormation — all tenants). SSM Parameter Store for runtime ARN discovery                                           |
 | Discovery           | Cloud Map HTTP namespace + service registrations, 6 discovery tools: **config-scanner** (AWS Config SDK — advanced query, history, compliance), **resource-explorer** (Resource Explorer 2 SDK — search, index), **stack-inventory** (CloudFormation SDK — list/describe, drift detection), **tag-organizer** (Tagging API SDK — search, compliance, tag/untag), **cost-analyzer** (Cost Explorer SDK — cost by service, forecast), **resource-index** (in-memory cross-reference) |
+| Registry _(gated)_  | AgentCore Registry scaffold (ADR-034). **Context-gated: synthesized only when `-c deployRegistry=true`.** Phase 0/1 adapter + feature flags landed (`REGISTRY_ENABLED`, `REGISTRY_PRIMARY_READ`, `REGISTRY_ID`), Phase 2+ blocked on multi-tenancy spike. See `docs/MIGRATION-registry.md`.                                                                                                                                                                                                                                          |
 
 ---
 
@@ -103,31 +107,43 @@ sequenceDiagram
     participant CLI as "chimera chat (ink TUI / readline)"
     participant ALB as "ALB (ECS Fargate)"
     participant GW as "Hono chat-gateway"
+    participant ZOD as "Zod ChatRequestSchema<br/>[Wave 2-3]"
     participant AUTH as "authenticateJWT middleware"
     participant TC as "extractTenantContext middleware"
     participant RL as rateLimitMiddleware
     participant AGENT as "AgentCore Runtime (MicroVM)"
+    participant BEDROCK as "BedrockModel<br/>enforceTierCeiling [Wave 3]"
     participant STRANDS as "Strands ReAct Loop"
     participant TOOLS as "AWS Tools (40 implementations)"
 
     U->>CLI: user types message
     CLI->>ALB: POST /chat/stream — Authorization: Bearer JWT
     ALB->>GW: HTTP request
+    GW->>ZOD: parse body — ChatRequestSchema.safeParse()
+    ZOD-->>GW: on failure → HTTP 400 with flatten() errors
     GW->>AUTH: authenticateJWT (validates + extracts JWT claims)
     AUTH->>TC: extractTenantContext (tenantId from JWT or header)
     TC->>RL: rateLimitMiddleware (token bucket check)
     RL->>AGENT: invoke agent (tenantId · userId · message)
     AGENT->>STRANDS: hydrate session (AgentCore Memory STM)
     loop ReAct iterations (max 20)
+        STRANDS->>BEDROCK: ConverseStream invoke<br/>[tier-ceiling: downgrade model if above tenant tier]
+        BEDROCK-->>STRANDS: token stream (ConverseStreamCommand)
         STRANDS->>TOOLS: tool call (Cedar policy check)
         TOOLS-->>STRANDS: tool result
     end
     STRANDS-->>AGENT: final response
-    AGENT-->>GW: SSE stream — {type:token,...}
+    AGENT-->>GW: SSE stream — {type:token,...}<br/>heartbeat + abort + drain [Wave 2-3]
     GW-->>ALB: chunked SSE response
     ALB-->>CLI: stream tokens
     CLI-->>U: render via ink / stdout
 ```
+
+**Wave 2-3 hardening** (see `packages/chat-gateway/src/types.ts`, `packages/chat-gateway/src/routes/chat.ts`): route entry validates the request body with `ChatRequestSchema.safeParse()` and returns HTTP 400 with `flatten()` errors on malformed input; the SSE response side adds a periodic heartbeat, a client-disconnect abort path, and a `finally` drain that closes the heartbeat timer and tees the upstream stream cleanly.
+
+**Wave 3 tier-ceiling enforcement** (see `packages/core/src/agent/bedrock-model.ts` → `enforceTierCeiling`): the `BedrockModel` is configured with the tenant `tier`; the LAST gate before `ConverseCommand` / `ConverseStreamCommand` downgrades any requested model that exceeds the tenant's tier ceiling. This runs after Cedar and rate-limit checks and cannot be bypassed by a misbehaving agent choosing a larger model ID.
+
+**Wave 3 ConverseStream race fix:** the streaming path handles an edge case where `ConverseStreamCommand` can emit its first event before the downstream SSE writer is attached; the gateway now serializes writer attachment before pulling the first chunk from the Bedrock stream.
 
 ---
 
@@ -210,7 +226,7 @@ flowchart TD
     EB["EventBridge<br/>Pipeline Execution<br/>State Change"]
     LAMBDA["PipelineCompletionHandler<br/>Lambda"]
     DDB_STATE["evolution-state<br/>DynamoDB"]
-    POLL["Agent polling<br/>wait_for_evolution_deployment<br/>every 30s, max 15 min"]
+    POLL["Agent polling<br/>wait_for_evolution_deployment<br/>every 30s, max 15 min<br/>circuit-break: 5 consecutive errors [Wave 2-3]"]
 
     DETECT --> HARNESS
     HARNESS --> HUMAN
@@ -238,6 +254,8 @@ flowchart TD
 
 **Safety limits:** 10 evolutions/day total · 3 infra changes/day · 3 prompt A/B tests/week
 
+**Wave 2-3 polling circuit breaker** (see `packages/agents/tools/evolution_tools.py::wait_for_evolution_deployment`): the agent poll loop aborts if it sees 5 consecutive DDB `get_item` errors, returning an explicit `ABORTED` message instead of silently retrying for the full 15-minute timeout. Successful polls reset the error counter. This prevents a broken IAM grant or DDB outage from eating the agent's entire evolution budget.
+
 ---
 
 ## 5a. Evolution Feedback Loop
@@ -262,7 +280,7 @@ sequenceDiagram
     LAMBDA->>DDB: Update status: deploying → deployed/deploy_failed
     LAMBDA->>EB_CUSTOM: Publish "Evolution Deployment Complete"
 
-    loop Polling (every 30s, max 15 min)
+    loop Polling (every 30s, max 15 min; abort after 5 consecutive errors [Wave 2-3])
         AGENT->>DDB: wait_for_evolution_deployment (check status)
     end
 
@@ -283,6 +301,7 @@ flowchart TD
     RATE["Rate limiter<br/>token bucket in<br/>chimera-rate-limits"]
     CEDAR["Cedar policy engine<br/>permit / forbid decision"]
     AGENT["AgentCore Runtime<br/>MicroVM per tenant"]
+    PYTOOL["Python tool layer<br/>require_tenant_id() +<br/>ensure_tenant_filter()<br/>(ADR-033 ContextVar)"]
     MEM["AgentCore Memory<br/>namespace: tenant-X-user-Y"]
     DDB["DynamoDB<br/>PK: tenantId#resourceId"]
     GSI["GSI queries<br/>FilterExpression: tenantId = :tid"]
@@ -293,11 +312,12 @@ flowchart TD
     GW --> RATE
     RATE --> CEDAR
     CEDAR --> AGENT
-    AGENT --> MEM
-    AGENT --> DDB
+    AGENT --> PYTOOL
+    PYTOOL --> MEM
+    PYTOOL --> DDB
     DDB --> GSI
     DDB --> KMS
-    AGENT --> AUDIT
+    PYTOOL --> AUDIT
 
     style CEDAR fill:#c0392b,color:#fff
     style KMS fill:#8e44ad,color:#fff
@@ -336,6 +356,8 @@ flowchart LR
 **Trust tiers:** Platform (0) · Verified (1) · Community (2) · Private (3) · Experimental (4). Manual review (Stage 7) is triggered for trust levels 3 and 4.
 
 **Execution modes:** `inline` (@tool decorated, trusted) · `sandbox` (Code Interpreter, untrusted) · `mcp` (AgentCore Gateway) · `lambda` (compute-intensive)
+
+**AgentCore Registry scaffolding [Phase 0/1 flag-gated]** (ADR-034): the Stage 7 "publish" step additionally calls `CreateRegistryRecord` + `SubmitRegistryRecordForApproval` when `REGISTRY_ENABLED=true`, dual-writing to the AgentCore Registry alongside the `chimera-skills` DDB table. Discovery reads from Registry when `REGISTRY_PRIMARY_READ=true` with automatic DDB fallback. Both flags default to off — DDB remains the source of truth until the multi-tenancy spike closes. See `docs/MIGRATION-registry.md` for the operator runbook and `docs/architecture/decisions/ADR-034-agentcore-registry-adoption.md` for the decision record.
 
 ---
 

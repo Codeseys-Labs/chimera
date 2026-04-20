@@ -131,6 +131,11 @@ These conventions were discovered through production incidents and are documente
 
 **GSI Cross-Tenant Leakage:** ALWAYS add `FilterExpression='tenantId = :tid'` to all GSI queries on multi-tenant tables — GSI keys don't enforce partition isolation
 
+**Tenant isolation is enforced at three layers** (as of ADR-033):
+1. **CDK/DynamoDB** — partition keys `TENANT#{id}`, per-tenant KMS, IAM boundaries
+2. **TypeScript Cedar** — policies validated in `packages/core/src/tenant/cedar-authorization.ts`
+3. **Python agent tools** — every `@tool` calls `require_tenant_id()` from `tools/tenant_context.py`; DDB queries auto-inject `FilterExpression='tenantId = :__chimera_tid'` via `ensure_tenant_filter()`. An anti-pattern guard test (`test_no_tool_imports_boto3_without_tenant_context`) prevents regressions.
+
 **Web UI XSS Prevention:** Use `createElement` + `textContent` for user content (never set innerHTML directly)
 
 **Secrets Manager:** Never use `Secret.secretValue.unsafeUnwrap()` — embeds plaintext in CloudFormation template

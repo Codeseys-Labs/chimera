@@ -10,6 +10,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as xray from 'aws-cdk-lib/aws-xray';
+import * as aws_config from 'aws-cdk-lib/aws-config';
 import { Construct } from 'constructs';
 
 export interface ObservabilityStackProps extends cdk.StackProps {
@@ -43,6 +44,12 @@ export class ObservabilityStack extends cdk.Stack {
   public readonly costAttributionDashboard: cloudwatch.Dashboard;
   public readonly platformLogGroup: logs.LogGroup;
   public readonly xrayGroup: xray.CfnGroup;
+  /**
+   * Alarm that fires when the AWS Config managed rule DYNAMODB_PITR_ENABLED
+   * reports NON_COMPLIANT resources. Undefined when no DynamoDB tables are
+   * supplied to the stack (ref: docs/reviews/infra-review.md §7).
+   */
+  public readonly pitrComplianceAlarm?: cloudwatch.Alarm;
 
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
@@ -592,9 +599,18 @@ exports.handler = async () => {
     });
 
     // ======================================================================
-    // PITR Backup Monitoring: Continuous backup health checks
-    // Monitors DynamoDB point-in-time recovery status for critical tables.
-    // Alarms trigger if backup fails or PITR is disabled.
+    // PITR Backup Validation: AWS Config managed rule + non-compliance alarm
+    //
+    // AWS does not expose PITR status as a CloudWatch metric, so we rely on
+    // the AWS-managed Config rule DYNAMODB_PITR_ENABLED to continuously
+    // evaluate every DynamoDB table in the account. A CloudWatch alarm on
+    // the rule's non-compliant-resource count routes to the high-priority
+    // alarm topic, and an EventBridge rule on `onComplianceChange` fires an
+    // additional SNS notification the moment compliance flips.
+    //
+    // Requires AWS Config recorder + delivery channel to be active in the
+    // account (set up once per account via Control Tower, CFN, or console).
+    // (ref: docs/reviews/infra-review.md §7)
     // ======================================================================
     const pitrTables = [
       { name: 'Tenants', table: props.tenantsTable },
@@ -604,24 +620,59 @@ exports.handler = async () => {
       { name: 'Audit', table: props.auditTable },
     ];
 
-    for (const { name, table } of pitrTables) {
-      if (!table) continue;
+    const pitrTablesProvided = pitrTables.some(({ table }) => table !== undefined);
+    if (pitrTablesProvided) {
+      const pitrRunbook = props.runbookBaseUrl
+        ? `${props.runbookBaseUrl}dynamodb-pitr-disabled`
+        : 'Re-enable PITR on the offending DynamoDB table immediately. Investigate how PITR was disabled (CloudTrail: UpdateContinuousBackups) and restore from last PITR snapshot if data was modified while unprotected.';
 
-      // DynamoDB backup monitoring via CloudWatch Metrics
-      // AWS publishes backup metrics to CloudWatch when PITR is enabled
-      const backupMetric = new cloudwatch.Metric({
-        namespace: 'AWS/DynamoDB',
-        metricName: 'AccountProvisionedReadCapacityUtilization',
-        statistic: 'Average',
-        period: cdk.Duration.hours(1),
-        dimensionsMap: {
-          TableName: table.tableName,
-        },
+      const pitrConfigRule = new aws_config.ManagedRule(this, 'DynamoDbPitrEnabledRule', {
+        configRuleName: `chimera-${props.envName}-dynamodb-pitr-enabled`,
+        description:
+          'Continuously evaluates whether point-in-time recovery (PITR) is enabled on ' +
+          'all DynamoDB tables. Non-compliance indicates a critical backup gap.',
+        identifier: aws_config.ManagedRuleIdentifiers.DYNAMODB_PITR_ENABLED,
       });
 
-      // Note: AWS doesn't directly expose PITR status as a CloudWatch metric.
-      // In production, use AWS Config rule dynamodb-pitr-enabled for compliance monitoring.
-      // This alarm serves as a proxy for table health.
+      // Non-compliance alarm: fires when >=1 DynamoDB resource fails the rule.
+      const pitrComplianceMetric = new cloudwatch.Metric({
+        namespace: 'AWS/Config',
+        metricName: 'ComplianceByConfigRule',
+        dimensionsMap: {
+          RuleName: pitrConfigRule.configRuleName,
+          ComplianceType: 'NON_COMPLIANT',
+        },
+        statistic: 'Maximum',
+        period: cdk.Duration.minutes(15),
+      });
+
+      const pitrAlarm = new cloudwatch.Alarm(this, 'DynamoDbPitrDisabledAlarm', {
+        alarmName: `chimera-${props.envName}-dynamodb-pitr-disabled`,
+        alarmDescription: `DynamoDB PITR compliance rule reports NON_COMPLIANT resources. RUNBOOK: ${pitrRunbook}`,
+        metric: pitrComplianceMetric,
+        threshold: 1,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      pitrAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+      pitrAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+      this.pitrComplianceAlarm = pitrAlarm;
+
+      // Real-time fan-out: EventBridge -> SNS on every compliance change so
+      // operators see the transition event (not just the sustained alarm).
+      pitrConfigRule.onComplianceChange('PitrComplianceChange', {
+        target: new targets.SnsTopic(this.highAlarmTopic, {
+          message: events.RuleTargetInput.fromText(
+            `DynamoDB PITR compliance change for rule ${pitrConfigRule.configRuleName}. Investigate immediately — RUNBOOK: ${pitrRunbook}`
+          ),
+        }),
+      });
+
+      // Composite alarm (prod-only): combines PITR non-compliance with the
+      // AWS Backup failure alarm so on-call receives a single "backup
+      // protection compromised" signal rather than two correlated alerts.
+      // Deferred to the prod-only block below where backupFailureAlarm exists.
     }
 
     // Add alarm for AWS Backup (if using AWS Backup service for DR)
@@ -648,6 +699,28 @@ exports.handler = async () => {
       });
       backupFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
       backupFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+
+      // Composite "backup protection compromised" alarm: OR of PITR
+      // non-compliance and AWS Backup job failure. Provides a single
+      // high-signal page for on-call.
+      if (this.pitrComplianceAlarm) {
+        new cloudwatch.CompositeAlarm(this, 'BackupProtectionCompromised', {
+          compositeAlarmName: `chimera-${props.envName}-backup-protection-compromised`,
+          alarmDescription:
+            'Backup protection compromised: either AWS Backup job failed OR DynamoDB PITR compliance rule reports NON_COMPLIANT resources.',
+          alarmRule: cloudwatch.AlarmRule.anyOf(
+            cloudwatch.AlarmRule.fromAlarm(
+              backupFailureAlarm,
+              cloudwatch.AlarmState.ALARM
+            ),
+            cloudwatch.AlarmRule.fromAlarm(
+              this.pitrComplianceAlarm,
+              cloudwatch.AlarmState.ALARM
+            )
+          ),
+          actionsEnabled: true,
+        }).addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+      }
     }
 
     // ======================================================================
@@ -956,6 +1029,30 @@ exports.handler = async () => {
     );
 
     // ======================================================================
+    // Registry Observability (AgentCore Registry Phase 1/2 migration)
+    //
+    // Alarms and dashboard panel for the flag-gated Registry code paths in
+    // the skill-deployment Lambda (dual-write, Phase 1) and skills-api
+    // Lambda (dual-read, Phase 2). With feature flags OFF (the default),
+    // none of these metrics fire and all alarms remain at INSUFFICIENT_DATA
+    // — no operator noise, no extra cost. When flags flip, the alarms
+    // provide immediate visibility into Registry write failures, read
+    // errors, and fallback rate.
+    //
+    // Metric emitters:
+    //   - `RegistryWriteFailure` (namespace `Chimera/SkillPipeline`,
+    //     EMF): dual-write Lambda `skill-deployment`.
+    //   - `RegistryReadSuccess` / `RegistryReadFallback` /
+    //     `RegistryReadError` (namespace `Chimera/Registry`, EMF):
+    //     dual-read Lambda `skills-api`.
+    //
+    // Cross-links:
+    //   - docs/MIGRATION-registry.md              (operator runbook)
+    //   - docs/reviews/cost-observability-audit.md (metrics catalog)
+    // ======================================================================
+    this.addRegistryAlarms(props);
+
+    // ======================================================================
     // Stack Outputs
     // ======================================================================
     new cdk.CfnOutput(this, 'AlarmTopicArn', {
@@ -1023,5 +1120,193 @@ exports.handler = async () => {
       exportName: `${this.stackName}-XRayGroupName`,
       description: 'X-Ray tracing group name',
     });
+  }
+
+  /**
+   * AgentCore Registry migration alarms + dashboard panel.
+   *
+   * Created unconditionally. While feature flags `REGISTRY_ENABLED` and
+   * `REGISTRY_PRIMARY_READ` are OFF (default), the Lambdas emit nothing to
+   * these namespaces and all three alarms remain at INSUFFICIENT_DATA — no
+   * pages, no cost. Once an operator flips a flag per
+   * `docs/MIGRATION-registry.md`, the alarms provide immediate visibility.
+   *
+   * Cross-links:
+   *   - docs/MIGRATION-registry.md              (operator runbook)
+   *   - docs/reviews/cost-observability-audit.md (metrics catalog)
+   */
+  private addRegistryAlarms(props: ObservabilityStackProps): void {
+    const envName = props.envName;
+
+    // Dual-write failure metric (Phase 1, skill-deployment Lambda).
+    // Emitted on any Registry write error (CreateRegistryRecord,
+    // SubmitRegistryRecordForApproval, UpdateRegistryRecordStatus).
+    const registryWriteFailureMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/SkillPipeline',
+      metricName: 'RegistryWriteFailure',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Dual-read metrics (Phase 2, skills-api Lambda).
+    const registryReadSuccessMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Registry',
+      metricName: 'RegistryReadSuccess',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    const registryReadFallbackMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Registry',
+      metricName: 'RegistryReadFallback',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    const registryReadErrorMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Registry',
+      metricName: 'RegistryReadError',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // --- Alarm A: RegistryWriteFailure > 0 in any 5-min window ---
+    // Any dual-write failure indicates Registry adapter breakage or IAM gap
+    // and must be investigated before Phase 3 bulk migration can run.
+    const registryWriteRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}registry-write-failure`
+      : 'See docs/MIGRATION-registry.md → "Known limitations" for rollback. Check skill-deployment Lambda logs for RegistryWriteFailure reason (missing registry ID, IAM denial, SDK load failure).';
+
+    const registryWriteFailureAlarm = new cloudwatch.Alarm(this, 'RegistryWriteFailureAlarm', {
+      alarmName: `chimera-${envName}-registry-write-failure`,
+      alarmDescription: `Registry dual-write failed (Phase 1). RUNBOOK: ${registryWriteRunbook}`,
+      metric: registryWriteFailureMetric,
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    registryWriteFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+
+    // --- Alarm B: RegistryReadError > 5 for 2 consecutive 5-min periods ---
+    // Distinguishes genuine SDK/runtime errors from benign fallbacks. The
+    // 2-period requirement suppresses single transient errors (cold starts,
+    // momentary throttles) while catching sustained breakage.
+    const registryReadErrorAlarm = new cloudwatch.Alarm(this, 'RegistryReadErrorAlarm', {
+      alarmName: `chimera-${envName}-registry-read-error`,
+      alarmDescription:
+        'Registry dual-read surfaced >5 errors in 2 consecutive 5-min windows. ' +
+        'See docs/MIGRATION-registry.md for Phase 2 troubleshooting.',
+      metric: registryReadErrorMetric,
+      threshold: 5,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    registryReadErrorAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+
+    // --- Alarm C: Fallback rate > 50% for 3 consecutive 5-min periods ---
+    // Informational during Phase 2 bake-in (routes to MEDIUM). A sustained
+    // majority of reads falling back to DDB means Registry is effectively
+    // not serving traffic and indicates a rollout problem (missing tenant
+    // mapping, wrong registry ID, empty Registry).
+    //
+    // Divide-by-zero handling: `treatMissingData: NOT_BREACHING` keeps the
+    // alarm at INSUFFICIENT_DATA when both metrics are absent (flags off,
+    // Lambda idle). The math expression itself does not fire when
+    // `m_fb + m_ok == 0` because CloudWatch treats a division with a
+    // missing/zero denominator as a missing data point.
+    const registryFallbackRateExpression = new cloudwatch.MathExpression({
+      expression: '(m_fb / (m_fb + m_ok)) * 100',
+      usingMetrics: {
+        m_fb: registryReadFallbackMetric,
+        m_ok: registryReadSuccessMetric,
+      },
+      period: cdk.Duration.minutes(5),
+      label: 'Registry fallback rate (%)',
+    });
+
+    const registryFallbackRateAlarm = new cloudwatch.Alarm(this, 'RegistryFallbackRateAlarm', {
+      alarmName: `chimera-${envName}-registry-fallback-rate`,
+      alarmDescription:
+        'Registry dual-read fell back to DDB for >50% of reads across 3 consecutive ' +
+        '5-min windows. Informational during Phase 2 bake-in; escalate if sustained ' +
+        'beyond the planned cutover window. See docs/MIGRATION-registry.md.',
+      metric: registryFallbackRateExpression,
+      threshold: 50,
+      evaluationPeriods: 3,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      // Flags off => no metrics => INSUFFICIENT_DATA (not ALARM).
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    registryFallbackRateAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.mediumAlarmTopic)
+    );
+
+    // --- Dashboard panel: Registry row on platform dashboard ---
+    // Three widgets keyed to the three alarms above. Added to the existing
+    // `chimera-platform-${env}` dashboard (see task spec §2).
+    this.platformDashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown:
+          `## Registry (AgentCore) — Phase 1/2 migration\n\n` +
+          `Metrics are emitted only when the \`REGISTRY_ENABLED\` and/or ` +
+          `\`REGISTRY_PRIMARY_READ\` feature flags are ON. With flags off, ` +
+          `widgets will show "No data".\n\n` +
+          `Runbook: \`docs/MIGRATION-registry.md\` · ` +
+          `Metrics catalog: \`docs/reviews/cost-observability-audit.md\`.`,
+        width: 24,
+        height: 2,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Registry Reads: Success vs Fallback vs Error (1h)',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'Chimera/Registry',
+            metricName: 'RegistryReadSuccess',
+            statistic: 'Sum',
+            period: cdk.Duration.minutes(5),
+            label: 'Success',
+          }),
+          new cloudwatch.Metric({
+            namespace: 'Chimera/Registry',
+            metricName: 'RegistryReadFallback',
+            statistic: 'Sum',
+            period: cdk.Duration.minutes(5),
+            label: 'Fallback',
+          }),
+          new cloudwatch.Metric({
+            namespace: 'Chimera/Registry',
+            metricName: 'RegistryReadError',
+            statistic: 'Sum',
+            period: cdk.Duration.minutes(5),
+            label: 'Error',
+          }),
+        ],
+        stacked: true,
+        width: 12,
+        leftYAxis: { label: 'Events/5min', min: 0 },
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Registry Writes: Failures (24h)',
+        left: [
+          new cloudwatch.Metric({
+            namespace: 'Chimera/SkillPipeline',
+            metricName: 'RegistryWriteFailure',
+            statistic: 'Sum',
+            period: cdk.Duration.minutes(5),
+            label: 'Write failures',
+          }),
+        ],
+        width: 12,
+        leftYAxis: { label: 'Failures/5min', min: 0 },
+      }),
+      new cloudwatch.SingleValueWidget({
+        title: 'Registry Fallback Rate (%)',
+        metrics: [registryFallbackRateExpression],
+        width: 24,
+        height: 3,
+      })
+    );
   }
 }

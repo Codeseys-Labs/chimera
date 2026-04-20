@@ -134,18 +134,33 @@ export function applyApiStackSuppressions(stack: Stack): void {
 
 /**
  * Suppressions for ChatStack.
+ *
+ * @param stack  ChatStack instance
+ * @param isProd When true, the ALB access-logs suppression is NOT applied
+ *               because ChatStack conditionally enables ALB access logs to
+ *               S3 in prod (see infra/lib/chat-stack.ts). In dev the
+ *               suppression is retained to avoid cdk-nag false positives
+ *               for cost-driven access-log disablement.
+ *               (ref: docs/reviews/infra-review.md §5)
  */
-export function applyChatStackSuppressions(stack: Stack): void {
+export function applyChatStackSuppressions(stack: Stack, isProd: boolean = false): void {
   applyCommonSuppressions(stack);
 
+  if (!isProd) {
+    // Dev-only: ALB access logs are intentionally disabled to minimise cost
+    // on throwaway environments. Prod enables them in chat-stack.ts.
+    NagSuppressions.addStackSuppressions(stack, [
+      {
+        id: 'AwsSolutions-ELB2',
+        reason:
+          'Dev environment only: ALB access logs disabled for cost reduction. ' +
+          'Prod enables access logs to a dedicated S3 bucket with a 30-day ' +
+          'lifecycle rule (see infra/lib/chat-stack.ts).',
+      },
+    ]);
+  }
+
   NagSuppressions.addStackSuppressions(stack, [
-    {
-      id: 'AwsSolutions-ELB2',
-      reason:
-        'ALB access logs are not enabled for cost reduction in initial deployment. ' +
-        'ALB access logging charges $0.023/GB and generates significant volume. ' +
-        'Access logs will be enabled before production traffic.',
-    },
     {
       id: 'AwsSolutions-ECS2',
       reason:

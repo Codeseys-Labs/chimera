@@ -355,4 +355,138 @@ describe('ObservabilityStack', () => {
       });
     });
   });
+
+  // ==========================================================================
+  // Registry Observability (AgentCore Registry Phase 1/2 migration)
+  //
+  // These alarms + dashboard panel are created unconditionally so they exist
+  // before operators flip the REGISTRY_ENABLED / REGISTRY_PRIMARY_READ flags.
+  // With flags off, the metrics never fire and the alarms stay at
+  // INSUFFICIENT_DATA — validated by treatMissingData=notBreaching.
+  //
+  // See:
+  //   - docs/MIGRATION-registry.md              (operator runbook)
+  //   - docs/reviews/cost-observability-audit.md (metrics catalog)
+  // ==========================================================================
+  describe('Registry Observability (flag-gated, Phase 1/2)', () => {
+    let stack: ObservabilityStack;
+    let template: Template;
+
+    beforeEach(() => {
+      stack = new ObservabilityStack(app, 'TestObservabilityStackRegistry', {
+        envName: 'dev',
+        platformKey,
+        runbookBaseUrl: 'https://runbooks.example.com/',
+      });
+      template = Template.fromStack(stack);
+    });
+
+    it('should create RegistryWriteFailureAlarm on RegistryWriteFailure metric', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'chimera-dev-registry-write-failure',
+        Namespace: 'Chimera/SkillPipeline',
+        MetricName: 'RegistryWriteFailure',
+        Statistic: 'Sum',
+        Threshold: 0,
+        EvaluationPeriods: 1,
+        ComparisonOperator: 'GreaterThanThreshold',
+        TreatMissingData: 'notBreaching',
+      });
+    });
+
+    it('should link RegistryWriteFailureAlarm to the runbook when runbookBaseUrl is set', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'chimera-dev-registry-write-failure',
+        AlarmDescription: Match.stringLikeRegexp(
+          'https://runbooks\\.example\\.com/registry-write-failure'
+        ),
+      });
+    });
+
+    it('should create RegistryReadErrorAlarm with >5 threshold and 2 periods', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'chimera-dev-registry-read-error',
+        Namespace: 'Chimera/Registry',
+        MetricName: 'RegistryReadError',
+        Statistic: 'Sum',
+        Threshold: 5,
+        EvaluationPeriods: 2,
+        ComparisonOperator: 'GreaterThanThreshold',
+        TreatMissingData: 'notBreaching',
+      });
+    });
+
+    it('should create RegistryFallbackRateAlarm as a math expression alarm with div-by-zero guard', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'chimera-dev-registry-fallback-rate',
+        Threshold: 50,
+        EvaluationPeriods: 3,
+        ComparisonOperator: 'GreaterThanThreshold',
+        // treatMissingData: NOT_BREACHING guarantees INSUFFICIENT_DATA when
+        // both metrics are absent (flags off, Lambda idle) rather than ALARM.
+        TreatMissingData: 'notBreaching',
+        Metrics: Match.arrayWith([
+          Match.objectLike({
+            Expression: '(m_fb / (m_fb + m_ok)) * 100',
+          }),
+        ]),
+      });
+    });
+
+    it('should route RegistryWriteFailureAlarm and RegistryReadErrorAlarm to the high topic', () => {
+      // Both alarms should have AlarmActions referencing the high-priority topic.
+      const alarms = template.findResources('AWS::CloudWatch::Alarm', {
+        Properties: Match.objectLike({
+          AlarmName: Match.stringLikeRegexp(
+            'chimera-dev-registry-(write-failure|read-error)'
+          ),
+          AlarmActions: Match.anyValue(),
+        }),
+      });
+      expect(Object.keys(alarms).length).toBe(2);
+    });
+
+    it('should route RegistryFallbackRateAlarm to the medium topic (informational)', () => {
+      const alarms = template.findResources('AWS::CloudWatch::Alarm', {
+        Properties: Match.objectLike({
+          AlarmName: 'chimera-dev-registry-fallback-rate',
+          AlarmActions: Match.anyValue(),
+        }),
+      });
+      expect(Object.keys(alarms).length).toBe(1);
+    });
+
+    it('should add Registry widgets to the platform dashboard (Reads, Writes, Fallback rate)', () => {
+      const dashboards = template.findResources('AWS::CloudWatch::Dashboard', {
+        Properties: Match.objectLike({
+          DashboardName: 'chimera-platform-dev',
+        }),
+      });
+      const dashboard = Object.values(dashboards)[0] as {
+        Properties: { DashboardBody: unknown };
+      };
+      // DashboardBody is a CloudFormation token { 'Fn::Join': [..., [..., strings..., ...]] }.
+      // Flatten tokens to a single string so we can assert on widget titles.
+      const renderDashboard = (body: unknown): string => {
+        if (typeof body === 'string') return body;
+        if (Array.isArray(body)) return body.map(renderDashboard).join('');
+        if (body && typeof body === 'object') {
+          const record = body as Record<string, unknown>;
+          if ('Fn::Join' in record) {
+            const joinArgs = record['Fn::Join'] as [string, unknown[]];
+            return joinArgs[1].map(renderDashboard).join(joinArgs[0]);
+          }
+          return Object.values(record).map(renderDashboard).join('');
+        }
+        return '';
+      };
+      const rendered = renderDashboard(dashboard.Properties.DashboardBody);
+
+      expect(rendered).toContain('Registry Reads: Success vs Fallback vs Error (1h)');
+      expect(rendered).toContain('Registry Writes: Failures (24h)');
+      expect(rendered).toContain('Registry Fallback Rate (%)');
+      // The math expression for the single-value widget must appear.
+      expect(rendered).toContain('(m_fb / (m_fb + m_ok)) * 100');
+    });
+  });
 });

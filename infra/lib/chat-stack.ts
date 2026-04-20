@@ -9,6 +9,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
 export interface ChatStackProps extends cdk.StackProps {
@@ -26,6 +27,13 @@ export interface ChatStackProps extends cdk.StackProps {
   cognitoUserPoolClientId?: string;
   /** Bedrock inference profile ID for the chat gateway (default: us.anthropic.claude-sonnet-4-6-v1:0) */
   bedrockModelId?: string;
+  /**
+   * DAX cluster security group exposed by DataStack. When provided, ChatStack
+   * registers an ingress rule on port 8111 from the chat-gateway task SG so
+   * DAX access is strictly scoped to chat tasks only (ref: docs/reviews/infra-review.md §1).
+   * If omitted, DataStack falls back to its legacy broad ECS-SG rule.
+   */
+  daxSecurityGroup?: ec2.ISecurityGroup;
 }
 
 /**
@@ -54,11 +62,53 @@ export class ChatStack extends cdk.Stack {
   public readonly taskDefinition: ecs.FargateTaskDefinition;
   public readonly targetGroup: elbv2.ApplicationTargetGroup;
   public readonly distribution: cloudfront.Distribution;
+  /**
+   * Task-family-scoped security group for the chat-gateway Fargate service.
+   * Kept distinct from the shared `ecsSecurityGroup` so DataStack can narrow
+   * DAX cluster ingress to chat tasks only, rather than to every workload
+   * that shares the broader ECS SG (ref: docs/reviews/infra-review.md §1).
+   */
+  public readonly chatGatewayTaskSecurityGroup: ec2.SecurityGroup;
+  /**
+   * S3 bucket for ALB access logs (prod only, undefined in dev). Exposed so
+   * operators / Athena integrations can reference it without re-discovering
+   * the auto-generated bucket name.
+   */
+  public readonly albAccessLogsBucket?: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: ChatStackProps) {
     super(scope, id, props);
 
     const isProd = props.envName === 'prod';
+
+    // ======================================================================
+    // Chat-gateway task-scoped security group
+    // Placed before the FargateService so we can attach it as an additional
+    // SG and hand it to DataStack for DAX ingress scoping.
+    // ======================================================================
+    this.chatGatewayTaskSecurityGroup = new ec2.SecurityGroup(
+      this,
+      'ChatGatewayTaskSg',
+      {
+        vpc: props.vpc,
+        securityGroupName: `chimera-chat-gateway-task-${props.envName}`,
+        description:
+          'Chat-gateway Fargate task SG: scoped peer for DAX ingress (principle of least privilege)',
+        allowAllOutbound: true,
+      }
+    );
+
+    // If DataStack passed in its DAX SG, add the narrow 8111 ingress here so
+    // the rule lives in a single place (chat-stack), not buried inside
+    // DataStack. This is the active path once bin/chimera.ts wiring supplies
+    // `daxSecurityGroup` + `chatGatewayTaskSecurityGroup`.
+    if (props.daxSecurityGroup) {
+      props.daxSecurityGroup.addIngressRule(
+        this.chatGatewayTaskSecurityGroup,
+        ec2.Port.tcp(8111),
+        'Allow DAX (8111) from chat-gateway tasks only'
+      );
+    }
 
     // ======================================================================
     // ECS Cluster
@@ -317,6 +367,44 @@ export class ChatStack extends cdk.Stack {
       idleTimeout: cdk.Duration.seconds(300),
     });
 
+    // ALB access logs: enabled in prod only (dev retains cdk-nag suppression
+    // for cost). Logs land in a dedicated S3 bucket with a 30-day lifecycle
+    // so storage cost stays bounded while preserving a forensic window for
+    // security investigations + PCI-DSS / SOC 2 audit trail.
+    //
+    // Guarded on a concrete region because `alb.logAccessLogs(...)` throws
+    // when the stack is environment-agnostic — it needs to look up the
+    // regional ELBv2 log-delivery account. Unit-test stacks without an `env`
+    // prop hit this path, so we skip enablement there. Production always
+    // synthesises with a concrete region via bin/chimera.ts.
+    // (ref: docs/reviews/infra-review.md §5)
+    const hasConcreteRegion = !cdk.Token.isUnresolved(this.region);
+    if (isProd && hasConcreteRegion) {
+      // ALB access logs require either SSE-S3 or SSE-KMS with an AWS-managed
+      // key (CMKs are not supported by the ELB log-delivery service). We use
+      // KMS_MANAGED so the bucket satisfies EncryptionAspect's `aws:kms`
+      // requirement while remaining compatible with the delivery service.
+      const albAccessLogsBucket = new s3.Bucket(this, 'AlbAccessLogsBucket', {
+        bucketName: `chimera-alb-logs-${this.account}-${this.region}-${props.envName}`,
+        encryption: s3.BucketEncryption.KMS_MANAGED,
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        enforceSSL: true,
+        versioned: false,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+        lifecycleRules: [
+          {
+            id: 'expire-alb-access-logs-30d',
+            enabled: true,
+            expiration: cdk.Duration.days(30),
+          },
+        ],
+      });
+      // ALB ships logs via ELB service principal; CDK wires the bucket policy
+      // automatically inside logAccessLogs().
+      this.alb.logAccessLogs(albAccessLogsBucket, 'alb/chat-gateway');
+      this.albAccessLogsBucket = albAccessLogsBucket;
+    }
+
     // CloudWatch access logs for ALB
     const albLogGroup = new logs.LogGroup(this, 'AlbAccessLogs', {
       logGroupName: `/chimera/${props.envName}/alb/chat-gateway`,
@@ -392,7 +480,9 @@ export class ChatStack extends cdk.Stack {
       taskDefinition: this.taskDefinition,
       desiredCount: isProd ? 2 : 1,
       assignPublicIp: false, // Tasks run in private subnets
-      securityGroups: [props.ecsSecurityGroup],
+      // Attach both the shared ECS SG (ALB -> tasks) and the task-scoped SG
+      // (DAX peer). See `chatGatewayTaskSecurityGroup` construction above.
+      securityGroups: [props.ecsSecurityGroup, this.chatGatewayTaskSecurityGroup],
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
       },
