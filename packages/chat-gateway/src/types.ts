@@ -23,7 +23,9 @@ export interface ChatMessage {
  */
 export const ChatMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
+  // 32 KB cap: plenty for any legitimate chat turn; rejects 10MB DoS
+  // payloads at Zod validation before any streaming pipe is opened.
+  content: z.string().max(32768),
 });
 
 /**
