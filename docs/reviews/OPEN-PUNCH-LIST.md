@@ -121,7 +121,7 @@ All metrics below are *defined in dashboards* but *not emitted* by any code path
 | # | Metric | Namespace | Dimensions | Emitter |
 |---|--------|-----------|------------|---------|
 | 1 | `tier_violation_count` | Chimera/Agent | tenant_id, tier, model_requested | model-router.ts |
-| 2 | `loop_iterations` | Chimera/Agent | tenant_id, session_id | chimera_agent.py |
+| 2 | `loop_iterations` | Chimera/Agent | tenant_id, session_id | chimera_agent.py ⚠️ emits ceiling (20) until Strands exposes iteration_count — do NOT wire alarms yet (see `TODO(rabbithole-02)`) |
 | 3 | `tool:invocation_duration_ms` | Chimera/Agent | tenant_id, tier, tool_name, status | gateway_proxy.py |
 | 4 | `tool:success_rate_percent` | Chimera/Agent | tenant_id, tier, tool_name | gateway_proxy.py |
 | 5 | `tenant:hourly_cost_usd` | Chimera/Billing | tenant_id, tier, model_id | budget-monitor.ts |

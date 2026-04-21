@@ -1,0 +1,18 @@
+title = "Chimera gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "CI mock credentials for CDK unit tests — literal string 'testing', not a real key"
+paths = ['''\.github/workflows/ci\.yml''']
+regexes = ['''AWS_ACCESS_KEY_ID:\s*testing''', '''AWS_SECRET_ACCESS_KEY:\s*testing''']
+
+[[allowlists]]
+description = "Test fixtures and docs intentionally containing key-shaped strings"
+paths = [
+  '''.*test.*''',
+  '''.*tests/.*''',
+  '''.*__snapshots__/.*''',
+  '''docs/.*\.md''',
+]
