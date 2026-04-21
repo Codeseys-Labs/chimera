@@ -98,7 +98,12 @@ jobs:
           gitleaks version
 
       - name: Gitleaks secret scan
-        run: gitleaks detect --source=. --redact --verbose --no-banner
+        # --no-git scans the working tree only (not git history) — historical
+        # commits carry test-fixture "secrets" that are allowlisted in the
+        # current .gitleaks.toml but predate the allowlist on disk.
+        # --config is explicit so a misconfigured checkout can't fall back to
+        # default rules and false-positive test fixtures.
+        run: gitleaks detect --source=. --config=.gitleaks.toml --no-git --redact --verbose --no-banner
 
   security-summary:
     name: Security Summary
