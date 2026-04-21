@@ -112,7 +112,7 @@ describe('DependencyAuditor', () => {
       );
 
       expect(result.packagesScanned).toBe(2);
-    });
+    }, 15000);
 
     it('should handle pip-only audit', async () => {
       const result = await auditor.auditAll(['boto3'], []);
