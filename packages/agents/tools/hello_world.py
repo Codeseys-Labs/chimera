@@ -9,8 +9,11 @@ This is a minimal tool to validate:
 """
 from strands.tools import tool
 
+from .gateway_instrumentation import instrument_tool
+
 
 @tool
+@instrument_tool("hello_world_tool")
 def hello_world_tool(name: str = "World") -> str:
     """
     Say hello to someone.

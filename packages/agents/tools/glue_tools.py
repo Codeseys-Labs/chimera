@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, Dict
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -70,7 +71,7 @@ def list_glue_databases(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing Glue databases: {str(e)}"
 
 
@@ -153,7 +154,7 @@ def list_glue_tables(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing Glue tables: {str(e)}"
 
 
@@ -249,7 +250,7 @@ Owner: {table.get('Owner', 'N/A')}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting table schema: {str(e)}"
 
 
@@ -311,7 +312,7 @@ Use get_glue_job_status() to check progress."""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting Glue job: {str(e)}"
 
 
@@ -379,7 +380,7 @@ State: {job_run.get('JobRunState', 'N/A')}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting job status: {str(e)}"
 
 
@@ -443,5 +444,5 @@ Database: {crawler.get('DatabaseName', 'N/A')}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting crawler status: {str(e)}"

@@ -6,6 +6,7 @@ All operations respect IAM policies enforced at the tenant level.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, List, Dict
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -94,7 +95,7 @@ def list_redshift_clusters(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing Redshift clusters: {str(e)}"
 
 
@@ -178,7 +179,7 @@ Number of Nodes: {cluster['NumberOfNodes']}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating Redshift cluster: {str(e)}"
 
 
@@ -236,7 +237,7 @@ Status: {status}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting Redshift cluster: {str(e)}"
 
 
@@ -279,7 +280,7 @@ Use resume_redshift_cluster() to resume operations."""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error pausing Redshift cluster: {str(e)}"
 
 
@@ -321,7 +322,7 @@ Cluster will be available for queries once status is 'available'."""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error resuming Redshift cluster: {str(e)}"
 
 
@@ -396,5 +397,5 @@ Modifications applied:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error modifying Redshift cluster: {str(e)}"

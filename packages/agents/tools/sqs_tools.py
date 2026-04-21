@@ -7,6 +7,7 @@ and background task coordination.
 import boto3
 import json
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -64,7 +65,7 @@ Type: {queue_type}
 Delay: {delay_seconds}s
 Region: {region}"""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating SQS queue '{queue_name}': {str(e)}"
 
 
@@ -113,7 +114,7 @@ Message ID: {response['MessageId']}
 MD5: {response['MD5OfMessageBody']}
 Sequence: {response.get('SequenceNumber', 'N/A')}"""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error sending message to queue: {str(e)}"
 
 
@@ -174,7 +175,7 @@ def send_sqs_message_batch(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error sending batch messages: {str(e)}"
 
 
@@ -225,7 +226,7 @@ def receive_sqs_messages(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error receiving messages: {str(e)}"
 
 
@@ -260,7 +261,7 @@ def delete_sqs_message(
 
         return "Message deleted successfully from queue."
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting message: {str(e)}"
 
 
@@ -290,7 +291,7 @@ def delete_sqs_queue(
 
         return f"Queue deleted: {queue_url}"
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting queue: {str(e)}"
 
 
@@ -335,7 +336,7 @@ Message Retention: {attrs.get('MessageRetentionPeriod', 'N/A')}s"""
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting queue attributes: {str(e)}"
 
 
@@ -380,5 +381,5 @@ def list_sqs_queues(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing queues: {str(e)}"

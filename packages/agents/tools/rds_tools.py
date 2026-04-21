@@ -6,6 +6,7 @@ monitoring, and managing relational databases.
 """
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import List, Dict, Any, Optional
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -76,7 +77,7 @@ def describe_rds_db_instances(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error describing RDS instances: {str(e)}"
 
 
@@ -138,7 +139,7 @@ Region: {region}
 
 Note: Instance creation takes 10-20 minutes. Use describe_rds_db_instances to check status."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating RDS instance: {str(e)}"
 
 
@@ -187,7 +188,7 @@ Identifier: {db_instance_identifier}
 Status: {status}
 Final Snapshot: {'Created' if not skip_final_snapshot else 'Skipped'}"""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting RDS instance: {str(e)}"
 
 
@@ -226,7 +227,7 @@ Status: {status}
 
 Note: Startup takes 5-10 minutes."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting RDS instance: {str(e)}"
 
 
@@ -265,7 +266,7 @@ Status: {status}
 
 Note: Stopped instances automatically restart after 7 days."""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error stopping RDS instance: {str(e)}"
 
 
@@ -326,5 +327,5 @@ Changes: {', '.join(changes)}
 Status: {status}
 Timing: Applied {timing}"""
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error modifying RDS instance: {str(e)}"

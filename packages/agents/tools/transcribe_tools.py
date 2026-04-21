@@ -13,6 +13,7 @@ Operations:
 import boto3
 import json
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, List
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -92,7 +93,7 @@ def transcribe_start_job(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -147,7 +148,7 @@ def transcribe_get_job(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -218,7 +219,7 @@ def transcribe_list_jobs(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -261,7 +262,7 @@ def transcribe_delete_job(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),

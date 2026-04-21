@@ -7,6 +7,7 @@ All operations respect IAM policies enforced at the tenant level.
 import boto3
 import json
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -57,7 +58,7 @@ def list_stepfunctions_state_machines(region: str = "us-east-1") -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing Step Functions state machines in {region}: {str(e)}"
 
 
@@ -115,7 +116,7 @@ Created: {creation_date}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating state machine {name}: {str(e)}"
 
 
@@ -168,7 +169,7 @@ Definition:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error describing state machine {state_machine_arn}: {str(e)}"
 
 
@@ -221,7 +222,7 @@ Start Time: {start_date}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error starting execution for {state_machine_arn}: {str(e)}"
 
 
@@ -286,7 +287,7 @@ Output:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error describing execution {execution_arn}: {str(e)}"
 
 
@@ -352,7 +353,7 @@ def list_stepfunctions_executions(
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing executions for {state_machine_arn}: {str(e)}"
 
 
@@ -409,7 +410,7 @@ Stop Time: {stop_date}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error stopping execution {execution_arn}: {str(e)}"
 
 
@@ -467,7 +468,7 @@ Update Time: {update_date}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error updating state machine {state_machine_arn}: {str(e)}"
 
 
@@ -493,5 +494,5 @@ def delete_stepfunctions_state_machine(state_machine_arn: str, region: str = "us
 
         return f"Successfully deleted state machine: {state_machine_arn}"
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting state machine {state_machine_arn}: {str(e)}"

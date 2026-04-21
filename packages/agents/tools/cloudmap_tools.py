@@ -16,6 +16,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
+from .gateway_instrumentation import instrument_tool
 from .tenant_context import TenantContextError, require_tenant_id
 
 _BOTO_CONFIG = Config(
@@ -26,6 +27,7 @@ _BOTO_CONFIG = Config(
 
 
 @tool
+@instrument_tool("discover_infrastructure")
 def discover_infrastructure(
     env_name: Optional[str] = None,
     resource_type: Optional[str] = None,
@@ -111,6 +113,7 @@ def discover_infrastructure(
 
 
 @tool
+@instrument_tool("get_service_instances")
 def get_service_instances(
     service_name: str,
     env_name: Optional[str] = None,
@@ -166,6 +169,7 @@ def get_service_instances(
 
 
 @tool
+@instrument_tool("get_namespace_summary")
 def get_namespace_summary(env_name: Optional[str] = None) -> str:
     """
     Get a summary of the Chimera Cloud Map namespace with service and instance counts.

@@ -8,6 +8,7 @@ import boto3
 import json
 import base64
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -59,7 +60,7 @@ def list_lambda_functions(region: str = "us-east-1") -> str:
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error listing Lambda functions in {region}: {str(e)}"
 
 
@@ -144,7 +145,7 @@ Tags: {', '.join([f'{k}={v}' for k, v in tags.items()]) if tags else 'None'}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error getting function details for {function_name}: {str(e)}"
 
 
@@ -201,8 +202,8 @@ Executed Version: {executed_version}
             try:
                 payload_data = json.loads(payload_bytes.decode('utf-8'))
                 result += f"\nResponse Payload:\n{json.dumps(payload_data, indent=2)}\n"
-            except:
-                result += f"\nResponse Payload (raw):\n{payload_bytes.decode('utf-8')}\n"
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                result += f"\nResponse Payload (raw):\n{payload_bytes.decode('utf-8', errors='replace')}\n"
 
         # Include function error if present
         if 'FunctionError' in response:
@@ -217,7 +218,7 @@ Executed Version: {executed_version}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error invoking Lambda function {function_name}: {str(e)}"
 
 
@@ -307,7 +308,7 @@ Code Size: {size_str}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error creating Lambda function {function_name}: {str(e)}"
 
 
@@ -365,7 +366,7 @@ Last Modified: {last_modified}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error updating Lambda function code for {function_name}: {str(e)}"
 
 
@@ -432,7 +433,7 @@ Last Modified: {last_modified}
 
         return result
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error updating Lambda function configuration for {function_name}: {str(e)}"
 
 
@@ -458,5 +459,5 @@ def delete_lambda_function(function_name: str, region: str = "us-east-1") -> str
 
         return f"Successfully deleted Lambda function: {function_name}"
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Error deleting Lambda function {function_name}: {str(e)}"

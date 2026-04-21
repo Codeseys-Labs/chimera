@@ -15,6 +15,7 @@ Operations:
 import boto3
 import json
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, List, Dict, Any
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -79,7 +80,7 @@ def sagemaker_create_model(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -142,7 +143,7 @@ def sagemaker_create_endpoint_config(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -189,7 +190,7 @@ def sagemaker_create_endpoint(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -248,7 +249,7 @@ def sagemaker_describe_endpoint(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -291,7 +292,7 @@ def sagemaker_delete_endpoint(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -361,7 +362,7 @@ def sagemaker_list_endpoints(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),

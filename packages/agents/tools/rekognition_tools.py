@@ -15,6 +15,7 @@ import boto3
 import json
 import base64
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional, Dict, Any, List
 from strands.tools import tool
 from .tenant_context import TenantContextError, require_tenant_id
@@ -110,7 +111,7 @@ def rekognition_detect_labels(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -190,7 +191,7 @@ def rekognition_detect_faces(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -252,7 +253,7 @@ def rekognition_detect_text(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -316,7 +317,7 @@ def rekognition_detect_moderation_labels(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
@@ -400,7 +401,7 @@ def rekognition_compare_faces(
             }
         })
 
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return json.dumps({
             "success": False,
             "error": str(e),
