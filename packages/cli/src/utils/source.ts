@@ -127,14 +127,25 @@ function downloadFile(url: string, destPath: string): Promise<void> {
  * Paths are quoted to prevent any shell interpretation issues.
  */
 function extractTarball(tarballPath: string, destDir: string): void {
-  // Create destination directory
   fs.mkdirSync(destDir, { recursive: true });
 
-  // Extract tarball (strips first component - GitHub adds <owner>-<repo>-<sha> prefix)
-  // Both paths are application-generated (not user input), wrapped in quotes for safety
-  execSync(`tar -xzf "${tarballPath}" -C "${destDir}" --strip-components=1`, {
-    stdio: 'inherit',
+  // GitHub's auto-generated source archives wrap contents in <owner>-<repo>-<sha>/
+  // so --strip-components=1 is correct for them. Our custom chimera-agent-*.tar.gz
+  // is built from repo root with no wrapper (packages/, infra/, scripts/ at top
+  // level), so stripping would delete those directories. Detect by peeking at the
+  // first tarball entry: if it's a single top-level dir (no slash before its
+  // trailing /), the archive is wrapped.
+  const listing = execFileSync('tar', ['-tzf', tarballPath], {
+    encoding: 'utf-8',
   });
+  const firstEntry = listing.split('\n')[0]?.trim() ?? '';
+  const isWrapped =
+    firstEntry.endsWith('/') &&
+    firstEntry.replace(/\/$/, '').indexOf('/') === -1;
+
+  const tarArgs = ['-xzf', tarballPath, '-C', destDir];
+  if (isWrapped) tarArgs.push('--strip-components=1');
+  execFileSync('tar', tarArgs, { stdio: 'inherit' });
 }
 
 /**
