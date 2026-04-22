@@ -110,7 +110,7 @@ Risk #6: default is 3-AZ HA NAT. Edit `infra/lib/network-stack.ts` before `chime
 | 3 | `setup` silent-fails if Security not live | MEDIUM | Re-run `chimera setup` after Security stack done |
 | 4 | CodeCommit branch must match pipeline context | MEDIUM | Default `main`; don't override |
 | 5 | `which cdk` returning Bun binary breaks synth | HIGH | Use `npx cdk` only |
-| 6 | Default 3-AZ NAT = $320/mo surprise | MEDIUM | Edit `network-stack.ts` for dev |
+| 6 | ~~Default 3-AZ NAT = $320/mo surprise~~ **OUTDATED (Wave-13)** | — | `network-stack.ts:33` now uses `isProd ? 2 : 1` — dev gets 1 NAT (~$120/mo). No action needed. |
 | 7 | ECS Fargate first image pull 3–5 min | LOW | Expected; monitor CloudFormation events |
 
 ## What's deliberately NOT in v0.6.0
