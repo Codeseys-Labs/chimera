@@ -4,6 +4,7 @@ import importlib
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 import tools.evolution_tools as evo
 from tools.evolution_tools import (
@@ -74,7 +75,10 @@ class TestCheckKillSwitch:
 
     def test_fails_open_when_ssm_raises(self, mocker):
         mock_ssm = MagicMock()
-        mock_ssm.get_parameter.side_effect = Exception("ParameterNotFound")
+        mock_ssm.get_parameter.side_effect = ClientError(
+            {"Error": {"Code": "ParameterNotFound", "Message": "ParameterNotFound"}},
+            "GetParameter",
+        )
         mocker.patch("tools.evolution_tools.boto3.client", return_value=mock_ssm)
 
         result = _check_kill_switch()
@@ -137,7 +141,10 @@ class TestValidateEvolutionPolicy:
     def test_fails_open_when_avp_raises(self, mocker, monkeypatch):
         monkeypatch.setenv("CEDAR_POLICY_STORE_ID", "ps-abc123")
         mock_avp = MagicMock()
-        mock_avp.is_authorized.side_effect = Exception("AVP unavailable")
+        mock_avp.is_authorized.side_effect = ClientError(
+            {"Error": {"Code": "ServiceUnavailable", "Message": "AVP unavailable"}},
+            "IsAuthorized",
+        )
         mocker.patch("tools.evolution_tools.boto3.client", return_value=mock_avp)
 
         result = _validate_evolution_policy("tenant-1", "media", 10.0, "us-east-1")
@@ -181,7 +188,10 @@ class TestCheckEvolutionRateLimit:
 
     def test_fails_open_when_ddb_raises(self, mocker):
         mock_ddb = MagicMock()
-        mock_ddb.Table.side_effect = Exception("DynamoDB unavailable")
+        mock_ddb.Table.side_effect = ClientError(
+            {"Error": {"Code": "ServiceUnavailable", "Message": "DynamoDB unavailable"}},
+            "DescribeTable",
+        )
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
 
         result = _check_evolution_rate_limit("tenant-1")
@@ -266,7 +276,10 @@ class TestCommitToCodecommit:
 
     def test_returns_error_on_exception(self, mocker):
         mock_cc = MagicMock()
-        mock_cc.get_branch.side_effect = Exception("Repository not found")
+        mock_cc.get_branch.side_effect = ClientError(
+            {"Error": {"Code": "RepositoryDoesNotExistException", "Message": "Repository not found"}},
+            "GetBranch",
+        )
         mocker.patch("tools.evolution_tools.boto3.client", return_value=mock_cc)
 
         result = _commit_to_codecommit("bad-repo", "path", "code", "msg", "us-east-1")
@@ -500,7 +513,10 @@ class TestCheckEvolutionStatus:
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
 
         mock_cc = MagicMock()
-        mock_cc.get_pipeline_state.side_effect = Exception("Pipeline not found")
+        mock_cc.get_pipeline_state.side_effect = ClientError(
+            {"Error": {"Code": "PipelineNotFoundException", "Message": "Pipeline not found"}},
+            "GetPipelineState",
+        )
         mocker.patch("tools.evolution_tools.boto3.client", return_value=mock_cc)
 
         result = check_evolution_status(evolution_id="evo-abc")
@@ -555,7 +571,10 @@ class TestRegisterCapability:
 
     def test_ddb_error_reported(self, mocker):
         mock_table = MagicMock()
-        mock_table.put_item.side_effect = Exception("DynamoDB unavailable")
+        mock_table.put_item.side_effect = ClientError(
+            {"Error": {"Code": "ServiceUnavailable", "Message": "DynamoDB unavailable"}},
+            "PutItem",
+        )
         mock_ddb = MagicMock()
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
@@ -647,7 +666,10 @@ class TestListEvolutionHistory:
 
     def test_reports_error_on_ddb_failure(self, mocker):
         mock_table = MagicMock()
-        mock_table.query.side_effect = Exception("DynamoDB unavailable")
+        mock_table.query.side_effect = ClientError(
+            {"Error": {"Code": "ServiceUnavailable", "Message": "DynamoDB unavailable"}},
+            "Query",
+        )
         mock_ddb = MagicMock()
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)

@@ -33,6 +33,7 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
 
 from .tenant_context import TenantContextError, require_tenant_id
@@ -343,7 +344,7 @@ def wait_for_evolution_deployment(
                     f"The pipeline was manually stopped. Re-trigger if needed."
                 )
 
-        except Exception as e:
+        except (ClientError, BotoCoreError) as e:
             consecutive_errors += 1
             logger.warning(
                 f"Error polling evolution status "
@@ -428,7 +429,7 @@ def register_capability(
                 "status": "ACTIVE",
             }
         )
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Failed to register capability: {str(e)}"
 
     # Mirror to evolution audit table for traceability
@@ -451,7 +452,7 @@ def register_capability(
                 ),
             }
         )
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         logger.warning(
             "Failed to mirror capability registration to evolution table: %s", e
         )
@@ -505,7 +506,7 @@ def list_evolution_history(
             ScanIndexForward=False,
             Limit=limit,
         )
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         return f"Failed to query evolution history: {str(e)}"
 
     items = response.get("Items", [])
@@ -546,7 +547,7 @@ def _check_kill_switch(region: str = "us-east-1") -> dict:
         )
         enabled = resp["Parameter"]["Value"].lower() == "true"
         return {"enabled": enabled, "reason": "" if enabled else "Kill switch is off"}
-    except Exception as exc:
+    except (ClientError, BotoCoreError) as exc:
         logger.warning(
             "Kill switch SSM param not found, defaulting to enabled: %s", exc
         )
@@ -595,7 +596,7 @@ def _validate_evolution_policy(
         )
         return {"allowed": allowed, "reason": reason}
 
-    except Exception as exc:
+    except (ClientError, BotoCoreError) as exc:
         logger.warning("Cedar policy check unavailable, defaulting to allowed: %s", exc)
         return {"allowed": True, "reason": ""}
 
@@ -650,7 +651,7 @@ def _check_evolution_rate_limit(tenant_id: str) -> dict:
         )
         return {"allowed": True, "reason": ""}
 
-    except Exception as exc:
+    except (ClientError, BotoCoreError) as exc:
         logger.warning("Rate limit check failed, defaulting to allowed: %s", exc)
         return {"allowed": True, "reason": ""}
 
@@ -727,7 +728,7 @@ def _commit_to_codecommit(
         )
         return {"commit_id": commit_resp["commitId"]}
 
-    except Exception as exc:
+    except (ClientError, BotoCoreError) as exc:
         return {"error": str(exc)}
 
 
@@ -755,7 +756,7 @@ def _format_pipeline_status(pipeline_name: str, region: str) -> str:
         lines.insert(1, f"Overall Status: {overall}")
         return "\n".join(lines)
 
-    except Exception as exc:
+    except (ClientError, BotoCoreError) as exc:
         return f"\nPipeline status unavailable: {exc}"
 
 
@@ -797,5 +798,5 @@ def _record_evolution_request(
                 ),
             }
         )
-    except Exception as exc:
+    except (ClientError, BotoCoreError) as exc:
         logger.error("Failed to record evolution request %s: %s", evolution_id, exc)
