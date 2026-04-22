@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.6.1 (2026-04-21)
+
+### Added
+
+- EMF `tool_invocation_duration_ms` metric across 10 narrow tool files (observability)
+- Two CRITICAL observability metrics + Registry alarm wiring; bare-except narrowing batch
+- Wave-10 review artifacts and operator-facing docs; Wave-12 retrospective
+
+### Fixed
+
+- Security Scan pipeline green for the first time since 2026-04-08: CodeQL switched to buildless, gitleaks OSS binary path, gitleaks bumped 8.21.2 → 8.30.1 to match validated config, working-tree scan + exhaustive allowlist
+- CI Python tests now use `uv` + `pyproject.toml` (was pip with missing `requirements.txt`)
+- DependencyAuditor pip+npm test timeout bumped to 15s (flake fix)
+- Three P0 README gaps flagged in `wave11-readme-audit`
+
+### Security
+
+- gitleaks allowlist tuned for CI mock credentials; `loop_iterations` caveat documented
+
+### Refactored
+
+- Narrowed `except Exception` to `(ClientError, BotoCoreError)` across `evolution_tools.py` (10 sites), completing the Python-tool sweep started in commit `cd76efc`. 7 test mocks updated to `ClientError` stubs.
+
+### Documentation
+
+- Wave-13 deploy-risk sweep — risk #6 (3-AZ NAT default) marked OUTDATED; dev deploys use 1 NAT (~$120/mo, not ~$320/mo)
+
+## [0.6.0] - 2026-04-20
+
 ### Added
 
 - **ADR-033** — Tenant context injection for Python tools (`ContextVar` + `require_tenant_id()` + `ensure_tenant_filter()`)
