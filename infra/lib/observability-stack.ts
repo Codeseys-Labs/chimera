@@ -621,7 +621,13 @@ exports.handler = async () => {
     ];
 
     const pitrTablesProvided = pitrTables.some(({ table }) => table !== undefined);
-    if (pitrTablesProvided) {
+    // Requires AWS Config recorder + delivery channel in the target account.
+    // New accounts have neither, so gate the rule behind an opt-in context flag.
+    // Enable via: npx cdk deploy -c enableConfigRules=true (or cdk.json).
+    const enableConfigRules =
+      this.node.tryGetContext('enableConfigRules') === true ||
+      this.node.tryGetContext('enableConfigRules') === 'true';
+    if (pitrTablesProvided && enableConfigRules) {
       const pitrRunbook = props.runbookBaseUrl
         ? `${props.runbookBaseUrl}dynamodb-pitr-disabled`
         : 'Re-enable PITR on the offending DynamoDB table immediately. Investigate how PITR was disabled (CloudTrail: UpdateContinuousBackups) and restore from last PITR snapshot if data was modified while unprotected.';
