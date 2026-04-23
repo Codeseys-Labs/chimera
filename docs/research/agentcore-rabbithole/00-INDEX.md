@@ -117,4 +117,4 @@ Beyond the prior review memo:
 - Decision: `docs/architecture/decisions/ADR-034-agentcore-registry-adoption.md`
 - Migration: `docs/reviews/wave4-registry-migration-delta.md`
 - Spike: `docs/designs/agentcore-registry-spike.md`
-- Architecture coherence: `docs/reviews/wave4-architecture-coherence.md`
+- Architecture coherence: `docs/reviews/archive/wave4-architecture-coherence.md`

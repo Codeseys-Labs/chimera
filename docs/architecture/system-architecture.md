@@ -16,7 +16,7 @@ Comprehensive architecture diagrams for the AWS Chimera multi-tenant agent platf
 
 The default synthesis produces **14** CloudFormation stacks under the `Chimera-{env}` prefix. A 15th stack — `Registry` — is context-gated and only synthesized when `npx cdk synth -c deployRegistry=true` is passed (ADR-034 Phase 0/1 scaffolding). Arrows represent explicit `addDependency()` edges.
 
-<!-- TODO(wave7+): this diagram shows 13 nodes but the current stack set is 14 + gated Registry + Frontend + Discovery consolidation. Full rework tracked in docs/reviews/wave7-doc-drift-audit.md §system-architecture.md — deeper restructure still pending. -->
+<!-- TODO(wave7+): this diagram shows 13 nodes but the current stack set is 14 + gated Registry + Frontend + Discovery consolidation. Full rework tracked in docs/reviews/archive/wave7-doc-drift-audit.md §system-architecture.md — deeper restructure still pending. -->
 
 ```mermaid
 flowchart TD
