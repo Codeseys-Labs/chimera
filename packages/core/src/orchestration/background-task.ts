@@ -201,6 +201,13 @@ export class BackgroundTaskManager {
   /**
    * Cancel background task (best effort)
    *
+   * NOT IMPLEMENTED — the SQS removal + termination-signal halves are
+   * skeletons. The previous implementation only mutated local state
+   * (flipping status to `failed`) while the backing SQS message and any
+   * running agent were left untouched. Silently marking a task
+   * "cancelled" when the work is still running is a correctness bug.
+   * See Wave-14 audit finding M2.
+   *
    * @param taskId - Background task ID
    */
   async cancelTask(taskId: string): Promise<void> {
@@ -213,17 +220,9 @@ export class BackgroundTaskManager {
       throw new Error(`Cannot cancel ${task.status} task`);
     }
 
-    // TODO: Remove from SQS queue if still queued
-    // TODO: Send termination signal if running
-
-    task.status = 'failed';
-    task.completedAt = new Date().toISOString();
-    task.error = {
-      code: 'CANCELLED',
-      message: 'Task cancelled by user'
-    };
-
-    console.log(`[BackgroundTask] Cancelled: ${taskId}`);
+    throw new Error(
+      'not implemented: BackgroundTaskManager.cancelTask — SQS removal and termination signal are skeletons (Wave-14 audit M2)'
+    );
   }
 }
 
