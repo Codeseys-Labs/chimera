@@ -14,6 +14,7 @@ import os
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
 
@@ -21,10 +22,16 @@ from .tenant_context import TenantContextError, ensure_tenant_filter, require_te
 
 logger = logging.getLogger(__name__)
 
+_BOTO_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=30,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
+
 
 def _get_ddb_client():
     region = os.environ.get("AWS_REGION", "us-west-2")
-    return boto3.resource("dynamodb", region_name=region)
+    return boto3.resource("dynamodb", region_name=region, config=_BOTO_CONFIG)
 
 
 @tool

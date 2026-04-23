@@ -214,7 +214,7 @@ def check_evolution_status(
     if not pipeline_name:
         pipeline_name = f"chimera-deploy-{env_name}"
 
-    dynamodb = boto3.resource("dynamodb", region_name=region)
+    dynamodb = boto3.resource("dynamodb", region_name=region, config=_BOTO_CONFIG)
     table = dynamodb.Table(
         os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
     )
@@ -274,7 +274,7 @@ def wait_for_evolution_deployment(
     import time
 
     env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
-    dynamodb = boto3.resource("dynamodb", region_name=region)
+    dynamodb = boto3.resource("dynamodb", region_name=region, config=_BOTO_CONFIG)
     table = dynamodb.Table(
         os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
     )
@@ -409,7 +409,7 @@ def register_capability(
 
     env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
     registered_at = datetime.now(timezone.utc).isoformat()
-    dynamodb = boto3.resource("dynamodb", region_name=region)
+    dynamodb = boto3.resource("dynamodb", region_name=region, config=_BOTO_CONFIG)
     skills_table = dynamodb.Table(
         os.environ.get("SKILLS_TABLE", f"chimera-skills-{env_name}")
     )
@@ -506,7 +506,7 @@ def list_evolution_history(
 
     limit = min(max(limit, 1), 50)
     env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
-    dynamodb = boto3.resource("dynamodb", region_name=region)
+    dynamodb = boto3.resource("dynamodb", region_name=region, config=_BOTO_CONFIG)
     table = dynamodb.Table(
         os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
     )
@@ -636,7 +636,7 @@ def _check_evolution_rate_limit(tenant_id: str) -> dict:
     legitimate self-evolution on transient infra issues.
     """
     env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
-    dynamodb = boto3.resource("dynamodb")
+    dynamodb = boto3.resource("dynamodb", config=_BOTO_CONFIG)
     table = dynamodb.Table(
         os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
     )
@@ -815,7 +815,7 @@ def _record_evolution_request(
 ) -> None:
     """Record evolution request in DynamoDB for audit and status tracking."""
     try:
-        dynamodb = boto3.resource("dynamodb")
+        dynamodb = boto3.resource("dynamodb", config=_BOTO_CONFIG)
         env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
         table = dynamodb.Table(
             os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
