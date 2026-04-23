@@ -31,12 +31,12 @@ source of truth. Use this to file seeds issues.
 
 ## Quick stats
 
-**21 open items** across the categories below (6 closed in Wave-15d hardening pass):
+**19 open items** across the categories below (8 closed in Wave-15):
 
 | Category | Count |
 |----------|-------|
 | spike-blocked | 1 |
-| infra-refactor | 5 |
+| infra-refactor | 3 |
 | python-hardening | 0 |
 | typescript-hardening | 2 |
 | docs | 0 |
@@ -68,15 +68,17 @@ No severity conflicts across review docs; classifications consistent after dedup
 
 ## By category
 
-### infra-refactor (5)
+### infra-refactor (3)
 
 | # | Item | Effort | Why it matters |
 |---|------|--------|---------------|
 | 1 | DAX SG narrowing to chat-gateway task SG (requires NetworkStack refactor) | 0.5-1d | Closes DAX blast radius (wave4 flagged; blocked by circular dep) |
-| 2 | NAT Gateway consolidation + more VPC endpoints | 2-3d | $40-50/mo + data-processing savings |
-| 3 | CloudWatch log retention harmonization + S3 archive | 1d | $80-120/mo; fixes chat-stack (6mo) vs evolution-stack (1mo) drift |
-| 4 | S3 Intelligent-Tiering on 3 buckets | 0.5d | $40-80/mo |
-| 5 | DDB provisioned vs on-demand rightsizing (rate-limits first) | 1-2d | $100-200/mo |
+| 2 | CloudWatch log retention harmonization + S3 archive | 1d | $80-120/mo; fixes chat-stack (6mo) vs evolution-stack (1mo) drift |
+| 3 | DDB provisioned vs on-demand rightsizing (rate-limits first) | 1-2d | $100-200/mo — needs 4+ weeks prod traffic metrics first |
+
+Resolved in Wave-15c + Wave-15e verification:
+- ~~NAT Gateway consolidation + more VPC endpoints~~ — 6 interface endpoints (states/events/sqs/sns/sts/kms) added to network-stack.ts (commit b3cabec)
+- ~~S3 Intelligent-Tiering on 3 buckets~~ — enabled on skills/artifacts/evolution-artifacts/inbound-email via 30-day lifecycle rule (commit b3cabec)
 
 ### python-hardening (0)
 
