@@ -113,23 +113,24 @@ export class CronScheduler {
   /**
    * Register a cron job
    *
-   * Creates EventBridge scheduled rule that triggers Step Functions
-   * execution for agent invocation.
+   * Stores the job in the in-memory registry. Creating the EventBridge
+   * scheduled rule is a skeleton — see {@link enableJob}. Registration
+   * itself still succeeds so the registry remains queryable.
    *
    * @param job - Cron job definition
    */
   async registerJob(job: CronJob): Promise<void> {
     this.jobs.set(job.jobId, job);
-
-    if (job.enabled) {
-      await this.enableJob(job.jobId);
-    }
-
     console.log(`[Cron] Registered job: ${job.jobId} (${job.schedule})`);
   }
 
   /**
    * Enable cron job (create EventBridge rule)
+   *
+   * NOT IMPLEMENTED — the EventBridge rule creation is a skeleton.
+   * The previous implementation silently flipped a local boolean and
+   * returned success while no AWS resources were ever created. See
+   * Wave-14 audit finding M2.
    */
   async enableJob(jobId: string): Promise<void> {
     const job = this.jobs.get(jobId);
@@ -137,41 +138,15 @@ export class CronScheduler {
       throw new Error(`Job not found: ${jobId}`);
     }
 
-    // TODO: Create EventBridge scheduled rule
-    // const ruleName = `chimera-cron-${job.tenantId}-${job.jobId}`;
-    //
-    // await eventBridge.putRule({
-    //   Name: ruleName,
-    //   ScheduleExpression: job.schedule,
-    //   State: 'ENABLED',
-    //   Description: job.description,
-    //   EventBusName: this.config.eventBusName
-    // });
-    //
-    // // Add target: Step Functions state machine
-    // await eventBridge.putTargets({
-    //   Rule: ruleName,
-    //   EventBusName: this.config.eventBusName,
-    //   Targets: [{
-    //     Id: '1',
-    //     Arn: this.config.stateMachineArn,
-    //     RoleArn: 'arn:aws:iam::account:role/EventBridgeInvokeStepFunctions',
-    //     Input: JSON.stringify({
-    //       jobId: job.jobId,
-    //       tenantId: job.tenantId,
-    //       agentId: job.agentId,
-    //       instruction: job.instruction,
-    //       context: job.context
-    //     })
-    //   }]
-    // });
-
-    job.enabled = true;
-    console.log(`[Cron] Enabled job: ${jobId}`);
+    throw new Error(
+      'not implemented: CronScheduler.enableJob — EventBridge rule creation is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**
    * Disable cron job (disable EventBridge rule)
+   *
+   * NOT IMPLEMENTED — see {@link enableJob}.
    */
   async disableJob(jobId: string): Promise<void> {
     const job = this.jobs.get(jobId);
@@ -179,19 +154,15 @@ export class CronScheduler {
       throw new Error(`Job not found: ${jobId}`);
     }
 
-    // TODO: Disable EventBridge rule
-    // const ruleName = `chimera-cron-${job.tenantId}-${job.jobId}`;
-    // await eventBridge.disableRule({
-    //   Name: ruleName,
-    //   EventBusName: this.config.eventBusName
-    // });
-
-    job.enabled = false;
-    console.log(`[Cron] Disabled job: ${jobId}`);
+    throw new Error(
+      'not implemented: CronScheduler.disableJob — EventBridge rule update is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**
    * Delete cron job (delete EventBridge rule)
+   *
+   * NOT IMPLEMENTED — see {@link enableJob}.
    */
   async deleteJob(jobId: string): Promise<void> {
     const job = this.jobs.get(jobId);
@@ -199,162 +170,50 @@ export class CronScheduler {
       throw new Error(`Job not found: ${jobId}`);
     }
 
-    // TODO: Delete EventBridge rule
-    // const ruleName = `chimera-cron-${job.tenantId}-${job.jobId}`;
-    //
-    // // Remove targets first
-    // await eventBridge.removeTargets({
-    //   Rule: ruleName,
-    //   EventBusName: this.config.eventBusName,
-    //   Ids: ['1']
-    // });
-    //
-    // // Delete rule
-    // await eventBridge.deleteRule({
-    //   Name: ruleName,
-    //   EventBusName: this.config.eventBusName
-    // });
-
-    this.jobs.delete(jobId);
-    console.log(`[Cron] Deleted job: ${jobId}`);
+    throw new Error(
+      'not implemented: CronScheduler.deleteJob — EventBridge rule teardown is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**
    * Execute cron job (invoked by Step Functions)
    *
-   * This replaces the simple Pass state with real agent invocation:
-   * 1. Delegate task to agent via orchestrator
-   * 2. Wait for completion (or timeout)
-   * 3. Store execution result
-   * 4. Retry on failure (if configured)
+   * NOT IMPLEMENTED — the wait-for-agent-completion + DynamoDB storage
+   * halves are skeletons. The previous implementation delegated the task
+   * (which IS real), then slept 1 second and fabricated a hardcoded
+   * `{ success: true, message: 'Cron job completed (mock)' }` result,
+   * causing every call to silently "succeed" regardless of what the agent
+   * did. See Wave-14 audit finding M2.
    *
    * @param jobId - Cron job ID
    * @param scheduledTime - Scheduled execution time
+   * @param attemptNumber - Retry attempt counter
    */
   async executeCronJob(
     jobId: string,
-    scheduledTime: ISOTimestamp,
-    attemptNumber: number = 1
+    _scheduledTime: ISOTimestamp,
+    _attemptNumber: number = 1
   ): Promise<CronExecution> {
     const job = this.jobs.get(jobId);
     if (!job) {
       throw new Error(`Job not found: ${jobId}`);
     }
 
-    const executionId = `cron-exec-${jobId}-${Date.now()}`;
-
-    const execution: CronExecution = {
-      executionId,
-      jobId,
-      tenantId: job.tenantId,
-      agentId: job.agentId,
-      status: 'pending',
-      scheduledTime,
-      attemptNumber
-    };
-
-    this.executions.set(executionId, execution);
-
-    console.log(`[Cron] Executing job: ${jobId} (attempt ${attemptNumber})`);
-
-    try {
-      execution.status = 'running';
-      execution.startedAt = new Date().toISOString();
-
-      // Delegate task to agent
-      await this.orchestrator.delegateTask({
-        taskId: executionId,
-        sourceAgentId: 'cron-scheduler',
-        targetAgentId: job.agentId,
-        tenantId: job.tenantId,
-        instruction: job.instruction,
-        context: {
-          cronJob: true,
-          jobId: job.jobId,
-          scheduledTime,
-          ...job.context
-        },
-        timeoutSeconds: job.timeoutSeconds || 300,
-        correlationId: executionId
-      });
-
-      // TODO: Wait for agent to complete
-      // For now, simulate completion
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      execution.status = 'succeeded';
-      execution.completedAt = new Date().toISOString();
-      execution.durationMs = Date.now() - new Date(execution.startedAt).getTime();
-      execution.result = {
-        success: true,
-        message: 'Cron job completed (mock)'
-      };
-
-      console.log(`[Cron] Job completed: ${jobId}`);
-
-      // TODO: Store in DynamoDB
-      await this.storeExecution(execution);
-
-      return execution;
-    } catch (error) {
-      execution.status = 'failed';
-      execution.completedAt = new Date().toISOString();
-      execution.error = {
-        code: 'EXECUTION_ERROR',
-        message: error instanceof Error ? error.message : String(error)
-      };
-
-      console.error(`[Cron] Job failed: ${jobId}`, error);
-
-      // Retry if configured
-      if (
-        job.retryConfig &&
-        attemptNumber < job.retryConfig.maxAttempts
-      ) {
-        const backoffMs = Math.pow(job.retryConfig.backoffRate, attemptNumber) * 1000;
-
-        console.log(
-          `[Cron] Retrying job ${jobId} in ${backoffMs}ms (attempt ${attemptNumber + 1})`
-        );
-
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
-
-        return this.executeCronJob(jobId, scheduledTime, attemptNumber + 1);
-      }
-
-      // TODO: Store failed execution
-      await this.storeExecution(execution);
-
-      throw error;
-    }
+    throw new Error(
+      'not implemented: CronScheduler.executeCronJob — agent completion wait + DynamoDB storage are skeletons (Wave-14 audit M2)'
+    );
   }
 
   /**
    * Store execution in DynamoDB
-   * (Placeholder - will use DynamoDB SDK)
+   *
+   * NOT IMPLEMENTED — DynamoDB persistence is a skeleton.
+   * Only reachable via {@link executeCronJob}, which already throws.
    */
-  private async storeExecution(execution: CronExecution): Promise<void> {
-    // TODO: Store in DynamoDB
-    // await dynamodb.putItem({
-    //   TableName: this.config.executionTableName,
-    //   Item: {
-    //     PK: { S: `TENANT#${execution.tenantId}` },
-    //     SK: { S: `CRON_EXEC#${execution.executionId}` },
-    //     jobId: { S: execution.jobId },
-    //     agentId: { S: execution.agentId },
-    //     status: { S: execution.status },
-    //     scheduledTime: { S: execution.scheduledTime },
-    //     startedAt: { S: execution.startedAt || '' },
-    //     completedAt: { S: execution.completedAt || '' },
-    //     durationMs: { N: String(execution.durationMs || 0) },
-    //     result: { S: JSON.stringify(execution.result || {}) },
-    //     error: { S: JSON.stringify(execution.error || {}) },
-    //     attemptNumber: { N: String(execution.attemptNumber) },
-    //     ttl: { N: String(Math.floor(Date.now() / 1000) + 86400 * 30) } // 30 days
-    //   }
-    // });
-
-    console.log(`[Cron] Stored execution: ${execution.executionId}`);
+  private async storeExecution(_execution: CronExecution): Promise<void> {
+    throw new Error(
+      'not implemented: CronScheduler.storeExecution — DynamoDB persistence is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**

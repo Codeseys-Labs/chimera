@@ -1,8 +1,18 @@
 /**
- * Comprehensive unit tests for CronScheduler
+ * Unit tests for CronScheduler
  *
- * Tests job registration, enable/disable lifecycle, deletion, execution with
- * retry logic, execution history, tenant filtering, presets, and patterns.
+ * EventBridge rule creation and DynamoDB execution storage are skeletons
+ * (Wave-14 audit M2). `enableJob`, `disableJob`, `deleteJob`,
+ * `executeCronJob`, and the private `storeExecution` now throw
+ * `not implemented`; the previous stubs flipped local booleans and
+ * fabricated "succeeded" results while nothing reached AWS. These tests
+ * codify the new contract and preserve coverage for the still-real
+ * surface: `registerJob` (registry write), getters, presets, and
+ * `CronPatterns`.
+ *
+ * Note: `AgentOrchestrator.spawnAgent` is also gated (M1), so no tenant
+ * agents can be registered from tests. Tests here no longer rely on a
+ * spawned agent — the scheduler is exercised in isolation.
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
@@ -12,8 +22,6 @@ import {
   CronPatterns,
   CronJobPresets,
   type CronJob,
-  type CronExecution,
-  type CronSchedulerConfig,
 } from '../cron-scheduler';
 import {
   AgentOrchestrator,
@@ -23,19 +31,16 @@ import {
 } from '../orchestrator';
 
 // ---------------------------------------------------------------------------
-// Mock AWS clients
+// Mock AWS clients (only required for AgentOrchestrator construction)
 // ---------------------------------------------------------------------------
 
 function createMockSQSClient(): OrchestratorSQSClient {
-  let queueCounter = 0;
   return {
     createQueue: async (input) => ({
-      QueueUrl: `https://sqs.us-east-1.amazonaws.com/123456789012/${input.QueueName}`,
+      QueueUrl: `https://sqs.us-east-1.amazonaws.com/TESTACCT/${input.QueueName}`,
     }),
     getQueueAttributes: async () => ({
-      Attributes: {
-        QueueArn: `arn:aws:sqs:us-east-1:123456789012:dlq-${++queueCounter}`,
-      },
+      Attributes: { QueueArn: 'arn:aws:sqs:us-east-1:TESTACCT:test-dlq' },
     }),
     sendMessage: async () => ({ MessageId: `msg-${Date.now()}` }),
     deleteQueue: async () => {},
@@ -95,7 +100,7 @@ describe('CronScheduler', () => {
   let orchestrator: AgentOrchestrator;
   let scheduler: CronScheduler;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     orchestrator = createTestOrchestrator();
     scheduler = new CronScheduler(orchestrator, {
       region: 'us-east-1',
@@ -103,18 +108,10 @@ describe('CronScheduler', () => {
       executionTableName: 'test-cron-executions',
       maxConcurrentJobs: 50,
     });
-
-    // Spawn a test agent so delegateTask works
-    await orchestrator.spawnAgent({
-      tenantId: 'tenant-123',
-      agentId: 'agent-001',
-      role: 'worker',
-      capabilities: [],
-    });
   });
 
   // =========================================================================
-  // registerJob
+  // registerJob — still a real local-registry write
   // =========================================================================
 
   describe('registerJob', () => {
@@ -127,14 +124,12 @@ describe('CronScheduler', () => {
       expect(job!.schedule).toBe(CronPatterns.hourly);
     });
 
-    it('should enable the job if enabled=true', async () => {
+    it('should store the enabled flag as provided (no EventBridge call)', async () => {
       await scheduler.registerJob(defaultJob({ enabled: true }));
       expect(scheduler.getJob('job-001')!.enabled).toBe(true);
-    });
 
-    it('should not enable the job if enabled=false', async () => {
-      await scheduler.registerJob(defaultJob({ enabled: false }));
-      expect(scheduler.getJob('job-001')!.enabled).toBe(false);
+      await scheduler.registerJob(defaultJob({ jobId: 'job-002', enabled: false }));
+      expect(scheduler.getJob('job-002')!.enabled).toBe(false);
     });
 
     it('should store description and metadata', async () => {
@@ -167,75 +162,59 @@ describe('CronScheduler', () => {
   });
 
   // =========================================================================
-  // enableJob
+  // AWS lifecycle methods throw "not implemented"
   // =========================================================================
 
   describe('enableJob', () => {
-    it('should enable a disabled job', async () => {
+    it('should throw "not implemented" for a registered job', async () => {
       await scheduler.registerJob(defaultJob({ enabled: false }));
-      await scheduler.enableJob('job-001');
-
-      expect(scheduler.getJob('job-001')!.enabled).toBe(true);
+      await expect(scheduler.enableJob('job-001')).rejects.toThrow('not implemented');
     });
 
-    it('should throw for non-existent job', async () => {
+    it('should still throw "Job not found" for missing jobs (validation runs first)', async () => {
       await expect(scheduler.enableJob('ghost')).rejects.toThrow('Job not found: ghost');
-    });
-
-    it('should be idempotent for already enabled job', async () => {
-      await scheduler.registerJob(defaultJob({ enabled: true }));
-      await scheduler.enableJob('job-001');
-
-      expect(scheduler.getJob('job-001')!.enabled).toBe(true);
     });
   });
 
-  // =========================================================================
-  // disableJob
-  // =========================================================================
-
   describe('disableJob', () => {
-    it('should disable an enabled job', async () => {
-      await scheduler.registerJob(defaultJob({ enabled: true }));
-      await scheduler.disableJob('job-001');
-
-      expect(scheduler.getJob('job-001')!.enabled).toBe(false);
+    it('should throw "not implemented" for a registered job', async () => {
+      await scheduler.registerJob(defaultJob());
+      await expect(scheduler.disableJob('job-001')).rejects.toThrow('not implemented');
     });
 
-    it('should throw for non-existent job', async () => {
+    it('should still throw "Job not found" for missing jobs', async () => {
       await expect(scheduler.disableJob('ghost')).rejects.toThrow('Job not found: ghost');
     });
   });
 
-  // =========================================================================
-  // deleteJob
-  // =========================================================================
-
   describe('deleteJob', () => {
-    it('should remove the job from registry', async () => {
+    it('should throw "not implemented" for a registered job', async () => {
       await scheduler.registerJob(defaultJob());
-      await scheduler.deleteJob('job-001');
-
-      expect(scheduler.getJob('job-001')).toBeUndefined();
+      await expect(scheduler.deleteJob('job-001')).rejects.toThrow('not implemented');
     });
 
-    it('should throw for non-existent job', async () => {
+    it('should still throw "Job not found" for missing jobs', async () => {
       await expect(scheduler.deleteJob('ghost')).rejects.toThrow('Job not found: ghost');
     });
+  });
 
-    it('should not affect other jobs', async () => {
-      await scheduler.registerJob(defaultJob({ jobId: 'keep' }));
-      await scheduler.registerJob(defaultJob({ jobId: 'delete-me' }));
+  describe('executeCronJob', () => {
+    it('should throw "not implemented" for a registered job', async () => {
+      await scheduler.registerJob(defaultJob());
+      await expect(
+        scheduler.executeCronJob('job-001', new Date().toISOString())
+      ).rejects.toThrow('not implemented');
+    });
 
-      await scheduler.deleteJob('delete-me');
-
-      expect(scheduler.getJob('keep')).toBeDefined();
-      expect(scheduler.getJob('delete-me')).toBeUndefined();
+    it('should still throw "Job not found" for missing jobs', async () => {
+      await expect(
+        scheduler.executeCronJob('ghost', new Date().toISOString())
+      ).rejects.toThrow('Job not found: ghost');
     });
   });
 
   // =========================================================================
-  // getJob
+  // getJob / getJobs — real, no AWS
   // =========================================================================
 
   describe('getJob', () => {
@@ -251,10 +230,6 @@ describe('CronScheduler', () => {
       expect(scheduler.getJob('nonexistent')).toBeUndefined();
     });
   });
-
-  // =========================================================================
-  // getJobs (tenant filtering)
-  // =========================================================================
 
   describe('getJobs', () => {
     it('should return all jobs for a tenant', async () => {
@@ -273,130 +248,18 @@ describe('CronScheduler', () => {
   });
 
   // =========================================================================
-  // executeCronJob
-  // =========================================================================
-
-  describe('executeCronJob', () => {
-    it('should execute job and return succeeded execution', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      const scheduledTime = new Date().toISOString();
-      const execution = await scheduler.executeCronJob('job-001', scheduledTime);
-
-      expect(execution.jobId).toBe('job-001');
-      expect(execution.tenantId).toBe('tenant-123');
-      expect(execution.agentId).toBe('agent-001');
-      expect(execution.status).toBe('succeeded');
-      expect(execution.scheduledTime).toBe(scheduledTime);
-      expect(execution.startedAt).toBeTruthy();
-      expect(execution.completedAt).toBeTruthy();
-      expect(execution.durationMs).toBeGreaterThan(0);
-      expect(execution.attemptNumber).toBe(1);
-    });
-
-    it('should store execution result', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      const execution = await scheduler.executeCronJob('job-001', new Date().toISOString());
-
-      expect(execution.result).toBeDefined();
-      expect(execution.result!.success).toBe(true);
-    });
-
-    it('should throw for non-existent job', async () => {
-      await expect(scheduler.executeCronJob('ghost', new Date().toISOString())).rejects.toThrow(
-        'Job not found: ghost'
-      );
-    });
-
-    it('should use custom attempt number', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      const execution = await scheduler.executeCronJob('job-001', new Date().toISOString(), 3);
-
-      expect(execution.attemptNumber).toBe(3);
-    });
-
-    it('should include executionId with cron-exec prefix', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      const execution = await scheduler.executeCronJob('job-001', new Date().toISOString());
-
-      expect(execution.executionId).toMatch(/^cron-exec-job-001-/);
-    });
-  });
-
-  // =========================================================================
-  // getExecutionHistory
+  // getExecutionHistory — real (reads from in-memory map)
   // =========================================================================
 
   describe('getExecutionHistory', () => {
-    it('should return execution history for a job', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      await scheduler.executeCronJob('job-001', new Date().toISOString());
-      await new Promise((r) => setTimeout(r, 10));
-      await scheduler.executeCronJob('job-001', new Date().toISOString());
-
-      const history = scheduler.getExecutionHistory('job-001');
-      expect(history.length).toBe(2);
-    });
-
-    it('should sort by scheduledTime descending (newest first)', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      const time1 = new Date(Date.now() - 10000).toISOString();
-      const time2 = new Date().toISOString();
-
-      await scheduler.executeCronJob('job-001', time1);
-      await new Promise((r) => setTimeout(r, 10));
-      await scheduler.executeCronJob('job-001', time2);
-
-      const history = scheduler.getExecutionHistory('job-001');
-      expect(new Date(history[0].scheduledTime).getTime()).toBeGreaterThanOrEqual(
-        new Date(history[1].scheduledTime).getTime()
-      );
-    });
-
-    it('should respect limit parameter', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      for (let i = 0; i < 5; i++) {
-        await scheduler.executeCronJob('job-001', new Date().toISOString());
-        await new Promise((r) => setTimeout(r, 5));
-      }
-
-      const history = scheduler.getExecutionHistory('job-001', 3);
-      expect(history.length).toBe(3);
-    }, 30000);
-
-    it('should default limit to 10', async () => {
-      await scheduler.registerJob(defaultJob());
-
-      const history = scheduler.getExecutionHistory('job-001');
-      expect(history.length).toBeLessThanOrEqual(10);
-    });
-
     it('should return empty array for job with no executions', () => {
       const history = scheduler.getExecutionHistory('no-executions');
       expect(history).toEqual([]);
     });
-
-    it('should not include executions from other jobs', async () => {
-      await scheduler.registerJob(defaultJob({ jobId: 'job-A' }));
-      await scheduler.registerJob(defaultJob({ jobId: 'job-B' }));
-
-      await scheduler.executeCronJob('job-A', new Date().toISOString());
-      await scheduler.executeCronJob('job-B', new Date().toISOString());
-
-      const historyA = scheduler.getExecutionHistory('job-A');
-      expect(historyA.length).toBe(1);
-      expect(historyA[0].jobId).toBe('job-A');
-    });
   });
 
   // =========================================================================
-  // CronPatterns
+  // CronPatterns (pure constants)
   // =========================================================================
 
   describe('CronPatterns', () => {
@@ -430,7 +293,7 @@ describe('CronScheduler', () => {
   });
 
   // =========================================================================
-  // CronJobPresets
+  // CronJobPresets (pure data)
   // =========================================================================
 
   describe('CronJobPresets', () => {
