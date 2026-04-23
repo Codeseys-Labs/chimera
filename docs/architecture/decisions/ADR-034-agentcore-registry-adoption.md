@@ -9,7 +9,7 @@ decision_makers: [chimera-architecture-team]
 
 ## Status
 
-**Proposed** (2026-04-17)
+**Accepted (partial — Phase 0-1 only)** (accepted 2026-04-17; Phase 2+ gated on multi-tenancy spike per `docs/designs/agentcore-registry-spike.md`)
 
 ## Context
 

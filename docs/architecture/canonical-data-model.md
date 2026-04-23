@@ -854,11 +854,7 @@ for tenant in allTenants:
 **Problem:** Gap analysis (docs/research/enhancement/00-Gap-Analysis-Report.md) identified 4 incompatible DynamoDB schemas across the research corpus.
 
 #### Design 1: Single-Table Pattern
-<<<<<<< HEAD
-- **Source:** `ClawCore-Architecture-Review-Platform-IaC.md`
-=======
 - **Source:** `Chimera-Architecture-Review-Platform-IaC.md`
->>>>>>> overstory/builder-docs-fix2/chimera-c9ec
 - **Schema:** 1 table (`chimera-platform`) with SK overloading
 - **Verdict:** ❌ Rejected — TTL conflicts, encryption conflicts, harder to manage isolation
 
