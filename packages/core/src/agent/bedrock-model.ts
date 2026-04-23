@@ -37,6 +37,8 @@ function getBedrockClient(region: string): BedrockRuntimeClient {
  */
 const RETRYABLE_ERROR_NAMES = new Set([
   'ThrottlingException',
+  'TooManyRequestsException',
+  'ProvisionedThroughputExceededException',
   'ServiceUnavailable',
   'ServiceUnavailableException',
   'InternalServerError',
@@ -463,6 +465,15 @@ export class BedrockModel {
     // manual retry around the initial `send()`. Once the stream is open
     // we never retry mid-stream — downstream consumers get partial
     // events and would need to restart the turn themselves.
+    //
+    // ORDERING INVARIANT — tier-ceiling BEFORE retry:
+    // buildInput() above runs enforceTierCeiling() on turn.modelId, so the
+    // ConverseStreamCommand is constructed with the tier-compliant model
+    // (e.g. Opus → Haiku for a Basic tenant) BEFORE sendWithRetry ever
+    // sees it. Retries therefore operate on the already-downgraded model.
+    // If the order were reversed, a throttled Opus request from a Basic
+    // tenant could be retried as Opus — bypassing the tier ceiling on
+    // every retry. Keep buildInput() strictly upstream of sendWithRetry().
     const response = await sendWithRetry(() => this.client.send(command));
 
     if (!response.stream) {

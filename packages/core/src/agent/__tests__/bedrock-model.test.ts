@@ -566,6 +566,97 @@ describe('BedrockModel', () => {
       await expect(gen.next()).rejects.toThrow('Bad input');
       expect(calls).toBe(1);
     });
+
+    it('should exhaust retries after 3 attempts on persistent ThrottlingException', async () => {
+      // Persistent throttling — every attempt fails. sendWithRetry's default
+      // maxAttempts is 3, so we expect exactly 3 send() calls before the
+      // final error propagates to the caller. This proves the retry loop
+      // has an upper bound and will not retry forever.
+      let calls = 0;
+      const throttlingErr = Object.assign(new Error('Rate exceeded persistently'), {
+        name: 'ThrottlingException',
+      });
+
+      const mockClient = {
+        send: async () => {
+          calls++;
+          throw throttlingErr;
+        },
+      };
+
+      const model = new BedrockModel({
+        modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+        client: mockClient as unknown as BedrockRuntimeClient,
+      });
+
+      const gen = model.converseStream({
+        messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+      });
+
+      await expect(gen.next()).rejects.toThrow('Rate exceeded persistently');
+      // Exactly 3 attempts: initial + 2 retries = 3 total.
+      expect(calls).toBe(3);
+    });
+
+    it.each([
+      ['TooManyRequestsException'],
+      ['ProvisionedThroughputExceededException'],
+      ['ServiceUnavailableException'],
+      ['InternalServerException'],
+    ])(
+      'should retry on %s (treated as transient throttle/5xx)',
+      async (errorName: string) => {
+        // Verify the retryable allow-list covers the full family of transient
+        // Bedrock/throttle codes, not just ThrottlingException. Each case
+        // fails once, then succeeds — confirming that sendWithRetry actually
+        // retries these names rather than short-circuiting.
+        let calls = 0;
+
+        async function* streamGen() {
+          yield { messageStart: { role: 'assistant' } };
+          yield { contentBlockStart: { contentBlockIndex: 0, start: {} } };
+          yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'ok' } } };
+          yield { contentBlockStop: { contentBlockIndex: 0 } };
+          yield { messageStop: { stopReason: 'end_turn' } };
+          yield {
+            metadata: { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } },
+          };
+        }
+
+        const transientErr = Object.assign(new Error(`transient: ${errorName}`), {
+          name: errorName,
+        });
+
+        const mockClient = {
+          send: async () => {
+            calls++;
+            if (calls === 1) throw transientErr;
+            return { stream: streamGen() };
+          },
+        };
+
+        const model = new BedrockModel({
+          modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+          client: mockClient as unknown as BedrockRuntimeClient,
+        });
+
+        const gen = model.converseStream({
+          messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+        });
+
+        let result: any;
+        while (true) {
+          const next = await gen.next();
+          if (next.done) {
+            result = next.value;
+            break;
+          }
+        }
+
+        expect(calls).toBe(2);
+        expect(result.output.message.content[0].text).toBe('ok');
+      }
+    );
   });
 
   // -------------------------------------------------------------------------
