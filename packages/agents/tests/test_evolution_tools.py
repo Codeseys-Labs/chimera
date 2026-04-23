@@ -158,13 +158,28 @@ class TestValidateEvolutionPolicy:
 
 
 class TestCheckEvolutionRateLimit:
-    def _make_mock_table(self, count: int, limit: int = 5):
+    def _make_mock_table_success(self, new_count: int, limit: int = 5):
+        """Simulate a successful conditional update: returns ALL_NEW attrs."""
         mock_table = MagicMock()
-        mock_table.get_item.return_value = {"Item": {"count": count, "limit": limit}}
+        mock_table.update_item.return_value = {
+            "Attributes": {"count": new_count, "limit": limit}
+        }
+        return mock_table
+
+    def _make_mock_table_denied(self, current_count: int, limit: int = 5):
+        """Simulate a ConditionalCheckFailedException from the atomic update."""
+        mock_table = MagicMock()
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "at limit"}},
+            "UpdateItem",
+        )
+        mock_table.get_item.return_value = {
+            "Item": {"count": current_count, "limit": limit}
+        }
         return mock_table
 
     def test_allows_when_under_limit(self, mocker):
-        mock_table = self._make_mock_table(count=2)
+        mock_table = self._make_mock_table_success(new_count=3)
         mock_ddb = MagicMock()
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
@@ -172,10 +187,12 @@ class TestCheckEvolutionRateLimit:
         result = _check_evolution_rate_limit("tenant-1")
 
         assert result["allowed"] is True
+        assert result["remaining"] == 2
         mock_table.update_item.assert_called_once()
 
     def test_blocks_when_at_limit(self, mocker):
-        mock_table = self._make_mock_table(count=5, limit=5)
+        """Atomic update fires ConditionalCheckFailedException, falls back to get_item."""
+        mock_table = self._make_mock_table_denied(current_count=5, limit=5)
         mock_ddb = MagicMock()
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
@@ -184,23 +201,14 @@ class TestCheckEvolutionRateLimit:
 
         assert result["allowed"] is False
         assert "5/5" in result["reason"]
-        mock_table.update_item.assert_not_called()
 
-    def test_fails_open_when_ddb_raises(self, mocker):
-        mock_ddb = MagicMock()
-        mock_ddb.Table.side_effect = ClientError(
-            {"Error": {"Code": "ServiceUnavailable", "Message": "DynamoDB unavailable"}},
-            "DescribeTable",
-        )
-        mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
-
-        result = _check_evolution_rate_limit("tenant-1")
-
-        assert result["allowed"] is True
-
-    def test_allows_when_no_existing_record(self, mocker):
+    def test_fails_open_when_ddb_raises_non_condition(self, mocker):
+        """Other DynamoDB errors (not ConditionalCheckFailed) fail OPEN."""
         mock_table = MagicMock()
-        mock_table.get_item.return_value = {}  # No 'Item' key
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ServiceUnavailable", "Message": "DynamoDB unavailable"}},
+            "UpdateItem",
+        )
         mock_ddb = MagicMock()
         mock_ddb.Table.return_value = mock_table
         mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
@@ -208,6 +216,34 @@ class TestCheckEvolutionRateLimit:
         result = _check_evolution_rate_limit("tenant-1")
 
         assert result["allowed"] is True
+
+    def test_allows_when_no_existing_record(self, mocker):
+        """First-call-of-day creates the record via if_not_exists and returns count=1."""
+        mock_table = self._make_mock_table_success(new_count=1)
+        mock_ddb = MagicMock()
+        mock_ddb.Table.return_value = mock_table
+        mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
+
+        result = _check_evolution_rate_limit("tenant-1")
+
+        assert result["allowed"] is True
+        assert result["remaining"] == 4
+
+    def test_toctou_race_denied_when_second_concurrent_hits_limit(self, mocker):
+        """Regression test for the Wave-15 H2 finding: two concurrent calls
+        with count already at limit-1 can race. The atomic update makes one
+        succeed and the other's ConditionalCheckFailedException is mapped to
+        denied. Without this behavior the old read-then-write would allow
+        both to pass."""
+        mock_table = self._make_mock_table_denied(current_count=5, limit=5)
+        mock_ddb = MagicMock()
+        mock_ddb.Table.return_value = mock_table
+        mocker.patch("tools.evolution_tools.boto3.resource", return_value=mock_ddb)
+
+        result = _check_evolution_rate_limit("tenant-1")
+
+        assert result["allowed"] is False
+        assert result["remaining"] == 0
 
 
 # ---------------------------------------------------------------------------

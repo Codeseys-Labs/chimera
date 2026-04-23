@@ -415,17 +415,30 @@ def register_capability(
     )
 
     try:
+        # GSI attributes must be populated or the item won't be indexed:
+        #   GSI1-author (author, updatedAt)
+        #   GSI2-category (category, SK)
+        #   GSI3-trust (trustLevel, updatedAt)
+        # Agent-registered capabilities default to the registering tenant
+        # as author, category="automation" (self-evolved code), trustLevel
+        # "private" (visible only until admin-promoted).
+        # See packages/core/src/skills/registry.ts + infra/lib/data-stack.ts.
         skills_table.put_item(
             Item={
                 "PK": f"SKILL#{capability_name}",
                 "SK": "REGISTRY",
                 "capability_name": capability_name,
+                "skillName": capability_name,
                 "tool_module": tool_module,
                 "tool_names": tool_names,
                 "tier": tier,
                 "description": description,
                 "registered_by": tenant_id,
                 "registered_at": registered_at,
+                "updatedAt": registered_at,
+                "author": tenant_id,
+                "category": "automation",
+                "trustLevel": "private",
                 "status": "ACTIVE",
             }
         )
@@ -601,40 +614,46 @@ def _validate_evolution_policy(
         return {"allowed": True, "reason": ""}
 
 
+_DAILY_EVOLUTION_LIMIT = 5
+
+
 def _check_evolution_rate_limit(tenant_id: str) -> dict:
     """
     Enforce per-tenant daily evolution rate limit (default: 5 per day).
 
-    Uses DynamoDB conditional atomic increment. Fails open if DynamoDB
-    is unavailable.
+    Uses a single atomic conditional update to increment-and-check in one
+    DynamoDB call, which eliminates the TOCTOU race the naive
+    read-then-write implementation had: two concurrent callers could
+    both observe count=N < limit, both pass the check, both increment,
+    and produce count=N+2 with limit bypassed by one.
+
+    Now: `ConditionExpression` rejects writes when count is already at
+    or above the limit, so only one of the two racing callers succeeds.
+    On `ConditionalCheckFailedException` we return denied with current
+    count reported back to the caller.
+
+    Fails open (allows) on other DynamoDB errors to avoid blocking
+    legitimate self-evolution on transient infra issues.
     """
+    env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
+    dynamodb = boto3.resource("dynamodb")
+    table = dynamodb.Table(
+        os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
+    )
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    pk = f"TENANT#{tenant_id}#RATE"
+    sk = f"EVOLUTION#{today}"
+
     try:
-        env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
-        dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table(
-            os.environ.get("EVOLUTION_TABLE", f"chimera-evolution-state-{env_name}")
-        )
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        pk = f"TENANT#{tenant_id}#RATE"
-        sk = f"EVOLUTION#{today}"
-
-        # Read current count first (allows graceful limit reporting)
-        get_resp = table.get_item(Key={"PK": pk, "SK": sk})
-        item = get_resp.get("Item", {})
-        count = int(item.get("count", 0))
-        daily_limit = int(item.get("limit", 5))
-
-        if count >= daily_limit:
-            return {
-                "allowed": False,
-                "reason": f"Daily limit of {daily_limit} reached ({count}/{daily_limit})",
-            }
-
-        # Increment atomically
-        table.update_item(
+        resp = table.update_item(
             Key={"PK": pk, "SK": sk},
             UpdateExpression=(
-                "ADD #cnt :one SET #lim = if_not_exists(#lim, :dlim),     #ttl = :ttl"
+                "SET #cnt = if_not_exists(#cnt, :zero) + :one, "
+                "#lim = if_not_exists(#lim, :dlim), "
+                "#ttl = if_not_exists(#ttl, :ttl)"
+            ),
+            ConditionExpression=(
+                "attribute_not_exists(#cnt) OR #cnt < if_not_exists(#lim, :dlim)"
             ),
             ExpressionAttributeNames={
                 "#cnt": "count",
@@ -642,18 +661,43 @@ def _check_evolution_rate_limit(tenant_id: str) -> dict:
                 "#ttl": "ttl",
             },
             ExpressionAttributeValues={
+                ":zero": 0,
                 ":one": 1,
-                ":dlim": 5,
+                ":dlim": _DAILY_EVOLUTION_LIMIT,
                 ":ttl": int(
                     (datetime.now(timezone.utc) + timedelta(days=2)).timestamp()
                 ),
             },
+            ReturnValues="ALL_NEW",
         )
-        return {"allowed": True, "reason": ""}
-
-    except (ClientError, BotoCoreError) as exc:
+        item = resp.get("Attributes", {}) or {}
+        count = int(item.get("count", 1))
+        daily_limit = int(item.get("limit", _DAILY_EVOLUTION_LIMIT))
+        return {
+            "allowed": True,
+            "reason": "",
+            "remaining": max(daily_limit - count, 0),
+        }
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            # Separately fetch current count for the denied message
+            try:
+                current = table.get_item(Key={"PK": pk, "SK": sk}).get("Item", {}) or {}
+                count = int(current.get("count", _DAILY_EVOLUTION_LIMIT))
+                daily_limit = int(current.get("limit", _DAILY_EVOLUTION_LIMIT))
+            except (ClientError, BotoCoreError):
+                count = _DAILY_EVOLUTION_LIMIT
+                daily_limit = _DAILY_EVOLUTION_LIMIT
+            return {
+                "allowed": False,
+                "reason": f"Daily limit of {daily_limit} reached ({count}/{daily_limit})",
+                "remaining": 0,
+            }
         logger.warning("Rate limit check failed, defaulting to allowed: %s", exc)
-        return {"allowed": True, "reason": ""}
+        return {"allowed": True, "reason": "", "remaining": -1}
+    except BotoCoreError as exc:
+        logger.warning("Rate limit check failed, defaulting to allowed: %s", exc)
+        return {"allowed": True, "reason": "", "remaining": -1}
 
 
 def _validate_cdk_code(cdk_code: str) -> dict:
