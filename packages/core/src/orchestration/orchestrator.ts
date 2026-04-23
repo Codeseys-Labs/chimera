@@ -538,24 +538,20 @@ export class AgentOrchestrator {
 
   /**
    * Create AgentCore Runtime for agent
-   * (Stub — will integrate with AgentCore SDK once available)
+   *
+   * NOT IMPLEMENTED — AgentCore SDK integration is pending. The previous
+   * implementation returned a fabricated ARN containing the placeholder
+   * AWS account ID `123456789012`, producing garbage ARNs in every
+   * `spawnAgent` call. Because `spawnAgent` is the sole caller, throwing
+   * here effectively gates the entire `spawnAgent` path until AgentCore
+   * integration lands. See Wave-14 audit finding M1.
    */
   private async createAgentRuntime(
-    config: SpawnAgentConfig
+    _config: SpawnAgentConfig
   ): Promise<string> {
-    // AgentCore Runtime SDK integration is pending.
-    // When available, replace with:
-    //   const runtime = await bedrockAgentCore.createRuntime({
-    //     name: `${config.tenantId}-${config.agentId}`,
-    //     modelId: config.modelId || 'anthropic.claude-sonnet-4-v1',
-    //     memory: {
-    //       namespace: `tenant-${config.tenantId}-user-*`,
-    //       strategy: config.memoryStrategy || 'SUMMARY'
-    //     }
-    //   });
-    //   return runtime.runtimeArn;
-
-    return `arn:aws:bedrock-agentcore:${this.config.region}:123456789012:runtime/${config.agentId}`;
+    throw new Error(
+      'not implemented: AgentOrchestrator.createAgentRuntime — AgentCore SDK integration is pending (Wave-14 audit M1)'
+    );
   }
 
   /**

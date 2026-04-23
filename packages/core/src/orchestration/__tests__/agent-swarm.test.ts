@@ -1,12 +1,15 @@
 /**
- * Comprehensive unit tests for AgentSwarm
+ * Unit tests for AgentSwarm
  *
- * Tests swarm initialization, auto-scaling strategies, state management,
- * shutdown, presets, and the createSwarm factory.
+ * `AgentOrchestrator.spawnAgent` is gated (Wave-14 audit M1) because
+ * AgentCore SDK integration has not landed. `AgentSwarm.initialize()`
+ * spawns minAgents via the orchestrator and therefore propagates the
+ * `not implemented` error. Tests preserve the constructor + presets
+ * + `stopScalingMonitor` contract and codify the new failure mode.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { AgentSwarm, createSwarm, SwarmPresets, type SwarmConfig, type SwarmState } from '../swarm';
+import { AgentSwarm, createSwarm, SwarmPresets, type SwarmConfig } from '../swarm';
 import {
   AgentOrchestrator,
   type OrchestratorSQSClient,
@@ -19,15 +22,12 @@ import {
 // ---------------------------------------------------------------------------
 
 function createMockSQSClient(): OrchestratorSQSClient {
-  let queueCounter = 0;
   return {
     createQueue: async (input) => ({
-      QueueUrl: `https://sqs.us-east-1.amazonaws.com/123456789012/${input.QueueName}`,
+      QueueUrl: `https://sqs.us-east-1.amazonaws.com/TESTACCT/${input.QueueName}`,
     }),
     getQueueAttributes: async () => ({
-      Attributes: {
-        QueueArn: `arn:aws:sqs:us-east-1:123456789012:dlq-${++queueCounter}`,
-      },
+      Attributes: { QueueArn: 'arn:aws:sqs:us-east-1:TESTACCT:test-dlq' },
     }),
     sendMessage: async () => ({ MessageId: `msg-${Date.now()}` }),
     deleteQueue: async () => {},
@@ -98,7 +98,7 @@ describe('AgentSwarm', () => {
   });
 
   // =========================================================================
-  // Constructor & Initial state
+  // Constructor & Initial state (pure — no AWS calls)
   // =========================================================================
 
   describe('constructor', () => {
@@ -122,60 +122,16 @@ describe('AgentSwarm', () => {
   });
 
   // =========================================================================
-  // initialize
+  // initialize — cascades the AgentCore Runtime stub throw
   // =========================================================================
 
   describe('initialize', () => {
-    it('should spawn minAgents during initialization', async () => {
+    it('should throw "not implemented" because orchestrator.spawnAgent is gated', async () => {
       swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 3 }));
-      await swarm.initialize();
-
-      const state = swarm.getState();
-      expect(state.agentIds.length).toBe(3);
-      expect(state.metrics.activeAgents).toBe(3);
+      await expect(swarm.initialize()).rejects.toThrow('not implemented');
     });
 
-    it('should name agents with swarm prefix and sequential IDs', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 2, swarmId: 'alpha' }));
-      await swarm.initialize();
-
-      const state = swarm.getState();
-      expect(state.agentIds).toContain('alpha-agent-1');
-      expect(state.agentIds).toContain('alpha-agent-2');
-    });
-
-    it('should register agents with orchestrator', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 2 }));
-      await swarm.initialize();
-
-      const agents = orchestrator.listAgents('tenant-123');
-      expect(agents.length).toBe(2);
-      expect(agents[0].role).toBe('worker');
-    });
-
-    it('should pass capabilities to spawned agents', async () => {
-      swarm = new AgentSwarm(
-        orchestrator,
-        defaultSwarmConfig({ minAgents: 1, capabilities: ['ml-training'] })
-      );
-      await swarm.initialize();
-
-      const agents = orchestrator.listAgents('tenant-123');
-      expect(agents[0].capabilities).toContain('ml-training');
-    });
-
-    it('should pass swarmId as metadata to spawned agents', async () => {
-      swarm = new AgentSwarm(
-        orchestrator,
-        defaultSwarmConfig({ minAgents: 1, swarmId: 'swarm-x', metadata: { custom: 'data' } })
-      );
-      await swarm.initialize();
-
-      const agents = orchestrator.listAgents('tenant-123');
-      expect(agents[0].metadata).toEqual({ swarmId: 'swarm-x', custom: 'data' });
-    });
-
-    it('should handle minAgents=0 gracefully', async () => {
+    it('should succeed when minAgents=0 (no spawn happens)', async () => {
       swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 0 }));
       await swarm.initialize();
 
@@ -184,97 +140,49 @@ describe('AgentSwarm', () => {
   });
 
   // =========================================================================
-  // getState
+  // getState — pure
   // =========================================================================
 
   describe('getState', () => {
-    it('should reflect config in returned state', async () => {
-      const config = defaultSwarmConfig({ minAgents: 1 });
+    it('should reflect config in returned state', () => {
+      const config = defaultSwarmConfig({ minAgents: 0 });
       swarm = new AgentSwarm(orchestrator, config);
-      await swarm.initialize();
-
-      const state = swarm.getState();
-      expect(state.config).toEqual(config);
-    });
-
-    it('should update metrics after initialization', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 3 }));
-      await swarm.initialize();
-
-      expect(swarm.getState().metrics.activeAgents).toBe(3);
+      expect(swarm.getState().config).toEqual(config);
     });
   });
 
   // =========================================================================
-  // shutdown
-  // =========================================================================
-
-  describe('shutdown', () => {
-    it('should terminate all agents in the swarm', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 3 }));
-      await swarm.initialize();
-
-      expect(orchestrator.listAgents('tenant-123').length).toBe(3);
-
-      await swarm.shutdown();
-
-      expect(orchestrator.listAgents('tenant-123').length).toBe(0);
-      expect(swarm.getState().agentIds.length).toBe(0);
-      expect(swarm.getState().metrics.activeAgents).toBe(0);
-    });
-
-    it('should stop scaling monitor on shutdown', async () => {
-      swarm = new AgentSwarm(
-        orchestrator,
-        defaultSwarmConfig({ minAgents: 1, scalingStrategy: 'queue-depth' })
-      );
-      await swarm.initialize();
-
-      // Shutdown should not throw and should stop the timer
-      await swarm.shutdown();
-
-      // No lingering intervals
-      expect(swarm.getState().agentIds.length).toBe(0);
-    });
-
-    it('should handle shutdown when no agents remain', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 0 }));
-      await swarm.initialize();
-
-      // Should not throw
-      await swarm.shutdown();
-    });
-  });
-
-  // =========================================================================
-  // stopScalingMonitor
+  // stopScalingMonitor (safe even without initialize)
   // =========================================================================
 
   describe('stopScalingMonitor', () => {
-    it('should be callable multiple times without error', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 1 }));
-      await swarm.initialize();
+    it('should be callable multiple times without error', () => {
+      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 0 }));
 
       swarm.stopScalingMonitor();
-      swarm.stopScalingMonitor(); // second call should be no-op
+      swarm.stopScalingMonitor();
     });
   });
 
   // =========================================================================
-  // createSwarm factory
+  // createSwarm factory — propagates initialize's throw when minAgents > 0
   // =========================================================================
 
   describe('createSwarm', () => {
-    it('should create and initialize swarm', async () => {
-      swarm = await createSwarm(orchestrator, defaultSwarmConfig({ minAgents: 2 }));
+    it('should throw when minAgents > 0 (spawn is gated)', async () => {
+      await expect(
+        createSwarm(orchestrator, defaultSwarmConfig({ minAgents: 2 }))
+      ).rejects.toThrow('not implemented');
+    });
 
+    it('should succeed when minAgents=0', async () => {
+      swarm = await createSwarm(orchestrator, defaultSwarmConfig({ minAgents: 0 }));
       expect(swarm).toBeInstanceOf(AgentSwarm);
-      expect(swarm.getState().agentIds.length).toBe(2);
     });
   });
 
   // =========================================================================
-  // SwarmPresets
+  // SwarmPresets (pure data)
   // =========================================================================
 
   describe('SwarmPresets', () => {
@@ -323,18 +231,10 @@ describe('AgentSwarm', () => {
         expect(config.maxAgents).toBe(20);
       });
     });
-
-    it('should produce configs usable with AgentSwarm constructor', async () => {
-      const config = SwarmPresets.research('tenant-123', 'swarm-test');
-      swarm = new AgentSwarm(orchestrator, config);
-      await swarm.initialize();
-
-      expect(swarm.getState().agentIds.length).toBe(config.minAgents);
-    });
   });
 
   // =========================================================================
-  // Scaling strategies (structural tests — evaluateScaling is private)
+  // Scaling strategy configuration (construction-time only)
   // =========================================================================
 
   describe('scaling strategy configuration', () => {
@@ -367,44 +267,6 @@ describe('AgentSwarm', () => {
       const state = swarm.getState();
       expect(state.config.scaleUpThreshold).toBe(15);
       expect(state.config.scaleDownThreshold).toBe(3);
-    });
-  });
-
-  // =========================================================================
-  // Edge cases
-  // =========================================================================
-
-  describe('edge cases', () => {
-    it('should handle swarm with maxAgents equal to minAgents', async () => {
-      swarm = new AgentSwarm(orchestrator, defaultSwarmConfig({ minAgents: 3, maxAgents: 3 }));
-      await swarm.initialize();
-
-      expect(swarm.getState().agentIds.length).toBe(3);
-    });
-
-    it('should track multiple swarms independently on same orchestrator', async () => {
-      const swarm1 = new AgentSwarm(
-        orchestrator,
-        defaultSwarmConfig({ swarmId: 'swarm-A', minAgents: 1 })
-      );
-      const swarm2 = new AgentSwarm(
-        orchestrator,
-        defaultSwarmConfig({ swarmId: 'swarm-B', minAgents: 2 })
-      );
-
-      await swarm1.initialize();
-      await swarm2.initialize();
-
-      expect(swarm1.getState().agentIds.length).toBe(1);
-      expect(swarm2.getState().agentIds.length).toBe(2);
-      expect(orchestrator.listAgents('tenant-123').length).toBe(3);
-
-      swarm1.stopScalingMonitor();
-      swarm2.stopScalingMonitor();
-
-      // Assign to module-level swarm so afterEach cleans up
-      swarm = swarm1;
-      await swarm2.shutdown();
     });
   });
 });
