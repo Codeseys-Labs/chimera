@@ -101,7 +101,12 @@ export class SecurityStack extends cdk.Stack {
         requireDigits: true,
         requireSymbols: true,
       },
-      mfa: cognito.Mfa.OPTIONAL,
+      // MFA: REQUIRED in prod (SOC2 + ISO 27001 + enterprise procurement
+      // checklists all mandate MFA for privileged multi-tenant SaaS).
+      // OPTIONAL in non-prod so developer iteration isn't blocked by TOTP
+      // enrollment during first-login flows on ephemeral stacks.
+      // Wave-15 H3.
+      mfa: isProd ? cognito.Mfa.REQUIRED : cognito.Mfa.OPTIONAL,
       mfaSecondFactor: {
         sms: false,
         otp: true,
@@ -270,17 +275,26 @@ exports.handler = async (event) => {
       },
       accessTokenValidity: cdk.Duration.hours(1),
       idTokenValidity: cdk.Duration.hours(1),
-      refreshTokenValidity: cdk.Duration.days(30),
+      // Web session refresh: 7 days. Shorter than Cognito's 30-day default;
+      // long enough for weekly active users without daily re-login, short
+      // enough that a stolen refresh token has bounded blast radius.
+      // Wave-15 M1.
+      refreshTokenValidity: cdk.Duration.days(7),
+      enableTokenRevocation: true,
       generateSecret: false, // PKCE doesn't use client secret
       preventUserExistenceErrors: true,
     });
 
-    // CLI client: SRP auth for the `chimera` CLI tool
+    // CLI client: SRP auth for the `chimera` CLI tool.
+    // 1-day refresh window: CLI tokens live on operator laptops; shorter
+    // window limits exposure if a machine is compromised. Operator re-logs
+    // in daily which is acceptable UX for admin tooling.
     this.userPool.addClient('CliClient', {
       userPoolClientName: 'chimera-cli',
       authFlows: { userSrp: true },
       accessTokenValidity: cdk.Duration.hours(8),
-      refreshTokenValidity: cdk.Duration.days(30),
+      refreshTokenValidity: cdk.Duration.days(1),
+      enableTokenRevocation: true,
     });
 
     // ======================================================================

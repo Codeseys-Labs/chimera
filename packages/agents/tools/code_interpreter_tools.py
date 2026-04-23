@@ -21,6 +21,8 @@ Environment variables:
 - CODE_INTERPRETER_SESSION_TTL: Session timeout in seconds (default: 3600)
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
