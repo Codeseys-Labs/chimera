@@ -189,10 +189,13 @@ export class TenantService {
     const pk = `TENANT#${params.tenantId}`;
     const now = new Date().toISOString();
 
-    // Default tier-based feature limits
+    // Default tier-based feature limits.
+    // enterprise/dedicated/premium (legacy) share the top-tier limit.
     const maxSubagentsByTier: Record<TenantTier, number> = {
       basic: 1,
       advanced: 5,
+      enterprise: 20,
+      dedicated: 20,
       premium: 20,
     };
 
@@ -210,21 +213,35 @@ export class TenantService {
       updatedAt: now,
     };
 
+    // `premium` is a legacy alias for `enterprise`. Both unlock the full
+    // feature set, as does `dedicated` (dedicated-deployment enterprise SLA).
+    const isFullTier =
+      params.tier === 'enterprise' ||
+      params.tier === 'dedicated' ||
+      params.tier === 'premium';
+
     // Create CONFIG#features item with tier-appropriate defaults
     const features: TenantFeatureConfig = {
       PK: pk,
       SK: 'CONFIG#features',
       codeInterpreter: params.tier !== 'basic',
       browser: params.tier !== 'basic',
-      cronJobs: params.tier === 'premium',
-      selfEditingIac: params.tier === 'premium',
+      cronJobs: isFullTier,
+      selfEditingIac: isFullTier,
       maxSubagents: maxSubagentsByTier[params.tier],
       allowedModelProviders: ['bedrock'],
       mcpToolsEnabled: true,
       ...params.features,
     };
 
-    // Tier-based model restrictions
+    // Tier-based model restrictions.
+    // enterprise/dedicated/premium (legacy) share the full model pool.
+    const fullModelPool = [
+      'us.amazon.nova-micro-v1:0',
+      'us.amazon.nova-lite-v1:0',
+      'us.anthropic.claude-sonnet-4-6-v1:0',
+      'us.anthropic.claude-opus-4-6-v1:0',
+    ];
     const modelsByTier: Record<TenantTier, string[]> = {
       basic: ['us.amazon.nova-lite-v1:0', 'us.anthropic.claude-sonnet-4-6-v1:0'],
       advanced: [
@@ -232,12 +249,9 @@ export class TenantService {
         'us.anthropic.claude-sonnet-4-6-v1:0',
         'us.anthropic.claude-opus-4-6-v1:0',
       ],
-      premium: [
-        'us.amazon.nova-micro-v1:0',
-        'us.amazon.nova-lite-v1:0',
-        'us.anthropic.claude-sonnet-4-6-v1:0',
-        'us.anthropic.claude-opus-4-6-v1:0',
-      ],
+      enterprise: [...fullModelPool],
+      dedicated: [...fullModelPool],
+      premium: [...fullModelPool],
     };
 
     const availableModels = modelsByTier[params.tier];

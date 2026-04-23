@@ -89,9 +89,29 @@ describe('calculateAuditTTL', () => {
     expect(delta).toBeLessThanOrEqual(365 * 24 * 60 * 60 + 5);
   });
 
-  it('returns 7 years for premium tier', () => {
+  it('returns 7 years for premium tier (legacy alias)', () => {
     const now = Math.floor(Date.now() / 1000);
     const ttl = calculateAuditTTL('premium');
+    const delta = ttl - now;
+    expect(delta).toBeGreaterThanOrEqual(7 * 365 * 24 * 60 * 60 - 5);
+    expect(delta).toBeLessThanOrEqual(7 * 365 * 24 * 60 * 60 + 5);
+  });
+
+  it('returns 7 years for enterprise tier (canonical SOC2/GDPR retention)', () => {
+    // Regression: pre-fix the `enterprise` tier was missing from both the
+    // TenantTier union and this lookup map, causing enterprise tenants to
+    // silently fall through to the 90-day basic default. See
+    // docs/reviews/wave14-system-audit.md finding C2.
+    const now = Math.floor(Date.now() / 1000);
+    const ttl = calculateAuditTTL('enterprise');
+    const delta = ttl - now;
+    expect(delta).toBeGreaterThanOrEqual(7 * 365 * 24 * 60 * 60 - 5);
+    expect(delta).toBeLessThanOrEqual(7 * 365 * 24 * 60 * 60 + 5);
+  });
+
+  it('returns 7 years for dedicated tier', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const ttl = calculateAuditTTL('dedicated');
     const delta = ttl - now;
     expect(delta).toBeGreaterThanOrEqual(7 * 365 * 24 * 60 * 60 - 5);
     expect(delta).toBeLessThanOrEqual(7 * 365 * 24 * 60 * 60 + 5);
@@ -101,8 +121,14 @@ describe('calculateAuditTTL', () => {
     expect(AUDIT_TTL_DAYS_BY_TIER).toEqual({
       basic: 90,
       advanced: 365,
+      enterprise: 7 * 365,
+      dedicated: 7 * 365,
       premium: 7 * 365,
     });
+  });
+
+  it('treats enterprise and premium identically (premium is a legacy alias)', () => {
+    expect(AUDIT_TTL_DAYS_BY_TIER.enterprise).toBe(AUDIT_TTL_DAYS_BY_TIER.premium);
   });
 
   it('falls back to basic retention for an unknown tier (defensive)', () => {
@@ -146,6 +172,21 @@ describe('AuditTrail.logAction — tier-enforced TTL', () => {
   it('premium tenant -> 7-year TTL is written to DynamoDB', async () => {
     const before = Math.floor(Date.now() / 1000);
     await trail.logAction(buildParams({ tenantTier: 'premium' }));
+    const after = Math.floor(Date.now() / 1000);
+
+    const item = mock.puts[0].Item;
+    const expectedMin = before + 7 * 365 * 24 * 60 * 60 - 5;
+    const expectedMax = after + 7 * 365 * 24 * 60 * 60 + 5;
+    expect(item.ttl).toBeGreaterThanOrEqual(expectedMin);
+    expect(item.ttl).toBeLessThanOrEqual(expectedMax);
+  });
+
+  it('enterprise tenant -> 7-year TTL is written to DynamoDB (C2 regression)', async () => {
+    // Pre-fix: enterprise fell through to 90-day basic retention because the
+    // TenantTier union was 'basic' | 'advanced' | 'premium' and the lookup
+    // had no 'enterprise' key. See wave14-system-audit.md C2.
+    const before = Math.floor(Date.now() / 1000);
+    await trail.logAction(buildParams({ tenantTier: 'enterprise' }));
     const after = Math.floor(Date.now() / 1000);
 
     const item = mock.puts[0].Item;

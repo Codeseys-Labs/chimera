@@ -44,7 +44,15 @@ export interface TierChangeResult {
   updatedItems: string[];
 }
 
-/** Feature flags that apply at each tier */
+/** Feature flags that apply at each tier.
+ *  `enterprise`, `dedicated`, and (legacy) `premium` share the same full-feature config. */
+const FULL_TIER_FEATURES = {
+  codeInterpreter: true,
+  browser: true,
+  cronJobs: true,
+  selfEditingIac: true,
+  maxSubagents: 20,
+} as const;
 const TIER_FEATURES: Record<TenantTier, Omit<TenantFeatureConfig, 'PK' | 'SK' | 'allowedModelProviders' | 'mcpToolsEnabled'>> = {
   basic: {
     codeInterpreter: false,
@@ -60,13 +68,9 @@ const TIER_FEATURES: Record<TenantTier, Omit<TenantFeatureConfig, 'PK' | 'SK' | 
     selfEditingIac: false,
     maxSubagents: 5,
   },
-  premium: {
-    codeInterpreter: true,
-    browser: true,
-    cronJobs: true,
-    selfEditingIac: true,
-    maxSubagents: 20,
-  },
+  enterprise: { ...FULL_TIER_FEATURES },
+  dedicated: { ...FULL_TIER_FEATURES },
+  premium: { ...FULL_TIER_FEATURES }, // legacy alias
 };
 
 const MODEL_COSTS: ModelWithCost[] = [
@@ -76,7 +80,17 @@ const MODEL_COSTS: ModelWithCost[] = [
   { modelId: 'us.anthropic.claude-opus-4-6-v1:0', costPer1kTokens: 0.045 },
 ];
 
-/** Model pools and monthly budgets per tier — mirrors TenantService.createTenant */
+/** Model pools and monthly budgets per tier — mirrors TenantService.createTenant.
+ *  `enterprise`, `dedicated`, and (legacy) `premium` share the same full model pool. */
+const FULL_TIER_MODELS = {
+  allowedModels: [
+    'us.amazon.nova-micro-v1:0',
+    'us.amazon.nova-lite-v1:0',
+    'us.anthropic.claude-sonnet-4-6-v1:0',
+    'us.anthropic.claude-opus-4-6-v1:0',
+  ],
+  monthlyBudgetUsd: 5000,
+} as const;
 const TIER_MODELS: Record<TenantTier, { allowedModels: string[]; monthlyBudgetUsd: number }> = {
   basic: {
     allowedModels: ['us.amazon.nova-lite-v1:0', 'us.anthropic.claude-sonnet-4-6-v1:0'],
@@ -90,18 +104,18 @@ const TIER_MODELS: Record<TenantTier, { allowedModels: string[]; monthlyBudgetUs
     ],
     monthlyBudgetUsd: 1000,
   },
-  premium: {
-    allowedModels: [
-      'us.amazon.nova-micro-v1:0',
-      'us.amazon.nova-lite-v1:0',
-      'us.anthropic.claude-sonnet-4-6-v1:0',
-      'us.anthropic.claude-opus-4-6-v1:0',
-    ],
-    monthlyBudgetUsd: 5000,
-  },
+  enterprise: { allowedModels: [...FULL_TIER_MODELS.allowedModels], monthlyBudgetUsd: FULL_TIER_MODELS.monthlyBudgetUsd },
+  dedicated: { allowedModels: [...FULL_TIER_MODELS.allowedModels], monthlyBudgetUsd: FULL_TIER_MODELS.monthlyBudgetUsd },
+  premium: { allowedModels: [...FULL_TIER_MODELS.allowedModels], monthlyBudgetUsd: FULL_TIER_MODELS.monthlyBudgetUsd },
 };
 
-/** Quota limits per tier for known resources */
+/** Quota limits per tier for known resources.
+ *  `enterprise`, `dedicated`, and (legacy) `premium` share the same top-tier quotas. */
+const FULL_TIER_QUOTAS = {
+  'agent-sessions': 20,
+  'api-requests': 100_000,
+  'tokens-monthly': 100_000_000,
+} as const;
 export const TIER_QUOTA_LIMITS: Record<TenantTier, Record<string, number>> = {
   basic: {
     'agent-sessions': 1,
@@ -113,11 +127,9 @@ export const TIER_QUOTA_LIMITS: Record<TenantTier, Record<string, number>> = {
     'api-requests': 10_000,
     'tokens-monthly': 10_000_000,
   },
-  premium: {
-    'agent-sessions': 20,
-    'api-requests': 100_000,
-    'tokens-monthly': 100_000_000,
-  },
+  enterprise: { ...FULL_TIER_QUOTAS },
+  dedicated: { ...FULL_TIER_QUOTAS },
+  premium: { ...FULL_TIER_QUOTAS }, // legacy alias
 };
 
 export class TenantLifecycleService {

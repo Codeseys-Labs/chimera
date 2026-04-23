@@ -25,17 +25,27 @@ import type { TenantTier } from '@chimera/shared';
  * Tier-based audit retention in days.
  *
  * Compliance requirement (see security-review.md M3):
- *   basic    -> 90 days
- *   advanced -> 365 days (1 year)
- *   premium  -> 2555 days (7 years)
+ *   basic      -> 90 days
+ *   advanced   -> 365 days (1 year)
+ *   enterprise -> 2555 days (7 years)  — SOC2 / GDPR long-tail retention
+ *   dedicated  -> 2555 days (7 years)  — dedicated deployment, enterprise SLA
+ *   premium    -> 2555 days (7 years)  — LEGACY alias for `enterprise`
  *
  * These values are the single source of truth for audit TTL. A caller
  * MUST NOT override the TTL -- doing so defeats compliance (e.g. a basic
  * tenant could write a 7-year TTL).
+ *
+ * `enterprise` and `premium` MUST map to the same retention. Before this
+ * mapping existed, the `TenantTier` union lacked `enterprise` entirely,
+ * causing enterprise tenants to silently fall through to the defensive
+ * basic/90-day fallback in {@link calculateAuditTTL} -- a 7-year GDPR/SOC2
+ * compliance violation. See wave14-system-audit.md finding C2.
  */
 export const AUDIT_TTL_DAYS_BY_TIER: Record<TenantTier, number> = {
   basic: 90,
   advanced: 365,
+  enterprise: 365 * 7,
+  dedicated: 365 * 7,
   premium: 365 * 7,
 };
 

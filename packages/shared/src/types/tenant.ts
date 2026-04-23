@@ -5,9 +5,20 @@
  */
 
 /**
- * Tenant subscription tier
+ * Tenant subscription tier.
+ *
+ * Canonical tiers (see docs/architecture/canonical-data-model.md):
+ *   - `basic`      — 90-day audit retention
+ *   - `advanced`   — 1-year audit retention
+ *   - `enterprise` — 7-year audit retention (SOC2 / GDPR)
+ *   - `dedicated`  — 7-year audit retention, dedicated deployment
+ *
+ * `premium` is a LEGACY alias for `enterprise`. It predates the canonical
+ * naming and is still accepted so existing tenants and test fixtures keep
+ * working, but all new code SHOULD use `enterprise`. The two values are
+ * treated identically for retention, feature gating, and billing.
  */
-export type TenantTier = 'basic' | 'advanced' | 'premium';
+export type TenantTier = 'basic' | 'advanced' | 'enterprise' | 'dedicated' | 'premium';
 
 /**
  * Tenant lifecycle status

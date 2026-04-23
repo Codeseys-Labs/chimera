@@ -96,9 +96,11 @@ const DEFAULT_MODEL_COSTS: Record<string, number> = {
  * the last line of defense so a Basic tenant cannot land on Opus even if
  * their tier config is incomplete.
  *
- * - `basic`    — cheap models only (Haiku, Sonnet). Sonnet allowed but costly.
- * - `advanced` — Haiku, Sonnet, Opus.
- * - `premium`  — all models (empty array = no ceiling).
+ * - `basic`      — cheap models only (Haiku, Sonnet). Sonnet allowed but costly.
+ * - `advanced`   — Haiku, Sonnet, Opus.
+ * - `enterprise` — all models (empty array = no ceiling).
+ * - `dedicated`  — all models (empty array = no ceiling).
+ * - `premium`    — LEGACY alias for `enterprise`, all models.
  */
 export const MODEL_TIER_ALLOWLIST: Record<TenantTier, readonly string[]> = {
   basic: [
@@ -110,7 +112,9 @@ export const MODEL_TIER_ALLOWLIST: Record<TenantTier, readonly string[]> = {
     'us.anthropic.claude-sonnet-4-6-v1:0',
     'us.anthropic.claude-opus-4-7',
   ] as const,
-  premium: [] as const, // empty = all models allowed
+  enterprise: [] as const, // empty = all models allowed
+  dedicated: [] as const, // empty = all models allowed
+  premium: [] as const, // empty = all models allowed (legacy alias for enterprise)
 } as const;
 
 /**
@@ -121,6 +125,8 @@ export const MODEL_TIER_ALLOWLIST: Record<TenantTier, readonly string[]> = {
 const TIER_FALLBACK_MODEL: Record<TenantTier, string> = {
   basic: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   advanced: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  enterprise: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  dedicated: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   premium: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
 };
 

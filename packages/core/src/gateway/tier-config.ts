@@ -101,12 +101,15 @@ export const TOOL_TIER_MAP: Record<ToolIdentifier, ToolTier | 'discovery'> = {
 };
 
 /**
- * Tenant tier to maximum tool tier mapping
+ * Tenant tier to maximum tool tier mapping.
+ * `enterprise`, `dedicated`, and (legacy) `premium` all grant full tier-3 access.
  */
 const TENANT_TIER_ACCESS: Record<TenantTier, ToolTier> = {
   basic: 1,
   advanced: 2,
-  premium: 3,
+  enterprise: 3,
+  dedicated: 3,
+  premium: 3, // legacy alias for enterprise
 };
 
 /**
