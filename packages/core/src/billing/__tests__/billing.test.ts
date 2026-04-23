@@ -4,8 +4,8 @@
  * Tests for CostTracker and BudgetMonitor
  */
 
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { CostTracker } from '../cost-tracker';
+import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
+import { CostTracker, emitEmfMetric } from '../cost-tracker';
 import type { CostTrackerConfig, RecordCostParams, DynamoDBClient } from '../cost-tracker';
 
 // Mock DynamoDB client
@@ -341,6 +341,132 @@ describe('CostTracker', () => {
       const cost = await tracker.getMonthlyCost('tenant-123', period);
       expect(cost).not.toBeNull();
       expect(cost!.totalCostUsd).toBe(0);
+    });
+  });
+
+  describe('EMF metric emission', () => {
+    it('should emit tenant_hourly_cost_usd on recordCost', async () => {
+      const logs: string[] = [];
+      const spy = spyOn(console, 'log').mockImplementation((msg: any) => {
+        logs.push(String(msg));
+      });
+
+      try {
+        await tracker.recordCost({
+          tenantId: 'tenant-abc',
+          tier: 'basic',
+          service: 'bedrock-inference',
+          costUsd: 0.0125,
+          modelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+          inputTokens: 250,
+          outputTokens: 120,
+          requestCount: 1,
+        });
+      } finally {
+        spy.mockRestore();
+      }
+
+      // Exactly one EMF line should have been emitted for the recordCost call
+      const emfLines = logs
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter((j) => j && j._aws && j.tenant_hourly_cost_usd !== undefined);
+
+      expect(emfLines).toHaveLength(1);
+      const emf = emfLines[0]!;
+
+      // Envelope shape
+      expect(emf._aws.CloudWatchMetrics[0].Namespace).toBe('Chimera/Billing');
+      expect(emf._aws.CloudWatchMetrics[0].Metrics[0]).toEqual({
+        Name: 'tenant_hourly_cost_usd',
+        Unit: 'None',
+      });
+
+      // Dimension map (flattened at envelope root)
+      expect(emf.tenant_id).toBe('tenant-abc');
+      expect(emf.tier).toBe('basic');
+      expect(emf.model_id).toBe('us.anthropic.claude-haiku-4-5-20251001-v1:0');
+      expect(emf.service).toBe('bedrock-inference');
+
+      // Value = cost in USD for this single invocation (not cumulative)
+      expect(emf.tenant_hourly_cost_usd).toBe(0.0125);
+    });
+
+    it('should default tier/model_id when not supplied', async () => {
+      const logs: string[] = [];
+      const spy = spyOn(console, 'log').mockImplementation((msg: any) => {
+        logs.push(String(msg));
+      });
+
+      try {
+        await tracker.recordCost({
+          tenantId: 'tenant-xyz',
+          service: 'dynamodb',
+          costUsd: 0.0003,
+        });
+      } finally {
+        spy.mockRestore();
+      }
+
+      const emf = logs
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .find((j) => j && j.tenant_hourly_cost_usd !== undefined);
+
+      expect(emf).toBeDefined();
+      expect(emf.tier).toBe('unknown');
+      expect(emf.model_id).toBe('none');
+      expect(emf.service).toBe('dynamodb');
+    });
+
+    it('emitEmfMetric helper produces a well-formed EMF line', () => {
+      const logs: string[] = [];
+      const spy = spyOn(console, 'log').mockImplementation((msg: any) => {
+        logs.push(String(msg));
+      });
+
+      try {
+        emitEmfMetric(
+          'Chimera/Billing',
+          'tenant_hourly_cost_usd',
+          1.25,
+          'None',
+          { tenant_id: 't1', tier: 'advanced', model_id: 'm1', service: 'bedrock-inference' }
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(logs).toHaveLength(1);
+      const envelope = JSON.parse(logs[0]);
+      expect(envelope._aws.CloudWatchMetrics[0].Namespace).toBe('Chimera/Billing');
+      expect(envelope._aws.CloudWatchMetrics[0].Dimensions[0]).toEqual([
+        'tenant_id',
+        'tier',
+        'model_id',
+        'service',
+      ]);
+      expect(envelope.tenant_hourly_cost_usd).toBe(1.25);
+    });
+
+    it('emitEmfMetric never throws on pathological input', () => {
+      // Circular reference would break JSON.stringify; helper must swallow.
+      const circular: any = { tenant_id: 't1', tier: 'basic', model_id: 'm' };
+      circular.self = circular;
+
+      expect(() => {
+        emitEmfMetric('Chimera/Billing', 'tenant_hourly_cost_usd', 0, 'None', circular);
+      }).not.toThrow();
     });
   });
 });

@@ -19,6 +19,51 @@ import type {
 } from '@aws-sdk/lib-dynamodb';
 
 /**
+ * Emit a CloudWatch EMF-formatted metric line to stdout.
+ *
+ * The Lambda/ECS runtime auto-publishes EMF metrics from stdout logs, so no
+ * IAM / PutMetricData is required. Failures here are swallowed — metric
+ * emission must never break the caller (billing accumulation succeeds even
+ * if the metric line is malformed or stdout is closed).
+ *
+ * Duplicated (by design) from `packages/core/src/evolution/model-router.ts`
+ * to avoid a cross-directory coupling between billing and evolution. Both
+ * copies emit the identical envelope shape; see
+ * `infra/lambdas/skill-pipeline/skill-deployment/registry-writer.mjs` for
+ * the JavaScript reference.
+ *
+ * Exported for unit-test introspection (see `billing.test.ts`).
+ */
+export function emitEmfMetric(
+  namespace: string,
+  metricName: string,
+  value: number,
+  unit: string,
+  dimensions: Record<string, string>
+): void {
+  try {
+    const emf = {
+      _aws: {
+        Timestamp: Date.now(),
+        CloudWatchMetrics: [
+          {
+            Namespace: namespace,
+            Dimensions: [Object.keys(dimensions)],
+            Metrics: [{ Name: metricName, Unit: unit }],
+          },
+        ],
+      },
+      ...dimensions,
+      [metricName]: value,
+    };
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify(emf));
+  } catch {
+    // never throw from metric emission
+  }
+}
+
+/**
  * DynamoDB client interface
  */
 export interface DynamoDBClient {
@@ -50,6 +95,13 @@ export interface RecordCostParams {
   inputTokens?: number;
   outputTokens?: number;
   requestCount?: number;
+  /**
+   * Tenant tier (basic/advanced/enterprise/dedicated/premium). Optional;
+   * defaults to "unknown" when absent. Used as a CloudWatch dimension on
+   * the `tenant_hourly_cost_usd` EMF metric so dashboards can slice spend
+   * by tier without an extra tenant-service lookup on the hot path.
+   */
+  tier?: string;
 }
 
 /**
@@ -224,6 +276,33 @@ export class CostTracker {
     };
 
     await this.config.dynamodb.update(updateParams);
+
+    // --- Observability: emit per-invocation cost metric (EMF) ---
+    // `tenant_hourly_cost_usd` is the recommended-HIGH metric from
+    // `docs/reviews/cost-observability-audit.md`. Emitting per-invocation
+    // lets CloudWatch aggregate to hourly buckets at query time via
+    // `SUM(tenant_hourly_cost_usd)` over a 1-hour period — we don't need
+    // in-process rolling windows (which would require shared state across
+    // Lambda/ECS containers).
+    //
+    // CloudWatch doesn't have a USD unit, so we use "None" (the canonical
+    // choice for currency amounts). Dimensions are kept tight to control
+    // custom-metric cardinality cost: tenant_id × tier × model_id. We
+    // omit `service` from dimensions because non-bedrock services
+    // (dynamodb, s3, cloudwatch) don't carry a model_id and would
+    // pollute the namespace with "model_id=unknown" rollups.
+    emitEmfMetric(
+      'Chimera/Billing',
+      'tenant_hourly_cost_usd',
+      costUsd,
+      'None',
+      {
+        tenant_id: tenantId,
+        tier: params.tier ?? 'unknown',
+        model_id: modelId ?? 'none',
+        service,
+      }
+    );
   }
 
   /**

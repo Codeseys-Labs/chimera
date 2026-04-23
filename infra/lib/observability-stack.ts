@@ -881,6 +881,19 @@ exports.handler = async () => {
       period: cdk.Duration.hours(1),
     });
 
+    // Per-invocation tenant cost (EMF emission from CostTracker.recordCost).
+    // Aggregated at dashboard query time: SUM over a 1-hour period yields
+    // the hourly cost. Dimensions: tenant_id, tier, model_id, service.
+    // See packages/core/src/billing/cost-tracker.ts and
+    // docs/architecture/observability.md §tenant_hourly_cost_usd.
+    const tenantHourlyCostMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Billing',
+      metricName: 'tenant_hourly_cost_usd',
+      statistic: 'Sum',
+      period: cdk.Duration.hours(1),
+      label: 'Hourly cost (USD, all tenants)',
+    });
+
     // Tier quota utilization
     const quotaUtilizationMetric = new cloudwatch.Metric({
       namespace: 'Chimera/Billing',
@@ -898,6 +911,12 @@ exports.handler = async () => {
     });
 
     this.costAttributionDashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Hourly Cost (USD) — from tenant_hourly_cost_usd EMF',
+        left: [tenantHourlyCostMetric],
+        width: 12,
+        leftYAxis: { label: 'USD/hour', min: 0 },
+      }),
       new cloudwatch.GraphWidget({
         title: 'Monthly Spend by Tenant',
         left: [tenantSpendMetric],
@@ -1033,6 +1052,119 @@ exports.handler = async () => {
         ],
       })
     );
+
+    // ======================================================================
+    // Tool invocation observability (Wave-12 gateway_instrumentation.py)
+    //
+    // Per-invocation EMF metrics emitted from
+    // `packages/agents/tools/gateway_instrumentation.py::instrument_tool`:
+    //   * Chimera/Tools::tool_invocation_duration_ms (Milliseconds)
+    //   * Chimera/Tools::Success                     (Count, 0 or 1)
+    // Dimensions: {Service, TenantId, Tier, ToolName}.
+    //
+    // `tool:success_rate_percent` is computed here via CloudWatch Metric
+    // Math from the raw `Success` counter (see
+    // `docs/architecture/observability.md` for the full rationale —
+    // briefly: Metric Math is stateless, cheaper than a separate
+    // pre-aggregated metric, and lets operators change the window at
+    // query time). Expression: (SUM(Success) / SAMPLE_COUNT(Success)) * 100.
+    // ======================================================================
+    const toolInvocationDuration = new cloudwatch.Metric({
+      namespace: 'Chimera/Tools',
+      metricName: 'tool_invocation_duration_ms',
+      statistic: 'p99',
+      period: cdk.Duration.minutes(5),
+      label: 'Tool duration p99 (ms)',
+    });
+
+    const toolSuccessSum = new cloudwatch.Metric({
+      namespace: 'Chimera/Tools',
+      metricName: 'Success',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+      label: 'Tool Success (Sum)',
+    });
+
+    const toolSuccessSampleCount = new cloudwatch.Metric({
+      namespace: 'Chimera/Tools',
+      metricName: 'Success',
+      statistic: 'SampleCount',
+      period: cdk.Duration.minutes(5),
+      label: 'Tool invocations (SampleCount)',
+    });
+
+    // Derived: success rate % via Metric Math.
+    // Guarded against divide-by-zero implicitly: CloudWatch returns a
+    // missing datapoint when the denominator is 0/missing, and the
+    // alarm's treatMissingData=NOT_BREACHING keeps quiet tools silent
+    // rather than firing on zero traffic.
+    const toolSuccessRatePercent = new cloudwatch.MathExpression({
+      expression: '(m1 / m2) * 100',
+      usingMetrics: { m1: toolSuccessSum, m2: toolSuccessSampleCount },
+      period: cdk.Duration.minutes(5),
+      label: 'Tool success rate (%)',
+    });
+
+    this.platformDashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown:
+          `## Tool Invocations (\`Chimera/Tools\`)\n\n` +
+          `EMF from \`packages/agents/tools/gateway_instrumentation.py\`. ` +
+          `Success rate is computed via CloudWatch Metric Math ` +
+          `(\`(SUM(Success) / SAMPLE_COUNT(Success)) * 100\`) — see ` +
+          `\`docs/architecture/observability.md\` for the full derivation.`,
+        width: 24,
+        height: 2,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Tool invocation duration (p99)',
+        left: [toolInvocationDuration],
+        width: 12,
+        leftYAxis: { label: 'Milliseconds', min: 0 },
+        leftAnnotations: [
+          {
+            value: 30_000,
+            label: 'p99 SLO (30s)',
+            color: '#ff0000',
+          },
+        ],
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Tool success rate (%) — derived via Metric Math',
+        left: [toolSuccessRatePercent],
+        width: 12,
+        leftYAxis: { label: 'Percent', min: 0, max: 100 },
+        leftAnnotations: [
+          {
+            value: 80,
+            label: 'HIGH alarm threshold (80%)',
+            color: '#ff0000',
+          },
+        ],
+      })
+    );
+
+    // Alarm: sustained low success rate. Fires when rate < 80% across 2
+    // consecutive 5-min windows (10-min sustained dip). NOT_BREACHING on
+    // missing data so quiet tools don't alarm.
+    const toolSuccessRateRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}tool-success-rate-low`
+      : 'Check gateway_instrumentation logs for failing ToolName dimension; review recent tool deploys and Bedrock/downstream throttle rate.';
+
+    const toolSuccessRateAlarm = new cloudwatch.Alarm(this, 'ToolSuccessRateAlarm', {
+      alarmName: `chimera-${props.envName}-tool-success-rate-low`,
+      alarmDescription:
+        `Tool success rate fell below 80% for 10 minutes. ` +
+        `Computed via Metric Math from Chimera/Tools::Success. ` +
+        `RUNBOOK: ${toolSuccessRateRunbook}`,
+      metric: toolSuccessRatePercent,
+      threshold: 80,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    toolSuccessRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+    toolSuccessRateAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
 
     // ======================================================================
     // Registry Observability (AgentCore Registry Phase 1/2 migration)
