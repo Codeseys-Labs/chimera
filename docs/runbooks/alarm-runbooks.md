@@ -887,6 +887,58 @@ High fallback = Registry unhealthy or migration incomplete. Use the decision mat
 
 ---
 
+## Queue / DLQ Alarms
+
+All SQS queues provisioned via `ChimeraQueue` (`infra/constructs/chimera-queue.ts` lines 69–86) automatically register two alarms per queue:
+
+### Queue Backlog Alarm
+
+**Alarm Name:** `<queueName>-backlog` (e.g., `chimera-agent-tasks-prod-dlq-backlog`)
+
+**Trigger:** `ApproximateNumberOfMessagesVisible > 1000` for 1 evaluation period (1 minute)
+
+**Severity:** SEV2 on DLQ (producer accumulating failures), SEV1 on main queue (consumer can't keep up)
+
+**Full runbook:** [dlq-drain-procedure.md](./dlq-drain-procedure.md)
+
+### Queue Message-Age Alarm
+
+**Alarm Name:** `<queueName>-message-age`
+
+**Trigger:** `ApproximateAgeOfOldestMessage > 300` seconds (5 min) for 1 evaluation period
+
+**Severity:** SEV2 (processing stalled)
+
+**Full runbook:** [dlq-drain-procedure.md](./dlq-drain-procedure.md) — classification + replay procedure
+
+---
+
+## Deploy Pipeline Alarms
+
+Defined in `infra/lib/pipeline-stack.ts` lines 1350–1383. These fire during the canary `Rollout` stage and can auto-trigger the `RollbackFunction` Lambda.
+
+### Pipeline Error Rate Alarm
+
+**Alarm Name:** `Chimera-Pipeline-ErrorRate-${env}`
+
+**Trigger:** `AgentPlatform/Errors > 50` in 5-minute window, 1 evaluation period
+
+**Severity:** SEV2 — canary deploy in distress
+
+**Full runbook:** [canary-rollback.md](./canary-rollback.md)
+
+### Pipeline Latency Alarm
+
+**Alarm Name:** `Chimera-Pipeline-Latency-${env}`
+
+**Trigger:** P99 `AgentPlatform/InvocationDuration > 60000` ms (60s) for 2 consecutive 5-minute periods
+
+**Severity:** SEV2 — canary latency regression
+
+**Full runbook:** [canary-rollback.md](./canary-rollback.md)
+
+---
+
 ## Alarm Response Checklist
 
 When an alarm fires:
@@ -908,6 +960,9 @@ When an alarm fires:
 - [Disaster Recovery Guide](../guides/disaster-recovery.md) — RTO/RPO procedures
 - [ObservabilityStack CDK](../../infra/lib/observability-stack.ts) — Alarm definitions
 - [Capacity Planning Runbook](./capacity-planning.md) — Proactive scaling
+- [DLQ Drain Procedure](./dlq-drain-procedure.md) — Response for `*-backlog` and `*-message-age` DLQ alarms
+- [Canary Rollback](./canary-rollback.md) — Response for `Chimera-Pipeline-ErrorRate` / `Chimera-Pipeline-Latency`
+- [Skill Compromise Response](./skill-compromise-response.md) — Response when a skill-throttle surge is caused by a malicious skill
 
 ---
 
