@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.6.2 (2026-04-23)
+
+### Added
+
+- First deploy to `baladita+Bedrock-Admin` account — 14/14 stacks live in us-west-2
+- AgentCore harness research (`docs/research/agentcore-harness-2026-04-22/`) — verdict: PARTIAL-ADOPT, don't replatform
+- Wave-14 system audit (`docs/reviews/wave14-system-audit.md`) — 2 CRITICAL + 5 HIGH + 4 MEDIUM + 5 LOW findings
+- Wave-13 retrospective documenting the first deploy experience
+
+### Fixed
+
+- **CRITICAL** `packages/core/src/skills/registry.ts` — GSI names + partition keys now match CDK data-stack. Skill marketplace browsing (`listByCategory`/`listByAuthor`/`listByTrustLevel`) was throwing `ValidationException` at runtime on every call
+- **CRITICAL** `packages/shared/src/types/tenant.ts` + `audit-trail.ts` — added `enterprise` + `dedicated` tiers. Enterprise tenants were silently falling through to 90-day audit retention instead of the 7-year compliance requirement (GDPR/SOC2 violation)
+- **P0** CLI `--source github` tarball extraction — auto-detect wrapped vs flat archives (broke first-deploy attempt on v0.6.1)
+- **P0** Observability stack AWS Config dependency — gated behind `enableConfigRules` context flag (blocked Observability + 2 downstream stacks on fresh accounts without AWS Config enabled)
+
+### Refactored
+
+- Complete bare-except sweep: `evolution_tools.py` narrowed to `(ClientError, BotoCoreError)` with 7 test mocks updated atomically
+
 ## v0.6.1 (2026-04-21)
 
 ### Added
