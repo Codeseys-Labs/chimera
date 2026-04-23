@@ -1,0 +1,148 @@
+# Dependabot configuration for AWS Chimera
+#
+# Closes cleanup item #8 in docs/reviews/OPEN-PUNCH-LIST.md.
+#
+# Bun uses the npm registry underneath, so the "npm" package-ecosystem covers
+# every TypeScript workspace (the monorepo root + each package under packages/).
+# Python is managed via uv + pyproject.toml in packages/agents; Dependabot's
+# "pip" ecosystem reads pyproject.toml + uv.lock. Docker and GitHub Actions
+# are kept current to pull security patches into the skill-pipeline base images
+# and CI workflows.
+#
+# Schedule: weekly (Monday 06:00 UTC) to cluster reviews and avoid mid-week
+# noise. Adjust open-pull-requests-limit if review throughput becomes a
+# bottleneck.
+
+version: 2
+updates:
+  # TypeScript monorepo root (hoisted workspace deps + tooling)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "typescript"
+    groups:
+      aws-sdk:
+        patterns:
+          - "@aws-sdk/*"
+          - "aws-cdk*"
+      types:
+        patterns:
+          - "@types/*"
+      dev-deps:
+        dependency-type: "development"
+
+  # Per-workspace manifests — each needs its own entry so Dependabot updates
+  # the package.json that owns the dep.
+  - package-ecosystem: "npm"
+    directory: "/packages/core"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/shared"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/chat-gateway"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/sse-bridge"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "frontend"
+
+  # Python agents (uv + pyproject.toml)
+  - package-ecosystem: "pip"
+    directory: "/packages/agents"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      aws:
+        patterns:
+          - "boto3"
+          - "botocore"
+          - "bedrock-agentcore*"
+      strands:
+        patterns:
+          - "strands*"
+
+  # GitHub Actions (action pin refresh keeps CI reproducible)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+
+  # Docker base images — skill-pipeline + chat-gateway runtime containers
+  - package-ecosystem: "docker"
+    directory: "/packages/agents"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/packages/chat-gateway"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
