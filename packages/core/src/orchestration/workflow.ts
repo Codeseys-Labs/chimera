@@ -306,6 +306,12 @@ export class WorkflowEngine {
 
   /**
    * Execute task step (delegate to agent)
+   *
+   * Delegation to the target agent IS implemented. What is NOT implemented
+   * is the wait-for-agent-completion step — the original code returned a
+   * hardcoded mock result, silently letting every task "succeed" regardless
+   * of what the agent did. Rather than continue shipping that lie, we throw
+   * after the delegation is submitted. See Wave-14 audit finding M2.
    */
   private async executeTaskStep(
     execution: WorkflowExecution,
@@ -332,15 +338,14 @@ export class WorkflowEngine {
       timeoutSeconds: step.timeoutSeconds
     };
 
-    // Delegate to agent
+    // Delegate to agent (this part IS implemented)
     await this.orchestrator.delegateTask(delegation);
 
-    // TODO: Wait for agent to complete task
-    // For now, return mock result
-    return {
-      taskId: delegation.taskId,
-      result: 'Task completed (mock)'
-    };
+    // The wait-for-completion half is NOT implemented. Throw rather than
+    // silently return a fabricated success result.
+    throw new Error(
+      'not implemented: WorkflowEngine.executeTaskStep — task delegation is submitted, but awaiting agent completion is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**
@@ -377,23 +382,23 @@ export class WorkflowEngine {
 
   /**
    * Execute choice step (conditional branching)
+   *
+   * NOT IMPLEMENTED — JSONPath condition evaluation is a skeleton. The
+   * previous implementation unconditionally returned the first choice,
+   * which silently routed every workflow down the same branch regardless
+   * of the actual condition. See Wave-14 audit finding M2.
    */
   private async executeChoiceStep(
-    execution: WorkflowExecution,
+    _execution: WorkflowExecution,
     step: WorkflowStep
   ): Promise<Record<string, unknown>> {
     if (!step.choices || step.choices.length === 0) {
       throw new Error('Choice step requires choices');
     }
 
-    // TODO: Evaluate JSONPath conditions
-    // For now, return first choice
-    const selectedChoice = step.choices[0];
-
-    return {
-      choiceSelected: selectedChoice.next,
-      condition: selectedChoice.condition
-    };
+    throw new Error(
+      'not implemented: WorkflowEngine.executeChoiceStep — JSONPath condition evaluation is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**
@@ -416,13 +421,16 @@ export class WorkflowEngine {
 
   /**
    * Execute map step (iterate over collection)
+   *
+   * NOT IMPLEMENTED — map iteration is a skeleton. See Wave-14 audit M2.
    */
   private async executeMapStep(
-    execution: WorkflowExecution,
-    step: WorkflowStep
+    _execution: WorkflowExecution,
+    _step: WorkflowStep
   ): Promise<Record<string, unknown>> {
-    // TODO: Implement map iteration
-    throw new Error('Map step not yet implemented');
+    throw new Error(
+      'not implemented: WorkflowEngine.executeMapStep — map iteration is a skeleton (Wave-14 audit M2)'
+    );
   }
 
   /**

@@ -335,7 +335,10 @@ describe('WorkflowEngine', () => {
   // =========================================================================
 
   describe('executeWorkflow — choice steps', () => {
-    it('should execute choice step and follow first branch', async () => {
+    it('should fail because JSONPath evaluation is not yet implemented', async () => {
+      // Choice branching requires JSONPath evaluation, which is a skeleton
+      // (Wave-14 audit M2). The step now throws "not implemented" rather
+      // than silently routing every execution down the first branch.
       engine.registerWorkflow({
         workflowId: 'wf-choice',
         name: 'Choice Test',
@@ -356,12 +359,12 @@ describe('WorkflowEngine', () => {
       });
 
       const execId = await engine.startExecution('wf-choice', 'tenant', 'user', { value: 5 });
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 300));
 
       const execution = engine.getExecution(execId)!;
-      expect(execution.status).toBe('succeeded');
-      // Choice step returns first choice and then follows next step
-      expect(execution.stepResults['choice-1']).toBeDefined();
+      expect(execution.status).toBe('failed');
+      expect(execution.error?.message).toContain('not implemented');
+      expect(execution.error?.stepId).toBe('choice-1');
     });
 
     it('should fail if choices array is empty', async () => {
@@ -394,15 +397,12 @@ describe('WorkflowEngine', () => {
   // =========================================================================
 
   describe('executeWorkflow — task steps', () => {
-    it('should execute task step by delegating to orchestrator', async () => {
-      // First spawn the target agent so delegation works
-      await orchestrator.spawnAgent({
-        tenantId: 'tenant-123',
-        agentId: 'agent-001',
-        role: 'worker',
-        capabilities: [],
-      });
-
+    it('should fail because agent-completion wait is not yet implemented', async () => {
+      // `AgentOrchestrator.spawnAgent` is gated (Wave-14 audit M1) so
+      // there is no registered agent; `delegateTask` therefore throws
+      // "Agent not found", which the step reports as a step error. Either
+      // way the task step cannot silently "succeed" — the prior mock
+      // result is gone.
       engine.registerWorkflow({
         workflowId: 'wf-task',
         name: 'Task Test',
@@ -420,12 +420,11 @@ describe('WorkflowEngine', () => {
       });
 
       const execId = await engine.startExecution('wf-task', 'tenant-123', 'user', {});
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 300));
 
       const execution = engine.getExecution(execId)!;
-      // Task delegation succeeds (returns mock result)
-      expect(execution.status).toBe('succeeded');
-      expect(execution.stepResults['task-1']).toBeDefined();
+      expect(execution.status).toBe('failed');
+      expect(execution.error?.stepId).toBe('task-1');
     });
 
     it('should fail if task step missing agentId', async () => {
@@ -498,7 +497,7 @@ describe('WorkflowEngine', () => {
 
       const execution = engine.getExecution(execId)!;
       expect(execution.status).toBe('failed');
-      expect(execution.error?.message).toContain('Map step not yet implemented');
+      expect(execution.error?.message).toContain('not implemented');
     });
   });
 

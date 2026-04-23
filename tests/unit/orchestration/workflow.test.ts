@@ -461,7 +461,9 @@ describe('WorkflowEngine', () => {
       expect(execution).toBeDefined();
     });
 
-    it('should handle choice step', async () => {
+    it('should fail choice step because JSONPath evaluation is not implemented', async () => {
+      // Wave-14 audit M2 — choice step throws `not implemented` rather
+      // than silently routing every execution down the first branch.
       const workflow: WorkflowDefinition = {
         workflowId: 'choice-test',
         name: 'Choice Test',
@@ -500,10 +502,11 @@ describe('WorkflowEngine', () => {
         { value: 5 }
       );
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       const execution = engine.getExecution(executionId);
-      expect(execution?.status).toBe('succeeded');
+      expect(execution?.status).toBe('failed');
+      expect(execution?.error?.message).toContain('not implemented');
     });
   });
 });
