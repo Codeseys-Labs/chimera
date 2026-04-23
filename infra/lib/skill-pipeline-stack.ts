@@ -177,9 +177,21 @@ export class SkillPipelineStack extends cdk.Stack {
 
     props.skillsTable.grantReadWriteData(performanceTestingChimera.fn);
     props.skillsBucket.grantRead(performanceTestingChimera.fn);
+    // PutMetricData requires '*' (AWS limitation). PutAnomalyDetector can be
+    // ARN-scoped; we narrow it to alarms under our own namespace+region+account.
+    // Wave-14 H4.
     performanceTestingChimera.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['cloudwatch:PutMetricData', 'cloudwatch:PutAnomalyDetector'],
+      actions: ['cloudwatch:PutMetricData'],
       resources: ['*'],
+      conditions: {
+        StringEquals: { 'cloudwatch:namespace': 'Chimera/Skills' },
+      },
+    }));
+    performanceTestingChimera.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cloudwatch:PutAnomalyDetector', 'cloudwatch:DeleteAnomalyDetector'],
+      resources: [
+        `arn:aws:cloudwatch:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:*`,
+      ],
     }));
 
     props.skillsTable.grantReadWriteData(manualReviewChimera.fn);
