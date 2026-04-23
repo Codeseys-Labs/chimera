@@ -140,33 +140,16 @@ export class GroupChat {
    * Create SNS topic for group communication
    *
    * @returns SNS topic ARN
+   *
+   * NOT IMPLEMENTED — the SNS integration is a skeleton. Previous
+   * versions returned a fabricated ARN containing the placeholder
+   * account ID `123456789012`, which silently produced invalid ARNs
+   * in reachable code paths. See Wave-14 audit finding M1.
    */
   async createGroup(): Promise<string> {
-    if (this.topicArn) {
-      console.log(`[GroupChat] Topic already exists: ${this.topicArn}`);
-      return this.topicArn;
-    }
-
-    const topicName = `chimera-groupchat-${this.config.tenantId}-${this.config.groupId}`;
-
-    // TODO: Implement SNS topic creation
-    // const sns = new SNSClient({ region: this.config.region ?? 'us-east-1' });
-    // const response = await sns.send(new CreateTopicCommand({
-    //   Name: topicName,
-    //   Tags: [
-    //     { Key: 'tenantId', Value: this.config.tenantId },
-    //     { Key: 'groupId', Value: this.config.groupId },
-    //     { Key: 'component', Value: 'groupchat' },
-    //   ],
-    // }));
-    // this.topicArn = response.TopicArn;
-
-    // Placeholder implementation
-    this.topicArn = `arn:aws:sns:${this.config.region ?? 'us-east-1'}:123456789012:${topicName}`;
-
-    console.log(`[GroupChat] Created topic: ${this.topicArn}`);
-
-    return this.topicArn;
+    throw new Error(
+      'not implemented: GroupChat.createGroup — SNS integration is a skeleton (Wave-14 audit M1/M2)'
+    );
   }
 
   /**
@@ -174,133 +157,26 @@ export class GroupChat {
    *
    * @param agentId - Agent identifier
    * @returns Agent subscription details
+   *
+   * NOT IMPLEMENTED — see {@link createGroup}.
    */
-  async addAgent(agentId: string): Promise<AgentSubscription> {
-    if (this.subscriptions.has(agentId)) {
-      const existing = this.subscriptions.get(agentId);
-      if (!existing) {
-        throw new Error(`Agent subscription not found: ${agentId}`);
-      }
-      console.log(`[GroupChat] Agent already subscribed: ${agentId}`);
-      return existing;
-    }
-
-    if (!this.topicArn) {
-      await this.createGroup();
-    }
-
-    const queueName = `chimera-groupchat-${this.config.tenantId}-${this.config.groupId}-${agentId}`;
-
-    // TODO: Implement SQS queue creation
-    // const sqs = new SQSClient({ region: this.config.region ?? 'us-east-1' });
-    // const queueResponse = await sqs.send(new CreateQueueCommand({
-    //   QueueName: queueName,
-    //   Attributes: {
-    //     MessageRetentionPeriod: String(this.config.messageRetentionSeconds ?? 345600), // 4 days
-    //     VisibilityTimeout: String(this.config.visibilityTimeoutSeconds ?? 30),
-    //     ReceiveMessageWaitTimeSeconds: '20', // Enable long polling
-    //   },
-    //   tags: {
-    //     tenantId: this.config.tenantId,
-    //     groupId: this.config.groupId,
-    //     agentId,
-    //   },
-    // }));
-    // const queueUrl = queueResponse.QueueUrl!;
-    //
-    // // Get queue ARN for SNS subscription
-    // const attrsResponse = await sqs.send(new GetQueueAttributesCommand({
-    //   QueueUrl: queueUrl,
-    //   AttributeNames: ['QueueArn'],
-    // }));
-    // const queueArn = attrsResponse.Attributes!['QueueArn'];
-
-    // Placeholder implementation
-    const queueUrl = `https://sqs.${this.config.region ?? 'us-east-1'}.amazonaws.com/123456789012/${queueName}`;
-    const queueArn = `arn:aws:sqs:${this.config.region ?? 'us-east-1'}:123456789012:${queueName}`;
-
-    // TODO: Implement SNS subscription
-    // const sns = new SNSClient({ region: this.config.region ?? 'us-east-1' });
-    // const subscriptionResponse = await sns.send(new SubscribeCommand({
-    //   TopicArn: this.topicArn,
-    //   Protocol: 'sqs',
-    //   Endpoint: queueArn,
-    //   Attributes: {
-    //     RawMessageDelivery: 'true', // Deliver SNS message body directly (not wrapped in SNS metadata)
-    //     FilterPolicyScope: 'MessageAttributes',
-    //   },
-    // }));
-    // const subscriptionArn = subscriptionResponse.SubscriptionArn!;
-
-    // TODO: Set SQS queue policy to allow SNS to send messages
-    // await sqs.send(new SetQueueAttributesCommand({
-    //   QueueUrl: queueUrl,
-    //   Attributes: {
-    //     Policy: JSON.stringify({
-    //       Version: '2012-10-17',
-    //       Statement: [
-    //         {
-    //           Effect: 'Allow',
-    //           Principal: { Service: 'sns.amazonaws.com' },
-    //           Action: 'sqs:SendMessage',
-    //           Resource: queueArn,
-    //           Condition: {
-    //             ArnEquals: { 'aws:SourceArn': this.topicArn },
-    //           },
-    //         },
-    //       ],
-    //     }),
-    //   },
-    // }));
-
-    // Placeholder implementation
-    const subscriptionArn = `arn:aws:sns:${this.config.region ?? 'us-east-1'}:123456789012:${this.config.groupId}:${agentId}`;
-
-    const subscription: AgentSubscription = {
-      agentId,
-      queueUrl,
-      queueArn,
-      subscriptionArn,
-      status: 'active',
-    };
-
-    this.subscriptions.set(agentId, subscription);
-    this.metrics.activeSubscriptions = this.subscriptions.size;
-
-    console.log(`[GroupChat] Agent subscribed: ${agentId} (queue: ${queueUrl})`);
-
-    return subscription;
+  async addAgent(_agentId: string): Promise<AgentSubscription> {
+    throw new Error(
+      'not implemented: GroupChat.addAgent — SQS subscription is a skeleton (Wave-14 audit M1/M2)'
+    );
   }
 
   /**
    * Remove agent from group (unsubscribe + delete SQS queue)
    *
    * @param agentId - Agent identifier
+   *
+   * NOT IMPLEMENTED — see {@link createGroup}.
    */
-  async removeAgent(agentId: string): Promise<void> {
-    const subscription = this.subscriptions.get(agentId);
-    if (!subscription) {
-      console.log(`[GroupChat] Agent not subscribed: ${agentId}`);
-      return;
-    }
-
-    // TODO: Implement SNS unsubscribe
-    // const sns = new SNSClient({ region: this.config.region ?? 'us-east-1' });
-    // await sns.send(new UnsubscribeCommand({
-    //   SubscriptionArn: subscription.subscriptionArn,
-    // }));
-
-    // TODO: Implement SQS queue deletion
-    // const sqs = new SQSClient({ region: this.config.region ?? 'us-east-1' });
-    // await sqs.send(new DeleteQueueCommand({
-    //   QueueUrl: subscription.queueUrl,
-    // }));
-
-    subscription.status = 'deleted';
-    this.subscriptions.delete(agentId);
-    this.metrics.activeSubscriptions = this.subscriptions.size;
-
-    console.log(`[GroupChat] Agent removed: ${agentId}`);
+  async removeAgent(_agentId: string): Promise<void> {
+    throw new Error(
+      'not implemented: GroupChat.removeAgent — SNS/SQS teardown is a skeleton (Wave-14 audit M1/M2)'
+    );
   }
 
   /**
@@ -308,140 +184,45 @@ export class GroupChat {
    *
    * @param message - GroupChat message
    * @returns Message ID
+   *
+   * NOT IMPLEMENTED — see {@link createGroup}.
    */
-  async publish(message: GroupChatMessage): Promise<string> {
-    if (!this.topicArn) {
-      throw new Error('GroupChat not initialized. Call createGroup() first.');
-    }
-
-    // Validate message
-    if (message.groupId !== this.config.groupId) {
-      throw new Error(`Message groupId mismatch: expected ${this.config.groupId}, got ${message.groupId}`);
-    }
-
-    // TODO: Implement SNS publish
-    // const sns = new SNSClient({ region: this.config.region ?? 'us-east-1' });
-    // const response = await sns.send(new PublishCommand({
-    //   TopicArn: this.topicArn,
-    //   Message: JSON.stringify(message),
-    //   MessageAttributes: {
-    //     tenantId: {
-    //       DataType: 'String',
-    //       StringValue: message.tenantId,
-    //     },
-    //     groupId: {
-    //       DataType: 'String',
-    //       StringValue: message.groupId,
-    //     },
-    //     sourceAgentId: {
-    //       DataType: 'String',
-    //       StringValue: message.sourceAgentId,
-    //     },
-    //     messageType: {
-    //       DataType: 'String',
-    //       StringValue: message.type,
-    //     },
-    //     priority: {
-    //       DataType: 'String',
-    //       StringValue: message.priority,
-    //     },
-    //   },
-    // }));
-    // const messageId = response.MessageId!;
-
-    // Placeholder implementation
-    const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-    this.metrics.messagesPublished++;
-    this.metrics.lastActivityAt = new Date().toISOString();
-
-    console.log(
-      `[GroupChat] Published message: ${messageId} (from: ${message.sourceAgentId}, type: ${message.type})`
+  async publish(_message: GroupChatMessage): Promise<string> {
+    throw new Error(
+      'not implemented: GroupChat.publish — SNS publish is a skeleton (Wave-14 audit M1/M2)'
     );
-
-    return messageId;
   }
 
   /**
    * Receive messages for specific agent (poll SQS queue)
    *
    * @param agentId - Agent identifier
-   * @param maxMessages - Maximum messages to receive (1-10)
+   * @param _options - Poll options
    * @returns Array of received messages
+   *
+   * NOT IMPLEMENTED — see {@link createGroup}.
    */
   async receive(
-    agentId: string,
+    _agentId: string,
     _options?: {
       maxMessages?: number;
       waitTimeSeconds?: number;
     }
   ): Promise<GroupChatMessage[]> {
-    const subscription = this.subscriptions.get(agentId);
-    if (!subscription) {
-      throw new Error(`Agent not subscribed: ${agentId}`);
-    }
-
-    // TODO: Implement SQS receive
-    // const sqs = new SQSClient({ region: this.config.region ?? 'us-east-1' });
-    // const response = await sqs.send(new ReceiveMessageCommand({
-    //   QueueUrl: subscription.queueUrl,
-    //   MaxNumberOfMessages: options?.maxMessages ?? 10,
-    //   WaitTimeSeconds: options?.waitTimeSeconds ?? 20, // Long polling
-    //   MessageAttributeNames: ['All'],
-    // }));
-    //
-    // const messages: GroupChatMessage[] = [];
-    // for (const msg of response.Messages ?? []) {
-    //   try {
-    //     const parsed = JSON.parse(msg.Body!) as GroupChatMessage;
-    //     messages.push(parsed);
-    //
-    //     // Delete message after successful processing
-    //     await sqs.send(new DeleteMessageCommand({
-    //       QueueUrl: subscription.queueUrl,
-    //       ReceiptHandle: msg.ReceiptHandle!,
-    //     }));
-    //   } catch (error) {
-    //     console.error(`[GroupChat] Failed to parse message: ${error}`);
-    //     this.metrics.failedDeliveries++;
-    //   }
-    // }
-
-    // Placeholder implementation
-    const messages: GroupChatMessage[] = [];
-
-    this.metrics.messagesReceived += messages.length;
-    this.metrics.lastActivityAt = new Date().toISOString();
-
-    console.log(`[GroupChat] Received ${messages.length} messages for agent: ${agentId}`);
-
-    return messages;
+    throw new Error(
+      'not implemented: GroupChat.receive — SQS polling is a skeleton (Wave-14 audit M1/M2)'
+    );
   }
 
   /**
    * Delete group (SNS topic + all SQS subscriptions)
+   *
+   * NOT IMPLEMENTED — see {@link createGroup}.
    */
   async deleteGroup(): Promise<void> {
-    // Remove all agents
-    for (const agentId of this.subscriptions.keys()) {
-      await this.removeAgent(agentId);
-    }
-
-    if (!this.topicArn) {
-      console.log('[GroupChat] No topic to delete');
-      return;
-    }
-
-    // TODO: Implement SNS topic deletion
-    // const sns = new SNSClient({ region: this.config.region ?? 'us-east-1' });
-    // await sns.send(new DeleteTopicCommand({
-    //   TopicArn: this.topicArn,
-    // }));
-
-    console.log(`[GroupChat] Deleted topic: ${this.topicArn}`);
-
-    this.topicArn = undefined;
-    this.metrics.activeSubscriptions = 0;
+    throw new Error(
+      'not implemented: GroupChat.deleteGroup — SNS topic teardown is a skeleton (Wave-14 audit M1/M2)'
+    );
   }
 
   /**

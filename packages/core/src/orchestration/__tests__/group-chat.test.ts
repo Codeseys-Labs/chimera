@@ -1,9 +1,13 @@
 /**
- * Comprehensive unit tests for GroupChat
+ * Unit tests for GroupChat
  *
- * Tests SNS/SQS fan-out pattern for multi-agent pub-sub communication:
- * group creation, agent subscription/unsubscription, message publishing,
- * message receiving, group deletion, metrics, and message builders.
+ * Every mutating lifecycle method on GroupChat (createGroup, addAgent,
+ * removeAgent, publish, receive, deleteGroup) is a skeleton with no SNS
+ * or SQS integration — the prior implementation fabricated ARNs and queue
+ * URLs containing the placeholder account ID `123456789012` (Wave-14
+ * audit M1/M2). Those methods now throw `not implemented`. These tests
+ * lock that contract in place and preserve coverage for the still-real
+ * surface: constructor, getters, and the pure-data message builders.
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
@@ -13,8 +17,6 @@ import {
   GroupChatMessageBuilder,
   type GroupChatConfig,
   type GroupChatMessage,
-  type GroupChatMetrics,
-  type AgentSubscription,
 } from '../groupchat';
 
 // ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ describe('GroupChat', () => {
   });
 
   // =========================================================================
-  // createGroupChat factory
+  // createGroupChat factory + constructor
   // =========================================================================
 
   describe('createGroupChat', () => {
@@ -85,304 +87,47 @@ describe('GroupChat', () => {
     });
 
     it('should accept pre-existing topic ARN', () => {
-      const gc = createGroupChat(defaultConfig({ topicArn: 'arn:aws:sns:us-east-1:123:existing' }));
-      expect(gc.getTopicArn()).toBe('arn:aws:sns:us-east-1:123:existing');
+      const gc = createGroupChat(
+        defaultConfig({ topicArn: 'arn:aws:sns:us-east-1:TESTACCT:existing' })
+      );
+      expect(gc.getTopicArn()).toBe('arn:aws:sns:us-east-1:TESTACCT:existing');
     });
   });
 
   // =========================================================================
-  // createGroup
+  // Guard contract — all AWS-facing methods throw "not implemented"
   // =========================================================================
 
-  describe('createGroup', () => {
-    it('should create SNS topic and return ARN', async () => {
-      const topicArn = await groupChat.createGroup();
-
-      expect(topicArn).toMatch(/^arn:aws:sns:/);
-      expect(topicArn).toContain('chimera-groupchat');
-      expect(topicArn).toContain('tenant-123');
-      expect(topicArn).toContain('swarm-alpha');
+  describe('AWS lifecycle methods throw "not implemented"', () => {
+    it('createGroup should throw', async () => {
+      await expect(groupChat.createGroup()).rejects.toThrow('not implemented');
     });
 
-    it('should store topic ARN after creation', async () => {
-      await groupChat.createGroup();
-      expect(groupChat.getTopicArn()).toBeTruthy();
+    it('addAgent should throw', async () => {
+      await expect(groupChat.addAgent('agent-1')).rejects.toThrow('not implemented');
     });
 
-    it('should return same ARN on repeated calls (idempotent)', async () => {
-      const arn1 = await groupChat.createGroup();
-      const arn2 = await groupChat.createGroup();
-      expect(arn1).toBe(arn2);
+    it('removeAgent should throw', async () => {
+      await expect(groupChat.removeAgent('agent-1')).rejects.toThrow('not implemented');
     });
 
-    it('should use the configured region in the ARN', async () => {
-      const gc = new GroupChat(defaultConfig({ region: 'eu-west-1' }));
-      const arn = await gc.createGroup();
-      expect(arn).toContain('eu-west-1');
-    });
-
-    it('should default region to us-east-1 when not specified', async () => {
-      const gc = new GroupChat(defaultConfig({ region: undefined }));
-      const arn = await gc.createGroup();
-      expect(arn).toContain('us-east-1');
-    });
-  });
-
-  // =========================================================================
-  // addAgent (addParticipant)
-  // =========================================================================
-
-  describe('addAgent', () => {
-    it('should add agent with active subscription', async () => {
-      await groupChat.createGroup();
-      const sub = await groupChat.addAgent('agent-1');
-
-      expect(sub.agentId).toBe('agent-1');
-      expect(sub.status).toBe('active');
-      expect(sub.queueUrl).toBeTruthy();
-      expect(sub.queueArn).toBeTruthy();
-      expect(sub.subscriptionArn).toBeTruthy();
-    });
-
-    it('should include tenant/group/agent in queue name', async () => {
-      await groupChat.createGroup();
-      const sub = await groupChat.addAgent('agent-1');
-
-      expect(sub.queueUrl).toContain('tenant-123');
-      expect(sub.queueUrl).toContain('swarm-alpha');
-      expect(sub.queueUrl).toContain('agent-1');
-    });
-
-    it('should auto-create group if not exists', async () => {
-      expect(groupChat.getTopicArn()).toBeUndefined();
-
-      await groupChat.addAgent('agent-1');
-
-      expect(groupChat.getTopicArn()).toBeTruthy();
-    });
-
-    it('should return existing subscription on duplicate add', async () => {
-      await groupChat.createGroup();
-      const sub1 = await groupChat.addAgent('agent-1');
-      const sub2 = await groupChat.addAgent('agent-1');
-
-      expect(sub1).toEqual(sub2);
-    });
-
-    it('should increment activeSubscriptions metric', async () => {
-      await groupChat.createGroup();
-      expect(groupChat.getMetrics().activeSubscriptions).toBe(0);
-
-      await groupChat.addAgent('agent-1');
-      expect(groupChat.getMetrics().activeSubscriptions).toBe(1);
-
-      await groupChat.addAgent('agent-2');
-      expect(groupChat.getMetrics().activeSubscriptions).toBe(2);
-    });
-
-    it('should track all subscriptions in getSubscriptions()', async () => {
-      await groupChat.createGroup();
-      await groupChat.addAgent('agent-1');
-      await groupChat.addAgent('agent-2');
-      await groupChat.addAgent('agent-3');
-
-      const subs = groupChat.getSubscriptions();
-      expect(subs).toHaveLength(3);
-      expect(subs.map((s) => s.agentId).sort()).toEqual(['agent-1', 'agent-2', 'agent-3']);
-    });
-  });
-
-  // =========================================================================
-  // removeAgent (removeParticipant)
-  // =========================================================================
-
-  describe('removeAgent', () => {
-    it('should remove agent from subscriptions', async () => {
-      await groupChat.addAgent('agent-1');
-      expect(groupChat.isSubscribed('agent-1')).toBe(true);
-
-      await groupChat.removeAgent('agent-1');
-
-      expect(groupChat.isSubscribed('agent-1')).toBe(false);
-      expect(groupChat.getSubscriptions()).toHaveLength(0);
-    });
-
-    it('should decrement activeSubscriptions metric', async () => {
-      await groupChat.addAgent('agent-1');
-      await groupChat.addAgent('agent-2');
-      expect(groupChat.getMetrics().activeSubscriptions).toBe(2);
-
-      await groupChat.removeAgent('agent-1');
-      expect(groupChat.getMetrics().activeSubscriptions).toBe(1);
-    });
-
-    it('should not throw for non-subscribed agent', async () => {
-      await expect(groupChat.removeAgent('non-existent')).resolves.toBeUndefined();
-    });
-
-    it('should allow re-adding agent after removal', async () => {
-      await groupChat.addAgent('agent-1');
-      await groupChat.removeAgent('agent-1');
-
-      const sub = await groupChat.addAgent('agent-1');
-      expect(sub.agentId).toBe('agent-1');
-      expect(sub.status).toBe('active');
-      expect(groupChat.isSubscribed('agent-1')).toBe(true);
-    });
-  });
-
-  // =========================================================================
-  // isSubscribed
-  // =========================================================================
-
-  describe('isSubscribed', () => {
-    it('should return true for subscribed agents', async () => {
-      await groupChat.addAgent('agent-1');
-      expect(groupChat.isSubscribed('agent-1')).toBe(true);
-    });
-
-    it('should return false for non-subscribed agents', () => {
-      expect(groupChat.isSubscribed('agent-1')).toBe(false);
-    });
-
-    it('should return false after agent is removed', async () => {
-      await groupChat.addAgent('agent-1');
-      await groupChat.removeAgent('agent-1');
-      expect(groupChat.isSubscribed('agent-1')).toBe(false);
-    });
-  });
-
-  // =========================================================================
-  // publish (sendMessage)
-  // =========================================================================
-
-  describe('publish', () => {
-    it('should publish message and return message ID', async () => {
-      await groupChat.createGroup();
-
-      const msg = buildTestMessage('swarm-alpha');
-      const messageId = await groupChat.publish(msg);
-
-      expect(messageId).toBeTruthy();
-      expect(messageId).toMatch(/^msg-/);
-    });
-
-    it('should increment messagesPublished metric', async () => {
-      await groupChat.createGroup();
-
-      await groupChat.publish(buildTestMessage('swarm-alpha'));
-      await groupChat.publish(buildTestMessage('swarm-alpha'));
-
-      expect(groupChat.getMetrics().messagesPublished).toBe(2);
-    });
-
-    it('should update lastActivityAt on publish', async () => {
-      await groupChat.createGroup();
-      const before = groupChat.getMetrics().lastActivityAt;
-
-      await new Promise((r) => setTimeout(r, 10));
-      await groupChat.publish(buildTestMessage('swarm-alpha'));
-
-      const after = groupChat.getMetrics().lastActivityAt;
-      expect(after >= before).toBe(true);
-    });
-
-    it('should throw if group not initialized (no topic)', async () => {
-      const msg = buildTestMessage('swarm-alpha');
-      await expect(groupChat.publish(msg)).rejects.toThrow(
-        'GroupChat not initialized. Call createGroup() first.'
+    it('publish should throw', async () => {
+      await expect(groupChat.publish(buildTestMessage('swarm-alpha'))).rejects.toThrow(
+        'not implemented'
       );
     });
 
-    it('should throw if message groupId does not match config', async () => {
-      await groupChat.createGroup();
-
-      const msg = buildTestMessage('wrong-group-id');
-      await expect(groupChat.publish(msg)).rejects.toThrow('groupId mismatch');
+    it('receive should throw', async () => {
+      await expect(groupChat.receive('agent-1')).rejects.toThrow('not implemented');
     });
 
-    it('should accept various message types', async () => {
-      await groupChat.createGroup();
-
-      const broadcastMsg = buildTestMessage('swarm-alpha', { type: 'broadcast' });
-      const eventMsg = buildTestMessage('swarm-alpha', { type: 'event' });
-      const requestMsg = buildTestMessage('swarm-alpha', { type: 'request' });
-
-      await expect(groupChat.publish(broadcastMsg)).resolves.toBeTruthy();
-      await expect(groupChat.publish(eventMsg)).resolves.toBeTruthy();
-      await expect(groupChat.publish(requestMsg)).resolves.toBeTruthy();
+    it('deleteGroup should throw', async () => {
+      await expect(groupChat.deleteGroup()).rejects.toThrow('not implemented');
     });
   });
 
   // =========================================================================
-  // receive
-  // =========================================================================
-
-  describe('receive', () => {
-    it('should return empty array from placeholder implementation', async () => {
-      await groupChat.addAgent('agent-1');
-      const messages = await groupChat.receive('agent-1');
-
-      expect(Array.isArray(messages)).toBe(true);
-      expect(messages).toEqual([]);
-    });
-
-    it('should throw if agent not subscribed', async () => {
-      await expect(groupChat.receive('non-existent')).rejects.toThrow(
-        'Agent not subscribed: non-existent'
-      );
-    });
-
-    it('should accept receive options', async () => {
-      await groupChat.addAgent('agent-1');
-      const messages = await groupChat.receive('agent-1', {
-        maxMessages: 5,
-        waitTimeSeconds: 10,
-      });
-
-      expect(messages).toEqual([]);
-    });
-
-    it('should throw after agent is removed', async () => {
-      await groupChat.addAgent('agent-1');
-      await groupChat.removeAgent('agent-1');
-
-      await expect(groupChat.receive('agent-1')).rejects.toThrow('Agent not subscribed');
-    });
-  });
-
-  // =========================================================================
-  // deleteGroup
-  // =========================================================================
-
-  describe('deleteGroup', () => {
-    it('should remove all subscriptions and clear topic ARN', async () => {
-      await groupChat.addAgent('agent-1');
-      await groupChat.addAgent('agent-2');
-
-      expect(groupChat.getSubscriptions()).toHaveLength(2);
-      expect(groupChat.getTopicArn()).toBeTruthy();
-
-      await groupChat.deleteGroup();
-
-      expect(groupChat.getSubscriptions()).toHaveLength(0);
-      expect(groupChat.getTopicArn()).toBeUndefined();
-      expect(groupChat.getMetrics().activeSubscriptions).toBe(0);
-    });
-
-    it('should not throw when no topic exists', async () => {
-      await expect(groupChat.deleteGroup()).resolves.toBeUndefined();
-    });
-
-    it('should not throw when topic exists but no agents', async () => {
-      await groupChat.createGroup();
-      await expect(groupChat.deleteGroup()).resolves.toBeUndefined();
-      expect(groupChat.getTopicArn()).toBeUndefined();
-    });
-  });
-
-  // =========================================================================
-  // getMetrics
+  // Getters still work (no AWS calls)
   // =========================================================================
 
   describe('getMetrics', () => {
@@ -403,45 +148,29 @@ describe('GroupChat', () => {
       const m2 = groupChat.getMetrics();
       expect(m2.messagesPublished).toBe(0);
     });
-
-    it('should accumulate metrics across operations', async () => {
-      await groupChat.createGroup();
-      await groupChat.addAgent('agent-1');
-      await groupChat.addAgent('agent-2');
-
-      await groupChat.publish(buildTestMessage('swarm-alpha'));
-      await groupChat.publish(buildTestMessage('swarm-alpha'));
-      await groupChat.publish(buildTestMessage('swarm-alpha'));
-
-      const metrics = groupChat.getMetrics();
-      expect(metrics.activeSubscriptions).toBe(2);
-      expect(metrics.messagesPublished).toBe(3);
-    });
   });
 
-  // =========================================================================
-  // getTopicArn
-  // =========================================================================
+  describe('isSubscribed', () => {
+    it('should return false for non-subscribed agents', () => {
+      expect(groupChat.isSubscribed('agent-1')).toBe(false);
+    });
+  });
 
   describe('getTopicArn', () => {
-    it('should return undefined before createGroup', () => {
+    it('should return undefined before createGroup is successfully run', () => {
       expect(groupChat.getTopicArn()).toBeUndefined();
     });
 
-    it('should return ARN after createGroup', async () => {
-      await groupChat.createGroup();
-      expect(groupChat.getTopicArn()).toMatch(/^arn:aws:sns:/);
-    });
-
-    it('should return undefined after deleteGroup', async () => {
-      await groupChat.createGroup();
-      await groupChat.deleteGroup();
-      expect(groupChat.getTopicArn()).toBeUndefined();
+    it('should return a pre-injected topic ARN from config', () => {
+      const gc = new GroupChat(
+        defaultConfig({ topicArn: 'arn:aws:sns:us-east-1:TESTACCT:inj' })
+      );
+      expect(gc.getTopicArn()).toBe('arn:aws:sns:us-east-1:TESTACCT:inj');
     });
   });
 
   // =========================================================================
-  // GroupChatMessageBuilder
+  // GroupChatMessageBuilder (pure data, no AWS)
   // =========================================================================
 
   describe('GroupChatMessageBuilder', () => {
