@@ -98,8 +98,12 @@ export async function extractTenantContext(c: Context, next: Next): Promise<Resp
     );
   }
 
-  // Tier from JWT claims; fall back to header only in dev, default to 'basic'
-  const validTiers = ['basic', 'advanced', 'premium'];
+  // Tier from JWT claims; fall back to header only in dev, default to 'basic'.
+  // Must stay in sync with TenantTier in packages/shared/src/types/tenant.ts.
+  // `premium` is a legacy alias for `enterprise` — both resolve to the same
+  // behavior (see AUDIT_TTL_DAYS_BY_TIER at audit-trail.ts and TIER_FEATURES
+  // at tenant-lifecycle-service.ts).
+  const validTiers = ['basic', 'advanced', 'enterprise', 'dedicated', 'premium'];
   let tier = tenantTier;
   if (!tier && isDev) {
     tier = c.req.header('x-tenant-tier') || undefined;

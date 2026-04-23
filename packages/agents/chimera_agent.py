@@ -182,10 +182,15 @@ def select_model_for_tier(tier: str, config: Dict[str, Any]) -> str:
     - advanced: Claude Sonnet 4.6 ($3/$15 per MTok)
     - premium: Claude Opus 4.6 ($15/$75 per MTok)
     """
+    # Must stay in sync with TenantTier in packages/shared/src/types/tenant.ts.
+    # `premium` is a legacy alias for `enterprise`; both route to Opus.
+    # `dedicated` is enterprise tier with dedicated infra — same model pool.
     tier_models = {
         'basic': 'us.amazon.nova-lite-v1:0',
         'advanced': 'us.anthropic.claude-sonnet-4-6-v1:0',
         'premium': 'us.anthropic.claude-opus-4-6-v1:0',
+        'enterprise': 'us.anthropic.claude-opus-4-6-v1:0',
+        'dedicated': 'us.anthropic.claude-opus-4-6-v1:0',
     }
 
     default_model = tier_models.get(tier, tier_models['basic'])
@@ -369,6 +374,10 @@ def get_memory_config_for_tier(tier: str) -> Dict[str, Any]:
             'ltm_retention_days': 365,
         },
     }
+    # `enterprise` and `dedicated` share premium's memory model.
+    # See packages/shared/src/types/tenant.ts TenantTier.
+    configs['enterprise'] = configs['premium']
+    configs['dedicated'] = configs['premium']
     return configs.get(tier, configs['basic'])
 
 
