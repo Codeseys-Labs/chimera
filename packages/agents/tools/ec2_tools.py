@@ -3,6 +3,13 @@ EC2 Tools - AWS EC2 operations for Chimera agent
 
 Provides EC2 instance management operations with tenant-scoped access control.
 All operations respect IAM policies enforced at the tenant level.
+
+The ``_tid = require_tenant_id()`` pattern used throughout this module
+is documented in detail in ``s3_tools.py``'s module docstring. TL;DR:
+the leading underscore flags the binding as locally unused — what
+matters is the *side effect* of calling ``require_tenant_id()``, which
+populates the ContextVar that ``ensure_tenant_filter`` reads downstream.
+Removing the line disables the tenant guard.
 """
 import boto3
 from botocore.config import Config

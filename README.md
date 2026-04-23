@@ -1,5 +1,7 @@
 # AWS Chimera
 
+[![Skill Registry: Phase 0-1 (DDB) — AgentCore Registry Phase 2+ pending spike](https://img.shields.io/badge/Skill%20Registry-Phase%200--1%20DDB%20%7C%20AgentCore%20Phase%202%2B%20pending%20spike-blue)](docs/architecture/decisions/ADR-034-agentcore-registry-adoption.md)
+
 > **The all-powerful, all-encompassing agentic system**
 >
 > Self-evolutionary. Self-optimizing. Self-expanding.
