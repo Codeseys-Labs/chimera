@@ -6,10 +6,19 @@ This is a minimal tool to validate:
 2. Tool is loaded into agent
 3. Agent can invoke tools via ReAct loop
 4. Tool execution returns to agent
+
+Production gating: this module exposes ``__production_excluded__ = True``
+so ``GatewayToolDiscovery`` can drop it from the tool set when
+``CHIMERA_ENV`` is ``prod`` / ``production``. See Wave-15 M3 in
+``docs/reviews/OPEN-PUNCH-LIST.md``.
 """
 from strands.tools import tool
 
 from .gateway_instrumentation import instrument_tool
+
+# Exclude this diagnostic tool from production tenant tool sets.
+# The gateway discovery layer checks this sentinel when loading modules.
+__production_excluded__ = True
 
 
 @tool

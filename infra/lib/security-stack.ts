@@ -346,12 +346,17 @@ exports.handler = async (event) => {
           },
         },
         {
+          // Bot/DDoS backstop only — NOT per-user rate limiting. Must be
+          // high enough that corporate-NAT egress with multiple concurrent
+          // tenants doesn't trigger false positives. Per-user / per-tenant
+          // rate limiting belongs at the API Gateway usage-plan layer
+          // (tracked in OPEN-PUNCH-LIST for a follow-up wave). Wave-15 M2.
           name: 'RateLimitPerIP',
           priority: 2,
           action: { block: {} },
           statement: {
             rateBasedStatement: {
-              limit: 2000,
+              limit: 10000,
               aggregateKeyType: 'IP',
             },
           },

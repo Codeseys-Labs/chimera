@@ -39,6 +39,12 @@ TENANT_TIER_ACCESS: Dict[str, int] = {
 # Tier 0 = core tools available to all tenants regardless of subscription.
 # Mirrors TOOL_TIER_MAP; lazy imports via importlib avoid loading unused
 # AWS SDK clients at module import time (same as TypeScript dynamic imports).
+# Modules that are diagnostic-only and must be excluded when CHIMERA_ENV=prod.
+# Mirrors the __production_excluded__ sentinel in tools.hello_world; listed
+# here as well so the gateway-proxy discovery path (which does not import the
+# target module locally) can filter without a lazy import. Wave-15 M3.
+_PRODUCTION_EXCLUDED_MODULES = frozenset({"tools.hello_world"})
+
 _TOOL_TIER_REGISTRY: Dict[str, tuple] = {
     # Core (tier 0 — always available)
     "tools.hello_world": (0, ["hello_world_tool"]),
@@ -644,6 +650,13 @@ class GatewayToolDiscovery:
             identifier = _MODULE_IDENTIFIERS[module_path]
             is_core = tool_tier == 0
 
+            # 0. Production exclusion (Wave-15 M3): diagnostic modules must
+            # not be surfaced to tenant tool sets in prod.  Matches the
+            # __production_excluded__ sentinel checked in _load_tools_for_tier.
+            if _is_production() and module_path in _PRODUCTION_EXCLUDED_MODULES:
+                denied_identifiers.append(identifier)
+                continue
+
             # 1. Deny list wins unconditionally
             if deny_list and identifier in deny_list:
                 denied_identifiers.append(identifier)
@@ -748,6 +761,13 @@ def _load_tools_for_tier(
         # Lazily import module and collect callables
         try:
             module = importlib.import_module(module_path)
+            # Production gating: modules that declare __production_excluded__
+            # are diagnostics-only (e.g. hello_world) and must not be exposed
+            # to tenant tool sets in prod.  See Wave-15 M3 in
+            # docs/reviews/OPEN-PUNCH-LIST.md.
+            if _is_production() and getattr(module, "__production_excluded__", False):
+                denied_identifiers.append(identifier)
+                continue
             for name in tool_names:
                 # Per-tool tier override: skip tools that require a higher tier
                 effective_tier = _TOOL_TIER_OVERRIDES.get(name, tool_tier)
@@ -765,3 +785,15 @@ def _load_tools_for_tier(
         count=len(tools),
         tier=tier,
     )
+
+
+def _is_production() -> bool:
+    """Return True when running in a production environment.
+
+    Reads CHIMERA_ENV (preferred) or ENVIRONMENT as a fallback; any
+    value in {"prod", "production"} (case-insensitive) is treated as
+    production.  Non-prod envs (dev, staging, test, unset) return False,
+    keeping diagnostic tools like hello_world available for e2e tests.
+    """
+    env = (os.environ.get("CHIMERA_ENV") or os.environ.get("ENVIRONMENT") or "").lower()
+    return env in {"prod", "production"}

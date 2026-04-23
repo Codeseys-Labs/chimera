@@ -103,12 +103,24 @@ export class EmailStack extends cdk.Stack {
       versioned: false,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: !isProd,
-      // Lifecycle: delete raw MIME after 90 days (parsed content lives in DDB)
-      additionalLifecycleRules: [{
-        id: 'expire-raw-email',
-        expiration: cdk.Duration.days(90),
-        prefix: 'inbound/',
-      }],
+      // Lifecycle: delete raw MIME after 90 days (parsed content lives in DDB).
+      // Intelligent-Tiering at 30 days handles the 30-90d warm window where
+      // inbound emails may be reprocessed for debugging but are rarely read.
+      // (Wave-15c E3; ref RECOMMENDATIONS.md)
+      additionalLifecycleRules: [
+        {
+          id: 'expire-raw-email',
+          expiration: cdk.Duration.days(90),
+          prefix: 'inbound/',
+        },
+        {
+          id: 'intelligent-tiering',
+          transitions: [{
+            storageClass: s3.StorageClass.INTELLIGENT_TIERING,
+            transitionAfter: cdk.Duration.days(30),
+          }],
+        },
+      ],
     });
     this.inboundEmailBucket = inboundEmailChimera.bucket;
 

@@ -320,6 +320,18 @@ export class DataStack extends cdk.Stack {
       id: 'noncurrent-versions',
       noncurrentVersionExpiration: cdk.Duration.days(180),
     });
+    // Skill artifacts have long-tail access patterns: most skills are pulled
+    // once at install and rarely thereafter. Intelligent-Tiering with a 30-day
+    // initial transition catches the cold tail without changing the hot-read
+    // path. Archive tier opt-in is intentionally omitted so reads never need
+    // RestoreObject. (Wave-15c E3; ref RECOMMENDATIONS.md)
+    skillsChimeraBucket.bucket.addLifecycleRule({
+      id: 'intelligent-tiering',
+      transitions: [{
+        storageClass: s3.StorageClass.INTELLIGENT_TIERING,
+        transitionAfter: cdk.Duration.days(30),
+      }],
+    });
     this.skillsBucket = skillsChimeraBucket.bucket;
 
     // ======================================================================
@@ -341,6 +353,17 @@ export class DataStack extends cdk.Stack {
     artifactsChimera.bucket.addLifecycleRule({
       id: 'expire-noncurrent',
       noncurrentVersionExpiration: cdk.Duration.days(30),
+    });
+    // Drift reports and CDK synth assets have unpredictable reread patterns
+    // (incidents + diffing). Intelligent-Tiering with 30-day trigger covers
+    // objects that live out the 90-day expiration window unused.
+    // (Wave-15c E3; ref RECOMMENDATIONS.md)
+    artifactsChimera.bucket.addLifecycleRule({
+      id: 'intelligent-tiering',
+      transitions: [{
+        storageClass: s3.StorageClass.INTELLIGENT_TIERING,
+        transitionAfter: cdk.Duration.days(30),
+      }],
     });
     this.artifactsBucket = artifactsChimera.bucket;
 

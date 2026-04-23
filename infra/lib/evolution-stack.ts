@@ -99,6 +99,17 @@ export class EvolutionStack extends cdk.Stack {
       id: 'expire-noncurrent-versions',
       noncurrentVersionExpiration: cdk.Duration.days(30),
     });
+    // Catch-all Intelligent-Tiering for the bucket root prefix. Golden-datasets
+    // already transition to Glacier at 180d via the rule above; Intelligent-
+    // Tiering covers A/B test outputs and evolution telemetry whose access
+    // frequency is unpredictable. (Wave-15c E3; ref RECOMMENDATIONS.md)
+    evolutionArtifactsChimera.bucket.addLifecycleRule({
+      id: 'intelligent-tiering',
+      transitions: [{
+        storageClass: s3.StorageClass.INTELLIGENT_TIERING,
+        transitionAfter: cdk.Duration.days(30),
+      }],
+    });
     this.evolutionArtifactsBucket = evolutionArtifactsChimera.bucket;
 
     // ======================================================================

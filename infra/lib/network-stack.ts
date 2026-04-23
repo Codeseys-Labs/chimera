@@ -78,8 +78,13 @@ export class NetworkStack extends cdk.Stack {
       allowAllOutbound: false,
     });
 
-    // --- Interface endpoints (~$0.01/hr/AZ each) ---
+    // --- Interface endpoints (~$0.01/hr/AZ + $0.01/GB each) ---
     // These keep traffic off the NAT gateway and on the AWS backbone.
+    // Break-even vs NAT data-processing ($0.045/GB) is ~36 GB/mo per endpoint
+    // across 3 AZs once you include avoided NAT-hour attribution. Every
+    // service listed below is referenced by at least one stack in infra/lib,
+    // so the NAT-bypass traffic is real — not speculative.
+    // (ref: docs/research/cost-optimization-2026-04-23/RECOMMENDATIONS.md §E1)
     const interfaceEndpointServices: Array<{ id: string; service: string }> = [
       { id: 'BedrockRuntime', service: 'bedrock-runtime' },
       { id: 'BedrockAgentRuntime', service: 'bedrock-agent-runtime' },
@@ -88,6 +93,14 @@ export class NetworkStack extends cdk.Stack {
       { id: 'EcrDkr', service: 'ecr.dkr' },
       { id: 'CloudWatchLogs', service: 'logs' },
       { id: 'CloudWatchMonitoring', service: 'monitoring' },
+      // Added in Wave-15c cost optimization. Every entry below is used by
+      // at least one stack (see RECOMMENDATIONS.md §E1 for evidence).
+      { id: 'StepFunctions', service: 'states' }, // orchestration-stack state machines
+      { id: 'EventBridge', service: 'events' }, // email/evolution/orchestration event bus
+      { id: 'Sqs', service: 'sqs' }, // orchestration + email parser queues
+      { id: 'Sns', service: 'sns' }, // pipeline + observability alarm topics
+      { id: 'Sts', service: 'sts' }, // every boto3 AssumeRole hop
+      { id: 'Kms', service: 'kms' }, // every CMK encrypt/decrypt call
     ];
 
     for (const ep of interfaceEndpointServices) {

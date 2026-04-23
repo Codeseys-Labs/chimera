@@ -144,8 +144,18 @@ def load_tenant_config(tenant_id: str) -> Dict[str, Any]:
     Returns tenant profile with tier, features, allowed models, memory config, and budget.
     """
     import boto3
+    from botocore.config import Config
+    from botocore.exceptions import BotoCoreError, ClientError
 
-    dynamodb = boto3.client('dynamodb')
+    # Use the same timeout + retry posture as the per-tool boto3 clients in
+    # packages/agents/tools/*.py. Defaults (60s read) are too long for a
+    # cold-start code path that blocks agent invocation. Wave-15 L1.
+    _BOTO_CONFIG = Config(
+        connect_timeout=5,
+        read_timeout=30,
+        retries={"max_attempts": 3, "mode": "standard"},
+    )
+    dynamodb = boto3.client('dynamodb', config=_BOTO_CONFIG)
 
     try:
         response = dynamodb.get_item(
@@ -155,7 +165,7 @@ def load_tenant_config(tenant_id: str) -> Dict[str, Any]:
                 'SK': {'S': 'PROFILE'}
             }
         )
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         raise ValueError(f"Failed to load tenant config for {tenant_id}: {e}")
 
     if 'Item' not in response:
