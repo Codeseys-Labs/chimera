@@ -175,10 +175,11 @@ export class DataStack extends cdk.Stack {
     // Table 5: chimera-cost-tracking
     // PK: TENANT#{id}, SK: PERIOD#{yyyy-mm}
     // Streams: triggers budget threshold alarms via EventBridge
-    // No TTL -- retained 2 years for billing reconciliation.
+    // TTL: 2 years (set at write time by cost-tracker.ts::calculateTTL).
     // ======================================================================
     const costTrackingChimera = new ChimeraTable(this, 'CostTrackingTable', {
       tableName: `chimera-cost-tracking-${props.envName}`,
+      ttlAttribute: 'ttl',
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
     this.costTrackingTable = costTrackingChimera.table;
