@@ -35,27 +35,48 @@ class InMemoryDynamoDBClient implements DynamoDBClient {
     }
 
     const items: any[] = [];
-    const pkValue = params.ExpressionAttributeValues?.[':pk'];
-    const skPrefix = params.ExpressionAttributeValues?.[':sk'];
+    const eav = params.ExpressionAttributeValues || {};
+    const skPrefix = eav[':sk'];
 
-    for (const [key, value] of table.entries()) {
-      // For PK queries (like TENANT#tenant-1 or SKILL#name)
-      if (value.PK === pkValue) {
-        // Check SK prefix if provided (begins_with)
-        if (skPrefix && !value.SK.startsWith(skPrefix)) {
+    // Determine which attribute the KeyConditionExpression uses. GSI queries
+    // use `category`, `trustLevel`, or `author` as the partition key — the
+    // base table uses `PK`.
+    let pkAttr: string | null = null;
+    let pkValue: any = undefined;
+    const kce: string = params.KeyConditionExpression || '';
+    if (kce.includes('PK = :pk')) {
+      pkAttr = 'PK';
+      pkValue = eav[':pk'];
+    } else if (kce.includes('category = :category')) {
+      pkAttr = 'category';
+      pkValue = eav[':category'];
+    } else if (kce.includes('trustLevel = :trustLevel')) {
+      pkAttr = 'trustLevel';
+      pkValue = eav[':trustLevel'];
+    } else if (kce.includes('author = :author')) {
+      pkAttr = 'author';
+      pkValue = eav[':author'];
+    }
+
+    for (const [, value] of table.entries()) {
+      if (pkAttr !== null && (value as any)[pkAttr] !== pkValue) {
+        continue;
+      }
+
+      // Check SK prefix if provided (begins_with)
+      if (skPrefix && !value.SK?.startsWith(skPrefix)) {
+        continue;
+      }
+
+      // Apply FilterExpression if present (tenant isolation)
+      if (params.FilterExpression) {
+        const tenantId = eav[':tenantId'];
+        if (tenantId && value.tenantId !== tenantId) {
           continue;
         }
-
-        // Apply FilterExpression if present
-        if (params.FilterExpression) {
-          const tenantId = params.ExpressionAttributeValues?.[':tenantId'];
-          if (tenantId && value.tenantId !== tenantId) {
-            continue;
-          }
-        }
-
-        items.push(value);
       }
+
+      items.push(value);
     }
 
     return { Items: items };
@@ -397,17 +418,25 @@ describe('SkillRegistry', () => {
   });
 
   describe('listByAuthor', () => {
-    it('should query by author GSI', async () => {
-      // Note: In real DDB, GSI-1 would project author as PK
-      // For testing, we simulate this by checking the query parameters
-      const author1Skill = createMockSkill('skill-1', 'author-1');
-      const author2Skill = createMockSkill('skill-2', 'author-2');
+    it('should query by author GSI with tenant isolation', async () => {
+      // Note: In real DDB, GSI1-author uses `author` as the partition key (plain
+      // attribute), not the composite `PK`. The InMemoryDynamoDBClient matches
+      // on the `:author` expression attribute value against item.PK via a shim
+      // below — so we seed items with PK equal to the author id for this test.
+      const author1Skill = {
+        ...createMockSkill('skill-1', 'author-1'),
+        PK: 'author-1',
+        author: 'author-1',
+      };
+      const author2Skill = {
+        ...createMockSkill('skill-2', 'author-2'),
+        PK: 'author-2',
+        author: 'author-2',
+      };
 
       dynamodb.seed('skills', [author1Skill, author2Skill]);
 
-      // This will return 0 results since GSI PK doesn't match in test data
-      // In production, GSI-1 would have PK: AUTHOR#author-id
-      const results = await registry.listByAuthor('author-1');
+      const results = await registry.listByAuthor('author-1', 'author-1');
 
       // Test that the method doesn't error and returns an array
       expect(Array.isArray(results)).toBe(true);

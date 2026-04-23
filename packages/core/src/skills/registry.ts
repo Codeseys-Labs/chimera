@@ -194,7 +194,8 @@ export class SkillRegistry {
   /**
    * List skills by category
    *
-   * Uses GSI-2 (Category Index) for efficient querying
+   * Uses GSI2-category (Category Index) for efficient querying.
+   * GSI partition key is `category` (plain attribute), sort key is `downloadCount`.
    *
    * @param category - Skill category
    * @param tenantId - Tenant ID for security filtering
@@ -208,11 +209,11 @@ export class SkillRegistry {
   ): Promise<Skill[]> {
     const params = {
       TableName: this.config.skillsTableName,
-      IndexName: 'GSI-2',
-      KeyConditionExpression: 'PK = :pk',
+      IndexName: 'GSI2-category',
+      KeyConditionExpression: 'category = :category',
       FilterExpression: 'tenantId = :tenantId',
       ExpressionAttributeValues: {
-        ':pk': `CATEGORY#${category}`,
+        ':category': category,
         ':tenantId': tenantId,
       },
       Limit: limit,
@@ -226,7 +227,8 @@ export class SkillRegistry {
   /**
    * List skills by trust level
    *
-   * Uses GSI-3 (Trust Level Index) for efficient querying
+   * Uses GSI3-trust (Trust Level Index) for efficient querying.
+   * GSI partition key is `trustLevel` (plain attribute), sort key is `updatedAt`.
    *
    * @param trustLevel - Trust level
    * @param tenantId - Tenant ID for security filtering
@@ -240,11 +242,11 @@ export class SkillRegistry {
   ): Promise<Skill[]> {
     const params = {
       TableName: this.config.skillsTableName,
-      IndexName: 'GSI-3',
-      KeyConditionExpression: 'PK = :pk',
+      IndexName: 'GSI3-trust',
+      KeyConditionExpression: 'trustLevel = :trustLevel',
       FilterExpression: 'tenantId = :tenantId',
       ExpressionAttributeValues: {
-        ':pk': `TRUST#${trustLevel}`,
+        ':trustLevel': trustLevel,
         ':tenantId': tenantId,
       },
       Limit: limit,
@@ -258,7 +260,8 @@ export class SkillRegistry {
   /**
    * List skills by author
    *
-   * Uses GSI-1 (Author Index) for efficient querying
+   * Uses GSI1-author (Author Index) for efficient querying.
+   * GSI partition key is `author` (plain attribute), sort key is `skillName`.
    *
    * @param author - Author tenant ID
    * @param tenantId - Tenant ID for security filtering
@@ -268,11 +271,11 @@ export class SkillRegistry {
   async listByAuthor(author: string, tenantId: string, limit: number = 20): Promise<Skill[]> {
     const params = {
       TableName: this.config.skillsTableName,
-      IndexName: 'GSI-1',
-      KeyConditionExpression: 'PK = :pk',
+      IndexName: 'GSI1-author',
+      KeyConditionExpression: 'author = :author',
       FilterExpression: 'tenantId = :tenantId',
       ExpressionAttributeValues: {
-        ':pk': `AUTHOR#${author}`,
+        ':author': author,
         ':tenantId': tenantId,
       },
       Limit: limit,
