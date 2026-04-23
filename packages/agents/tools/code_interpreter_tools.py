@@ -30,6 +30,7 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
 
 from .tenant_context import TenantContextError, require_tenant_id
@@ -79,7 +80,13 @@ def _get_agentcore_client():
     region = os.environ.get("AWS_REGION", "us-west-2")
     try:
         return boto3.client("bedrock-agentcore", region_name=region, config=_BOTO_CONFIG)
-    except Exception as e:
+    # boto3.client() raises botocore.exceptions.UnknownServiceError (a subclass
+    # of BotoCoreError) when the service model is missing from the installed
+    # SDK version, and DataNotFoundError / NoRegionError in the same family
+    # for region/endpoint resolution issues. We treat all of those as
+    # "service unavailable in this environment" and surface the typed
+    # fallback signal the callers already branch on.
+    except (ClientError, BotoCoreError) as e:
         raise CodeInterpreterUnavailableError(
             f"AgentCore Code Interpreter service 'bedrock-agentcore' is not "
             f"available in this environment. This may mean the service has not GA'd "
@@ -159,7 +166,7 @@ def _ensure_session(tenant_id: str, session_name: str = "default") -> dict:
         return session
     except CodeInterpreterUnavailableError:
         raise
-    except Exception as e:
+    except (ClientError, BotoCoreError) as e:
         logger.error(f"Failed to create Code Interpreter session: {e}")
         raise
 
@@ -338,7 +345,11 @@ else:
         else:
             return f"CDK validation returned unexpected result:\n{json.dumps(result, indent=2)[:2000]}"
 
-    except Exception as e:
+    # boto3 surfaces remote failures as ClientError/BotoCoreError; we convert
+    # to a tool-level error string so the LLM can reason about it rather than
+    # crashing the agent loop. Narrower than a bare Exception catch so that
+    # programmer errors (TypeError, KeyError) still raise loudly.
+    except (ClientError, BotoCoreError) as e:
         return f"Code Interpreter execution failed: {str(e)[:500]}"
 
 
@@ -401,7 +412,9 @@ def execute_in_sandbox(
 
         return "\n".join(result_parts)
 
-    except Exception as e:
+    # See note above: narrow to boto3 exception hierarchy so programmer
+    # errors are not swallowed.
+    except (ClientError, BotoCoreError) as e:
         return f"Sandbox execution failed: {str(e)[:500]}"
 
 
@@ -494,5 +507,6 @@ except Exception as e:
         else:
             return f"Fetch failed: {result.get('error', 'Unknown error')}"
 
-    except Exception as e:
+    # boto3 failures from invoke_code_interpreter; narrower than Exception.
+    except (ClientError, BotoCoreError) as e:
         return f"URL fetch failed: {str(e)[:500]}"

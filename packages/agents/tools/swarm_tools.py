@@ -27,6 +27,7 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from strands.tools import tool
 
 from .tenant_context import TenantContextError, require_tenant_id
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 def _get_ddb():
     region = os.environ.get("AWS_REGION", "us-west-2")
-    return boto3.resource("dynamodb", region_name=region)
+    return boto3.resource("dynamodb", region_name=region, config=_BOTO_CONFIG)
 
 
 def _get_eb():
@@ -149,7 +150,10 @@ def decompose_and_execute(
             f"Wait for completion with: wait_for_swarm('{execution_id}')"
         )
 
-    except Exception as e:
+    # Narrow to boto3 exception hierarchy — DDB put_item + EventBridge
+    # put_events are the only network calls here. Programmer errors
+    # (TypeError, KeyError) should propagate, not be stringified.
+    except (ClientError, BotoCoreError) as e:
         logger.error(f"Swarm execution failed: {e}")
         return f"Failed to start swarm execution: {str(e)[:500]}"
 
@@ -235,7 +239,8 @@ def check_swarm_status(
 
         return result
 
-    except Exception as e:
+    # DDB get_item + query are the only network paths; narrow accordingly.
+    except (ClientError, BotoCoreError) as e:
         return f"Status check failed: {str(e)[:500]}"
 
 
@@ -300,7 +305,10 @@ def wait_for_swarm(
                     f"Use check_swarm_status('{execution_id}') for detailed task breakdown."
                 )
 
-        except Exception as e:
+        # Polling circuit-breaker: only boto3-level transient failures should
+        # feed the consecutive-error counter. A programmer error must crash
+        # the loop immediately rather than spin for N iterations.
+        except (ClientError, BotoCoreError) as e:
             consecutive_errors += 1
             logger.warning(
                 f"Poll error ({consecutive_errors}/{max_consecutive_errors}): {e}"
@@ -408,5 +416,6 @@ def delegate_subtask(
             f"Check progress: check_swarm_status('{task_id}')"
         )
 
-    except Exception as e:
+    # DDB put_item + EventBridge put_events are the only network paths.
+    except (ClientError, BotoCoreError) as e:
         return f"Delegation failed: {str(e)[:500]}"

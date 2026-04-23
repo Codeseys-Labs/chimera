@@ -97,11 +97,23 @@ class TestServiceNameRegression:
         If boto3 can't find the service model, we must raise
         CodeInterpreterUnavailableError so callers fall back to regex
         validation instead of crashing.
+
+        Uses UnknownServiceError (a BotoCoreError subclass) because that is
+        what boto3 actually raises when the installed SDK lacks a service
+        model — it is NOT a bare Exception. The tool's except clause is
+        narrowed to (ClientError, BotoCoreError) so this test uses the
+        realistic failure type.
         """
+        from botocore.exceptions import UnknownServiceError
+
+        unknown_service = UnknownServiceError(
+            service_name="bedrock-agentcore",
+            known_service_names=["s3", "ec2"],
+        )
         with patch.object(
             code_interpreter_tools.boto3,
             "client",
-            side_effect=Exception("unknown service"),
+            side_effect=unknown_service,
         ):
             with pytest.raises(CodeInterpreterUnavailableError) as exc_info:
                 _get_agentcore_client()

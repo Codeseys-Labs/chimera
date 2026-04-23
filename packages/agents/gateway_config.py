@@ -28,11 +28,17 @@ from gateway_proxy import GatewayToolDefinition, create_gateway_proxy_tools
 
 logger = logging.getLogger(__name__)
 
-# Tenant tier → max tool tier (mirrors TENANT_TIER_ACCESS in tier-config.ts)
+# Tenant tier → max tool tier (mirrors TENANT_TIER_ACCESS in tier-config.ts).
+# Keep in sync with packages/shared/src/types/tenant.ts TenantTier.
+# `premium` is a legacy alias for `enterprise`; `dedicated` is enterprise
+# with dedicated infra — both share the Tier-3 tool ceiling. Missing these
+# keys silently downgrades enterprise tenants to Tier 1 (Wave-15d C1).
 TENANT_TIER_ACCESS: Dict[str, int] = {
     "basic": 1,
     "advanced": 2,
     "premium": 3,
+    "enterprise": 3,
+    "dedicated": 3,
 }
 
 # Registry: module_path → (tier, [tool_names])
