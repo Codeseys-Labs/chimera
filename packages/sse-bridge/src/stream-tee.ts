@@ -1,13 +1,29 @@
 /**
- * StreamTee - fans out an AsyncIterable source to a buffer + registered listeners.
+ * StreamTee - fans out an AsyncIterable source to a bounded buffer + registered listeners.
  *
  * Drive the source in the background via consume(). New listeners are notified
- * of future items. The buffer accumulates all items for reconnection replay.
+ * of future items. The buffer accumulates items for reconnection replay, up to
+ * `maxBufferSize` (default 1000). When the cap is reached the oldest items
+ * are dropped from the head (ring-buffer semantics) and `truncated` flips true.
+ * Reconnecting clients observe the truncation flag and know their replay may
+ * be incomplete.
+ *
+ * Cap rationale (Wave-15 H4): a 20-iteration ReAct agent with tool calls can
+ * produce several hundred DSP parts; at 10 concurrent tenants with 5-minute
+ * post-completion retention an unbounded buffer is an OOM vector for the ECS
+ * Fargate task. 1000 parts × ~200 bytes = ~200 KB per stream worst-case.
  *
  * JavaScript's single-threaded event loop guarantees that between calling
  * addListener() and replaying tee.buffer (with no await in between), no new
  * items can be added — making the register-then-replay pattern race-free.
  */
+export interface StreamTeeOptions {
+  /** Max items retained in the replay buffer. Defaults to 1000. */
+  maxBufferSize?: number;
+}
+
+const DEFAULT_MAX_BUFFER_SIZE = 1000;
+
 export class StreamTee<T> {
   private _buffer: T[] = [];
   private _listeners = new Set<(item: T) => void>();
@@ -15,6 +31,15 @@ export class StreamTee<T> {
   private _errorListeners = new Set<(err: Error) => void>();
   private _done = false;
   private _error?: Error;
+  private _truncated = false;
+  private readonly _maxBufferSize: number;
+
+  constructor(options: StreamTeeOptions = {}) {
+    this._maxBufferSize = options.maxBufferSize ?? DEFAULT_MAX_BUFFER_SIZE;
+    if (this._maxBufferSize < 1) {
+      throw new Error(`StreamTee maxBufferSize must be >= 1, got ${this._maxBufferSize}`);
+    }
+  }
 
   /** Accumulated buffer of all items seen so far */
   get buffer(): readonly T[] {
@@ -29,6 +54,11 @@ export class StreamTee<T> {
   /** Error from source, if any */
   get error(): Error | undefined {
     return this._error;
+  }
+
+  /** True once the buffer has reached maxBufferSize and items have been dropped. */
+  get truncated(): boolean {
+    return this._truncated;
   }
 
   /**
@@ -70,6 +100,13 @@ export class StreamTee<T> {
     try {
       for await (const item of source) {
         this._buffer.push(item);
+        // Ring-buffer trim: if we exceed the cap, drop from the head so the
+        // tail (most recent items) is always retained. Reconnecting clients
+        // see truncated=true so they can surface a "history incomplete" warn.
+        if (this._buffer.length > this._maxBufferSize) {
+          this._buffer.splice(0, this._buffer.length - this._maxBufferSize);
+          this._truncated = true;
+        }
         for (const fn of this._listeners) {
           try {
             fn(item);
