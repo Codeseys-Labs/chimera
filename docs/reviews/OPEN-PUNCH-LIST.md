@@ -12,7 +12,7 @@ source of truth. Use this to file seeds issues.
 
 ## Quick stats
 
-**32 open items** across the categories below:
+**29 open items** across the categories below:
 
 | Category | Count |
 |----------|-------|
@@ -21,7 +21,7 @@ source of truth. Use this to file seeds issues.
 | python-hardening | 2 |
 | typescript-hardening | 4 |
 | docs | 1 |
-| ops-runbooks | 3 |
+| ops-runbooks | 0 |
 | observability-emitter | 5 |
 | cost-reduction | 3 |
 | cleanup | 8 |
@@ -39,13 +39,13 @@ No severity conflicts across review docs; classifications consistent after dedup
 
 ## Top-7 highest-ROI (non-spike-blocked)
 
-1. **Per-tenant model tier-violation metric** — 2d. $360/mo/100-Basic-sessions if missing.
+1. **Per-tenant model tier-violation metric** — 2d. $360/mo/100-Basic-sessions if missing. *(Note: landed in c29745c — verify wiring.)*
 2. **Per-tenant hourly cost metric** — 2d. Enables tenant-facing billing.
-3. **Tool invocation duration + success-rate metrics** — 2d. SLA foundation.
-4. **DDB PITR restore runbook** — 1d. Blocks GA; undefined RTO/RPO.
-5. **Security-incident tenant-breach playbook** — 1d. Blocks GA.
-6. **CDK deploy-failure recovery runbook** — 1d. Blocks prod confidence.
-7. **Global `strict: true` + `any` quarantine (793 sites)** — 2d. Separate PR.
+3. **Tool invocation `success_rate_percent`** — 2d. SLA foundation (duration_ms landed in 35f8073; success-rate still pending).
+4. **Bare-except sweep re-verification** — 4h. Wave-14 sweep closed evolution_tools; 25-file inventory may still have stragglers.
+5. **Global `strict: true` + `any` quarantine (793 sites)** — 2d. Separate PR.
+6. **Log retention harmonization** — 1d. Chat-stack (6mo) vs evolution-stack (1mo) drift.
+7. **Cost-opt: VPC interface endpoints + S3 Intelligent-Tiering** — 0.5d each. See `docs/research/cost-optimization-2026-04-23/RECOMMENDATIONS.md`.
 
 ## By category
 
@@ -91,18 +91,15 @@ spike annotation, VISION status sync, canonical-data-model footnote,
 CHANGELOG scaffolding) were landed in the Wave-7 doc-drift sweep +
 e1356fd (canonical data model merge conflict + ADR-034 status).
 
-### ops-runbooks (3)
+### ops-runbooks (0)
 
-| # | File | Sev | Effort |
-|---|------|-----|--------|
-| 1 | `docs/runbooks/ddb-pitr-restore.md` | CRITICAL | 1d |
-| 2 | `docs/runbooks/security-incident-tenant-breach.md` | CRITICAL | 1d |
-| 3 | `docs/runbooks/cdk-deploy-failure-recovery.md` | CRITICAL | 1d |
-
-Skeletons for each in `docs/reviews/dr-runbook-gaps.md`.
-
-HIGH-severity runbooks (skill-compromise, dlq-drain, canary-rollback) landed
-in commits d745679..01e663c — see the "Already landed" section.
+All CRITICAL + HIGH runbooks landed:
+- `ddb-pitr-restore.md` (432 LOC) — Wave 10
+- `security-incident-tenant-breach.md` (507 LOC) — Wave 10
+- `cdk-deploy-failure-recovery.md` (460 LOC) — Wave 10
+- `skill-compromise-response.md` (607 LOC) — Wave 15a (commit d745679)
+- `dlq-drain-procedure.md` (450 LOC) — Wave 15a (commit d1f1ee4)
+- `canary-rollback.md` (561 LOC) — Wave 15a (commit 01e663c)
 
 ### observability-emitter (5)
 
