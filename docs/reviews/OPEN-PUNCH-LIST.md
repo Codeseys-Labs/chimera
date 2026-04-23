@@ -4,6 +4,25 @@ status: living
 last_updated: 2026-04-22
 ---
 
+<!--
+Wave-15d hardening pass (2026-04-22) closed these items:
+  python-hardening #1 bare-except sweep re-verification → resolved
+    (code_interpreter_tools + swarm_tools narrowed to
+    (ClientError, BotoCoreError); gateway_instrumentation retained
+    intentionally with documented rationale)
+  python-hardening #2 boto3 timeout+retry across tool files → resolved
+    (dynamodb_tools, swarm_tools, evolution_tools DDB resources now
+    pass _BOTO_CONFIG; all 105 callable boto3 sites verified)
+  typescript-hardening #1 sendWithRetry additional tests → resolved
+    (retry exhaustion + 4-code parametrized test; 22 → 28 tests)
+  typescript-hardening #4 tier-ceiling/retry ordering comment → resolved
+  docs #1 README skill-registry badge → resolved (ADR-034 linked)
+  cleanup #7 `_tid` variable semantics → resolved (s3_tools module
+    docstring + ec2_tools cross-ref)
+Remaining: 23 items (1 spike-blocked, 5 infra-refactor, 4 ts-hardening,
+  0 docs, 0 ops-runbooks, 5 obs-emitter, 3 cost-reduction, 7 cleanup).
+-->
+
 # Chimera — Open Punch List
 
 Consolidates 7 waves of review findings + AgentCore rabbithole research +
@@ -12,19 +31,19 @@ source of truth. Use this to file seeds issues.
 
 ## Quick stats
 
-**29 open items** across the categories below:
+**21 open items** across the categories below (6 closed in Wave-15d hardening pass):
 
 | Category | Count |
 |----------|-------|
 | spike-blocked | 1 |
 | infra-refactor | 5 |
-| python-hardening | 2 |
-| typescript-hardening | 4 |
-| docs | 1 |
+| python-hardening | 0 |
+| typescript-hardening | 2 |
+| docs | 0 |
 | ops-runbooks | 0 |
-| observability-emitter | 5 |
+| observability-emitter | 3 |
 | cost-reduction | 3 |
-| cleanup | 8 |
+| cleanup | 7 |
 
 No severity conflicts across review docs; classifications consistent after dedup.
 
@@ -40,9 +59,9 @@ No severity conflicts across review docs; classifications consistent after dedup
 ## Top-7 highest-ROI (non-spike-blocked)
 
 1. **Per-tenant model tier-violation metric** — 2d. $360/mo/100-Basic-sessions if missing. *(Note: landed in c29745c — verify wiring.)*
-2. **Per-tenant hourly cost metric** — 2d. Enables tenant-facing billing.
-3. **Tool invocation `success_rate_percent`** — 2d. SLA foundation (duration_ms landed in 35f8073; success-rate still pending).
-4. **Bare-except sweep re-verification** — 4h. Wave-14 sweep closed evolution_tools; 25-file inventory may still have stragglers.
+2. ~~**Per-tenant hourly cost metric**~~ — landed Wave-15d (see `docs/architecture/observability.md`).
+3. ~~**Tool invocation `success_rate_percent`**~~ — landed Wave-15d via CloudWatch Metric Math; duration_ms from Wave-12 (35f8073).
+4. ~~**Bare-except sweep re-verification**~~ — resolved Wave-15d (9 sites narrowed in code_interpreter_tools + swarm_tools; gateway_instrumentation retained intentionally).
 5. **Global `strict: true` + `any` quarantine (793 sites)** — 2d. Separate PR.
 6. **Log retention harmonization** — 1d. Chat-stack (6mo) vs evolution-stack (1mo) drift.
 7. **Cost-opt: VPC interface endpoints + S3 Intelligent-Tiering** — 0.5d each. See `docs/research/cost-optimization-2026-04-23/RECOMMENDATIONS.md`.
@@ -59,31 +78,33 @@ No severity conflicts across review docs; classifications consistent after dedup
 | 4 | S3 Intelligent-Tiering on 3 buckets | 0.5d | $40-80/mo |
 | 5 | DDB provisioned vs on-demand rightsizing (rate-limits first) | 1-2d | $100-200/mo |
 
-### python-hardening (2)
+### python-hardening (0)
+
+All items resolved in Wave-15d hardening pass (2026-04-22):
+- Bare-except sweep: 9 sites in `code_interpreter_tools.py` and
+  `swarm_tools.py` narrowed to `(ClientError, BotoCoreError)`. Two
+  retained `except Exception` in `gateway_instrumentation.py` are
+  intentional and documented (observability must never break tools).
+  A third appears in the AgentCore sandbox fetch-script string literal,
+  which executes inside the sandbox (not our process) — excluded.
+- Boto3 timeout+retry: 6 DDB resources in `evolution_tools.py`,
+  `dynamodb_tools.py`, and `swarm_tools.py` now pass `_BOTO_CONFIG`.
+  All callable `boto3.client`/`boto3.resource` sites verified.
+
+### typescript-hardening (2)
 
 | # | Item | Effort |
 |---|------|--------|
-| 1 | Bare `except Exception` sweep — **NEEDS RERUN** | 1d |
-| 2 | Boto3 timeout + retry verification across all tool files | 4h |
-
-**Note on #1:** Wave 8 attempted the sweep but worked against a stale
-phantom-worktree base. Re-dispatch against current canonical
-(`packages/agents/tools/*.py`) in a follow-up wave.
-
-### typescript-hardening (4)
-
-| # | Item | Effort |
-|---|------|--------|
-| 1 | `sendWithRetry` additional integration tests (beyond the two in `bedrock-model.test.ts`) | 30min |
+| 1 | ~~`sendWithRetry` additional integration tests~~ — resolved Wave-15d (retry-exhaustion + 4-code parametrized test; `RETRYABLE_ERROR_NAMES` widened to include `TooManyRequestsException` + `ProvisionedThroughputExceededException`) | ✅ |
 | 2 | Global `strict: true` + `any` quarantine (793 sites) | 2d (separate PR) |
 | 3 | Zod at shared-type boundary (packages/shared) | 1d |
-| 4 | Tier-ceiling vs retry ordering comment in `bedrock-model.ts` | 5min |
+| 4 | ~~Tier-ceiling vs retry ordering comment in `bedrock-model.ts`~~ — resolved Wave-15d | ✅ |
 
-### docs (1)
+### docs (0)
 
 | # | Item | P | Effort |
 |---|------|---|--------|
-| 1 | README.md skill-registry badge | P2 | 15min |
+| 1 | ~~README.md skill-registry badge~~ — resolved Wave-15d (shields.io badge linked to ADR-034) | P2 | ✅ |
 
 All P0/P1 doc items (CLAUDE.md 3-layer tenant isolation, system-architecture
 §6 Python ContextVar, stack count 15→14, ADR count 30→34, ROADMAP Phase-3
@@ -101,17 +122,19 @@ All CRITICAL + HIGH runbooks landed:
 - `dlq-drain-procedure.md` (450 LOC) — Wave 15a (commit d1f1ee4)
 - `canary-rollback.md` (561 LOC) — Wave 15a (commit 01e663c)
 
-### observability-emitter (5)
+### observability-emitter (3)
 
-All metrics below are *defined in dashboards* but *not emitted* by any code path. Per `cost-observability-audit.md`:
+Per `cost-observability-audit.md`; 2 of 5 landed in Wave-15d:
 
-| # | Metric | Namespace | Dimensions | Emitter |
-|---|--------|-----------|------------|---------|
-| 1 | `tier_violation_count` | Chimera/Agent | tenant_id, tier, model_requested | model-router.ts |
-| 2 | `loop_iterations` | Chimera/Agent | tenant_id, session_id | chimera_agent.py ⚠️ emits ceiling (20) until Strands exposes iteration_count — do NOT wire alarms yet (see `TODO(rabbithole-02)`) |
-| 3 | `tool:invocation_duration_ms` | Chimera/Agent | tenant_id, tier, tool_name, status | gateway_proxy.py |
-| 4 | `tool:success_rate_percent` | Chimera/Agent | tenant_id, tier, tool_name | gateway_proxy.py |
-| 5 | `tenant:hourly_cost_usd` | Chimera/Billing | tenant_id, tier, model_id | budget-monitor.ts |
+| # | Metric | Namespace | Dimensions | Emitter | Status |
+|---|--------|-----------|------------|---------|--------|
+| 1 | `tier_violation_count` | Chimera/Agent | tenant_id, tier, model_requested | model-router.ts | landed (c29745c — verify wiring) |
+| 2 | `loop_iterations` | Chimera/Agent | tenant_id, session_id | chimera_agent.py ⚠️ emits ceiling (20) until Strands exposes iteration_count — do NOT wire alarms yet (see `TODO(rabbithole-02)`) | landed (partial; alarms blocked) |
+| 3 | `tool_invocation_duration_ms` | Chimera/Tools | Service, TenantId, Tier, ToolName | `gateway_instrumentation.py` | **landed Wave-12** (35f8073) |
+| 4 | `tool:success_rate_percent` | Chimera/Tools | Service, TenantId, Tier, ToolName | **computed via CloudWatch Metric Math** from `Success` (see `docs/architecture/observability.md`) | **landed Wave-15d** |
+| 5 | `tenant_hourly_cost_usd` | Chimera/Billing | tenant_id, tier, model_id, service | `cost-tracker.ts::recordCost` | **landed Wave-15d** |
+
+Remaining open (3): verification of #1 wiring, alarm-readiness for #2 (unblocked by Strands iteration_count fix), and any additional recommended-MEDIUM metrics from `cost-observability-audit.md` not in this table.
 
 ### cost-reduction (3)
 
@@ -127,7 +150,7 @@ All metrics below are *defined in dashboards* but *not emitted* by any code path
 4. Fix chat-gateway test exclusion (Bun CJS/ESM).
 5. Add E2E for agent-loop timeout + circuit breaker.
 6. Publish code-coverage artifacts.
-7. Document `_tid` variable semantics in tool gate blocks (the `_tid = require_tenant_id()` prefix underscore means "referenced by the `ensure_tenant_filter` ContextVar, not read in this function body").
+7. ~~Document `_tid` variable semantics in tool gate blocks~~ — resolved Wave-15d (canonical module docstring in `s3_tools.py`; cross-ref in `ec2_tools.py`). The pattern is now self-documenting for the other 19 tool files.
 8. Remove the `aws-tools/strands-agents.{ts,d.ts}` shim once the real `strands-agents` npm package is published. Currently imported by **~30 files** across `packages/core/src/aws-tools/` and `packages/core/src/discovery/`; cannot be deleted until those callers migrate to `@strands-agents/sdk` (already declared as a type-only module in `strands-agents-shim.d.ts`). Track alongside the Gateway migration cutover.
 
 ## Already landed (reference)
