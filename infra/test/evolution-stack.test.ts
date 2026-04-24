@@ -333,25 +333,26 @@ describe('EvolutionStack', () => {
       });
     });
 
-    it('should create CloudWatch log groups for all state machines', () => {
+    it('should create CloudWatch log groups for all state machines (debug class, dev=3d)', () => {
+      // Wave-16b: SFN logs now use debug-class retention (dev=3d, prod=7d).
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/states/chimera-prompt-evolution-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
 
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/states/chimera-skill-generation-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
 
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/states/chimera-memory-evolution-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
 
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/states/chimera-feedback-processor-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
     });
   });
@@ -542,10 +543,12 @@ describe('EvolutionStack', () => {
       expect(retainedBuckets.length).toBeGreaterThan(0);
     });
 
-    it('should use 1-month log retention in prod state machine log groups', () => {
+    it('should use debug-class retention (7d) for prod state machine log groups', () => {
+      // Wave-16b: harmonized to debug class (prod=ONE_WEEK) — SFN logs
+      // are high-volume, low-signal and only interesting near deploys.
       prodTemplate.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/states/chimera-prompt-evolution-prod',
-        RetentionInDays: 30,
+        RetentionInDays: 7,
       });
     });
 

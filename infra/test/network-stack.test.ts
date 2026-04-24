@@ -92,10 +92,12 @@ describe('NetworkStack', () => {
         });
       });
 
-      it('should create CloudWatch log group with 1-month retention for dev', () => {
+      it('should create CloudWatch log group with security-class dev retention (7 days)', () => {
+        // Wave-16b: dev VPC flow logs now follow security-class retention
+        // (ONE_WEEK). Prod still floors at ONE_YEAR — see prod test below.
         template.hasResourceProperties('AWS::Logs::LogGroup', {
           LogGroupName: '/chimera/dev/vpc-flow-logs',
-          RetentionInDays: 30,
+          RetentionInDays: 7,
         });
       });
     });

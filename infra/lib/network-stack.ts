@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface NetworkStackProps extends cdk.StackProps {
   envName: string;
@@ -55,7 +56,13 @@ export class NetworkStack extends cdk.Stack {
       destination: ec2.FlowLogDestination.toCloudWatchLogs(
         new logs.LogGroup(this, 'FlowLogGroup', {
           logGroupName: `/chimera/${props.envName}/vpc-flow-logs`,
-          retention: isProd ? logs.RetentionDays.ONE_YEAR : logs.RetentionDays.ONE_MONTH,
+          // Security class, with an ONE_YEAR floor — VPC flow logs are
+          // historically retained one year in prod for post-incident
+          // forensics, and the audit guardrail requires we do NOT shorten
+          // that. logRetentionFor() returns max(classProdBaseline, floor).
+          retention: logRetentionFor('security', isProd, {
+            prodMinimumDays: logs.RetentionDays.ONE_YEAR,
+          }),
           removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
         }),
       ),

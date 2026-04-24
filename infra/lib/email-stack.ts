@@ -17,6 +17,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { ChimeraBucket } from '../constructs/chimera-bucket';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface EmailStackProps extends cdk.StackProps {
   envName: string;
@@ -252,7 +253,7 @@ export class EmailStack extends cdk.Stack {
 
     const parserLogGroup = new logs.LogGroup(this, 'EmailParserLogGroup', {
       logGroupName: `/aws/lambda/chimera-email-parser-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -294,7 +295,7 @@ export class EmailStack extends cdk.Stack {
 
     const senderLogGroup = new logs.LogGroup(this, 'EmailSenderLogGroup', {
       logGroupName: `/aws/lambda/chimera-email-sender-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 

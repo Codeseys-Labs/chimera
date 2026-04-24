@@ -12,6 +12,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { ChimeraQueue } from '../constructs/chimera-queue';
 import { ChimeraLambda } from '../constructs/chimera-lambda';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface OrchestrationStackProps extends cdk.StackProps {
   envName: string;
@@ -67,7 +68,7 @@ export class OrchestrationStack extends cdk.Stack {
 
     const eventLogGroup = new logs.LogGroup(this, 'EventBusLogGroup', {
       logGroupName: `/aws/events/chimera-agents-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       encryptionKey: props.platformKey,
     });
@@ -622,7 +623,7 @@ def handler(event, context):
         logs: {
           destination: new logs.LogGroup(this, 'PipelineBuildLogGroup', {
             logGroupName: `/aws/vendedlogs/states/chimera-pipeline-build-${props.envName}`,
-            retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+            retention: logRetentionFor('debug', isProd),
             removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
           }),
           level: stepfunctions.LogLevel.ALL,
@@ -689,7 +690,7 @@ def handler(event, context):
         logs: {
           destination: new logs.LogGroup(this, 'DataAnalysisLogGroup', {
             logGroupName: `/aws/vendedlogs/states/chimera-data-analysis-${props.envName}`,
-            retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+            retention: logRetentionFor('debug', isProd),
             removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
           }),
           level: stepfunctions.LogLevel.ALL,
@@ -756,7 +757,7 @@ def handler(event, context):
         logs: {
           destination: new logs.LogGroup(this, 'BackgroundTaskLogGroup', {
             logGroupName: `/aws/vendedlogs/states/chimera-background-task-${props.envName}`,
-            retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+            retention: logRetentionFor('debug', isProd),
             removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
           }),
           level: stepfunctions.LogLevel.ALL,

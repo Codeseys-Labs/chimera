@@ -281,10 +281,11 @@ describe('SkillPipelineStack', () => {
         });
       });
 
-      it('should use ONE_WEEK retention in dev', () => {
+      it('should use debug-class retention in dev (3 days)', () => {
+        // Wave-16b: SFN logs use debug class (dev=3d).
         template.hasResourceProperties('AWS::Logs::LogGroup', {
           LogGroupName: '/aws/states/chimera-skill-pipeline-dev',
-          RetentionInDays: 7,
+          RetentionInDays: 3,
         });
       });
     });
@@ -335,10 +336,11 @@ describe('SkillPipelineStack', () => {
       expect(secret.DeletionPolicy).toBe('Retain');
     });
 
-    it('should use ONE_MONTH retention for log group in prod', () => {
+    it('should use debug-class retention for log group in prod (7 days)', () => {
+      // Wave-16b: SFN logs use debug class (prod=ONE_WEEK).
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/states/chimera-skill-pipeline-prod',
-        RetentionInDays: 30,
+        RetentionInDays: 7,
       });
     });
 

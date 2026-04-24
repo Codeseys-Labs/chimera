@@ -16,6 +16,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { ChimeraBucket } from '../constructs/chimera-bucket';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface PipelineStackProps extends cdk.StackProps {
   envName: string;
@@ -168,7 +169,7 @@ export class PipelineStack extends cdk.Stack {
 
     const buildLogGroup = new logs.LogGroup(this, 'BuildLogGroup', {
       logGroupName: `/aws/codebuild/chimera-build-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -222,7 +223,7 @@ export class PipelineStack extends cdk.Stack {
 
     const dockerBuildLogGroup = new logs.LogGroup(this, 'DockerBuildLogGroup', {
       logGroupName: `/aws/codebuild/chimera-docker-build-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -310,7 +311,7 @@ export class PipelineStack extends cdk.Stack {
 
     const deployLogGroup = new logs.LogGroup(this, 'DeployLogGroup', {
       logGroupName: `/aws/codebuild/chimera-deploy-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -381,7 +382,7 @@ export class PipelineStack extends cdk.Stack {
 
     const frontendDeployLogGroup = new logs.LogGroup(this, 'FrontendDeployLogGroup', {
       logGroupName: `/aws/codebuild/chimera-frontend-deploy-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -482,7 +483,7 @@ export class PipelineStack extends cdk.Stack {
 
     const testLogGroup = new logs.LogGroup(this, 'TestLogGroup', {
       logGroupName: `/aws/codebuild/chimera-test-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -1221,7 +1222,7 @@ def handler(event, context):
 
     const orchestrationLogGroup = new logs.LogGroup(this, 'OrchestrationLogGroup', {
       logGroupName: `/aws/states/chimera-canary-orchestration-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 

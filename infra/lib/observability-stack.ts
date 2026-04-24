@@ -12,6 +12,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as xray from 'aws-cdk-lib/aws-xray';
 import * as aws_config from 'aws-cdk-lib/aws-config';
 import { Construct } from 'constructs';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface ObservabilityStackProps extends cdk.StackProps {
   envName: string;
@@ -62,7 +63,7 @@ export class ObservabilityStack extends cdk.Stack {
     // ======================================================================
     this.platformLogGroup = new logs.LogGroup(this, 'PlatformLogGroup', {
       logGroupName: `/chimera/${props.envName}/platform`,
-      retention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       encryptionKey: props.platformKey,
     });
@@ -1165,6 +1166,70 @@ exports.handler = async () => {
     });
     toolSuccessRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
     toolSuccessRateAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+
+    // ======================================================================
+    // Tier-ceiling cost-leak observability (§cost-observability-audit #1)
+    //
+    // Per-invocation EMF metric emitted from
+    // `packages/core/src/evolution/model-router.ts::enforceTierCeiling`
+    // whenever a tenant's requested model is rejected by their tier
+    // allowlist and downgraded to the cheapest tier-allowed fallback:
+    //   * Chimera/Agent::tier_violation_count (Count)
+    // Dimensions: {tenant_id, tier, model_requested}.
+    //
+    // Every emission represents a prevented cost leak: a Basic-tier
+    // session that *tried* to call Opus ($15/M in) was downgraded to
+    // Haiku/Sonnet ($0.25-$3/M in). Frequent emissions from a single
+    // tenant usually mean misconfigured model plumbing or a client
+    // pinning a premium model — both warrant operator attention before
+    // the downgrade becomes visible as degraded output quality.
+    //
+    // The alarm uses a low threshold (>=5 violations over 10 minutes) so
+    // a single misbehaving client surfaces quickly, but brief spikes
+    // from legitimate retries stay quiet.
+    // ======================================================================
+    const tierViolationCountMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Agent',
+      metricName: 'tier_violation_count',
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+      label: 'Tier violations (Sum)',
+    });
+
+    this.platformDashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Tier-ceiling violations (Chimera/Agent::tier_violation_count)',
+        left: [tierViolationCountMetric],
+        width: 12,
+        leftYAxis: { label: 'Violations/5min', min: 0 },
+        leftAnnotations: [
+          {
+            value: 5,
+            label: 'HIGH alarm threshold (>=5/10min)',
+            color: '#ff0000',
+          },
+        ],
+      })
+    );
+
+    const tierViolationRunbook = props.runbookBaseUrl
+      ? `${props.runbookBaseUrl}tier-violation-count-high`
+      : 'Identify tenant via tenant_id/tier/model_requested dimensions; audit client model pins; consider tier upgrade if legitimate.';
+
+    const tierViolationAlarm = new cloudwatch.Alarm(this, 'TierViolationCountAlarm', {
+      alarmName: `chimera-${props.envName}-tier-violation-count-high`,
+      alarmDescription:
+        `Tier-ceiling enforcement downgraded >=5 requests in 10 minutes. ` +
+        `Emitted from enforceTierCeiling() in packages/core/src/evolution/model-router.ts. ` +
+        `RUNBOOK: ${tierViolationRunbook}`,
+      metric: tierViolationCountMetric,
+      threshold: 5,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    tierViolationAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+    tierViolationAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
 
     // ======================================================================
     // Registry Observability (AgentCore Registry Phase 1/2 migration)

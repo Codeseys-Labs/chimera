@@ -543,11 +543,12 @@ describe('PipelineStack', () => {
       expect(artifactBucket.DeletionPolicy).toBe('Retain');
     });
 
-    it('should use ONE_MONTH log retention for prod CodeBuild projects', () => {
-      // ONE_MONTH = 30
+    it('should use debug-class retention for prod CodeBuild log groups (7 days)', () => {
+      // Wave-16b: CodeBuild logs are short-lived debug streams — harmonized
+      // to debug class (prod=ONE_WEEK). Retention shortened from ONE_MONTH.
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/codebuild/chimera-build-prod',
-        RetentionInDays: 30,
+        RetentionInDays: 7,
       });
     });
 

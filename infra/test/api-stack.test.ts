@@ -213,11 +213,12 @@ describe('ApiStack', () => {
       template = Template.fromStack(stack);
     });
 
-    it('should use SIX_MONTHS retention for prod REST API log group', () => {
-      // SIX_MONTHS = 180
+    it('should use app-class retention for prod REST API log group (30 days)', () => {
+      // Wave-16b: API Gateway access logs harmonized to app class
+      // (prod=ONE_MONTH). Long-tail flows to S3 out-of-band.
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/apigateway/chimera-api-prod',
-        RetentionInDays: 180,
+        RetentionInDays: 30,
       });
     });
 
@@ -241,10 +242,12 @@ describe('ApiStack', () => {
       });
     });
 
-    it('should use SIX_MONTHS retention for prod WebSocket log group', () => {
+    it('should use app-class retention for prod WebSocket log group (30 days)', () => {
+      // Wave-16b: WebSocket access logs harmonized to app class
+      // (prod=ONE_MONTH).
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/chimera/prod/api-gateway/websocket',
-        RetentionInDays: 180,
+        RetentionInDays: 30,
       });
     });
   });

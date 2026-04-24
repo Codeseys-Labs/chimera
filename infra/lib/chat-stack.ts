@@ -11,6 +11,7 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface ChatStackProps extends cdk.StackProps {
   envName: string;
@@ -127,7 +128,7 @@ export class ChatStack extends cdk.Stack {
     // ======================================================================
     const taskLogGroup = new logs.LogGroup(this, 'ChatTaskLogs', {
       logGroupName: `/chimera/${props.envName}/ecs/chat-gateway`,
-      retention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -408,7 +409,7 @@ export class ChatStack extends cdk.Stack {
     // CloudWatch access logs for ALB
     const albLogGroup = new logs.LogGroup(this, 'AlbAccessLogs', {
       logGroupName: `/chimera/${props.envName}/alb/chat-gateway`,
-      retention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 

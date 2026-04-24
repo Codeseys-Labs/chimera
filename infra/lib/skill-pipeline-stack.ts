@@ -11,6 +11,7 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { ChimeraLambda } from '../constructs/chimera-lambda';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface SkillPipelineStackProps extends cdk.StackProps {
   envName: string;
@@ -310,7 +311,7 @@ export class SkillPipelineStack extends cdk.Stack {
 
     const logGroup = new logs.LogGroup(this, 'StateMachineLogGroup', {
       logGroupName: `/aws/states/chimera-skill-pipeline-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 

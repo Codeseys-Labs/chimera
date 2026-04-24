@@ -12,6 +12,7 @@ import { Construct } from 'constructs';
 import { ChimeraTable } from '../constructs/chimera-table';
 import { ChimeraBucket } from '../constructs/chimera-bucket';
 import { ChimeraLambda } from '../constructs/chimera-lambda';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface EvolutionStackProps extends cdk.StackProps {
   envName: string;
@@ -1051,7 +1052,7 @@ def handler(event, context):
 
     const promptEvolutionLogGroup = new logs.LogGroup(this, 'PromptEvolutionLogGroup', {
       logGroupName: `/aws/states/chimera-prompt-evolution-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -1122,7 +1123,7 @@ def handler(event, context):
 
     const skillGenerationLogGroup = new logs.LogGroup(this, 'SkillGenerationLogGroup', {
       logGroupName: `/aws/states/chimera-skill-generation-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -1170,7 +1171,7 @@ def handler(event, context):
 
     const memoryEvolutionLogGroup = new logs.LogGroup(this, 'MemoryEvolutionLogGroup', {
       logGroupName: `/aws/states/chimera-memory-evolution-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -1221,7 +1222,7 @@ def handler(event, context):
 
     const feedbackProcessorLogGroup = new logs.LogGroup(this, 'FeedbackProcessorLogGroup', {
       logGroupName: `/aws/states/chimera-feedback-processor-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('debug', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 

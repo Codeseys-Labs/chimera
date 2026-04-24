@@ -6,6 +6,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface SecurityStackProps extends cdk.StackProps {
   envName: string;
@@ -314,7 +315,10 @@ exports.handler = async (event) => {
     // WAFv2 requires log group names to begin with 'aws-waf-logs-'.
     const wafLogGroup = new logs.LogGroup(this, 'WafLogGroup', {
       logGroupName: `aws-waf-logs-chimera-api-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
+      // Security class: 90-day compliance window. Raised from the
+      // historical ONE_MONTH so WAF incident investigations have the
+      // full retention recommended by the audit.
+      retention: logRetentionFor('security', isProd),
       encryptionKey: this.platformKey,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });

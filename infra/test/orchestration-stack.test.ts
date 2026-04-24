@@ -59,10 +59,11 @@ describe('OrchestrationStack', () => {
       });
     });
 
-    it('should create CloudWatch log group for event debugging', () => {
+    it('should create CloudWatch log group for event debugging (debug-class dev=3d)', () => {
+      // Wave-16b: event-debug logs use debug class (dev=3d, prod=7d).
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/events/chimera-agents-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
     });
   });
@@ -285,20 +286,21 @@ describe('OrchestrationStack', () => {
       });
     });
 
-    it('should create log groups for state machines', () => {
+    it('should create log groups for state machines (debug class dev=3d)', () => {
+      // Wave-16b: SFN vended logs use debug class (dev=3d).
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/vendedlogs/states/chimera-pipeline-build-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
 
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/vendedlogs/states/chimera-data-analysis-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
 
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/vendedlogs/states/chimera-background-task-dev',
-        RetentionInDays: 7,
+        RetentionInDays: 3,
       });
     });
   });
@@ -664,15 +666,17 @@ describe('OrchestrationStack', () => {
 
       const prodTemplate = Template.fromStack(prodStack);
 
-      // Event archive: 30 days in prod vs 7 in dev
+      // Event archive: 30 days in prod vs 7 in dev (not a log group; archive
+      // retention is independent of the log-retention class refactor).
       prodTemplate.hasResourceProperties('AWS::Events::Archive', {
         RetentionDays: 30,
       });
 
-      // Log groups: 1 month in prod vs 1 week in dev
+      // Log groups: debug class prod=7d (Wave-16b harmonization — SFN/event
+      // logs are high-volume debug streams and reduce from prior 1mo).
       prodTemplate.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/aws/events/chimera-agents-prod',
-        RetentionInDays: 30,
+        RetentionInDays: 7,
       });
     });
 

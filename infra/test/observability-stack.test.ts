@@ -167,6 +167,35 @@ describe('ObservabilityStack', () => {
         });
         expect(Object.keys(alarms)).toHaveLength(0);
       });
+
+      it('should create tier-violation-count alarm on Chimera/Agent EMF metric', () => {
+        // Wires enforceTierCeiling() EMF output in
+        // packages/core/src/evolution/model-router.ts to an alarm that
+        // fires when >=5 downgrades occur in 10min. Prevents silent
+        // cost-leak regressions (a Basic tenant repeatedly hitting Opus).
+        //
+        // CDK synthesizes alarms built from a Metric (not MetricName+Namespace
+        // top-level props) into the Metrics[] array shape, so we match the
+        // nested namespace + metric name alongside the alarm-level threshold.
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+          AlarmName: 'chimera-dev-tier-violation-count-high',
+          Threshold: 5,
+          EvaluationPeriods: 2,
+          ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+          TreatMissingData: 'notBreaching',
+          Metrics: Match.arrayWith([
+            Match.objectLike({
+              MetricStat: Match.objectLike({
+                Metric: Match.objectLike({
+                  Namespace: 'Chimera/Agent',
+                  MetricName: 'tier_violation_count',
+                }),
+                Stat: 'Sum',
+              }),
+            }),
+          ]),
+        });
+      });
     });
 
     describe('Stack Outputs', () => {
@@ -241,11 +270,12 @@ describe('ObservabilityStack', () => {
       template = Template.fromStack(stack);
     });
 
-    it('should use SIX_MONTHS retention for prod log group', () => {
-      // SIX_MONTHS = 180
+    it('should use app-class retention for prod platform log group (30 days)', () => {
+      // Wave-16b: platform log stream harmonized to app class
+      // (prod=ONE_MONTH). Long-tail archival flows to S3 out-of-band.
       template.hasResourceProperties('AWS::Logs::LogGroup', {
         LogGroupName: '/chimera/prod/platform',
-        RetentionInDays: 180,
+        RetentionInDays: 30,
       });
     });
 
