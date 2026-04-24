@@ -49,10 +49,18 @@ def test_set_rejects_empty_tenant_id():
         set_tenant_context("")
 
 
-def test_env_fallback(monkeypatch):
+def test_env_fallback_is_removed(monkeypatch):
+    """Wave-16 H3: `get_tenant_context()` MUST NOT fall back to
+    `CHIMERA_TENANT_ID` env var. `os.environ` is process-wide — a fallback
+    creates a cross-tenant leak vector where an ECS task with the env var
+    set serves every uninitialised request under the wrong tenant.
+    """
     clear_tenant_context()
     monkeypatch.setenv("CHIMERA_TENANT_ID", "tenant-env")
-    assert require_tenant_id() == "tenant-env"
+    # Even with the env var set, the context must remain None and
+    # require_tenant_id must raise — there is no legitimate fallback.
+    with pytest.raises(TenantContextError):
+        require_tenant_id()
 
 
 def test_ensure_tenant_filter_injects_when_filter_empty():

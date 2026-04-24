@@ -66,18 +66,18 @@ def clear_tenant_context() -> None:
 
 
 def get_tenant_context() -> Optional[TenantContext]:
-    """Return the current tenant context, or None if unset."""
-    ctx = _tenant_ctx.get()
-    if ctx is not None:
-        return ctx
-    fallback = os.environ.get("CHIMERA_TENANT_ID")
-    if fallback:
-        return TenantContext(
-            tenant_id=fallback,
-            tier=os.environ.get("CHIMERA_TENANT_TIER", "basic"),
-            user_id=os.environ.get("CHIMERA_USER_ID"),
-        )
-    return None
+    """Return the current tenant context, or None if unset.
+
+    SECURITY (Wave-16 H3): This function deliberately does NOT fall back to
+    `os.environ.get("CHIMERA_TENANT_ID")`. `os.environ` is process-wide and
+    cannot be isolated per concurrent request. An ECS task with
+    CHIMERA_TENANT_ID set in its environment would leak that tenant's context
+    to every request that reached this function without a prior
+    `set_tenant_context()` call — silently satisfying `require_tenant_id()`
+    with the wrong tenant. ADR-033 requires entrypoints to call
+    `set_tenant_context()` explicitly; there is no legitimate fallback path.
+    """
+    return _tenant_ctx.get()
 
 
 def require_tenant_id() -> str:

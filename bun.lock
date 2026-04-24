@@ -207,6 +207,9 @@
     "packages/shared": {
       "name": "@chimera/shared",
       "version": "0.1.0",
+      "dependencies": {
+        "zod": "^3.22.0",
+      },
       "devDependencies": {
         "@types/node": "^22.0.0",
         "typescript": "~5.7.0",
