@@ -9,6 +9,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
+import { logRetentionFor } from '../constructs/log-retention';
 
 export interface ApiStackProps extends cdk.StackProps {
   envName: string;
@@ -58,7 +59,7 @@ export class ApiStack extends cdk.Stack {
     // ======================================================================
     const accessLogGroup = new logs.LogGroup(this, 'ApiAccessLogs', {
       logGroupName: `/aws/apigateway/chimera-api-${props.envName}`,
-      retention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -102,9 +103,19 @@ export class ApiStack extends cdk.Stack {
         cacheDataEncrypted: true,
       },
       defaultCorsPreflightOptions: {
+        // Enumerate dev/staging origins instead of ALL_ORIGINS. Browsers
+        // reject `Access-Control-Allow-Origin: *` paired with
+        // `Access-Control-Allow-Credentials: true` (CORS spec), so the
+        // previous `ALL_ORIGINS` combination silently failed in every
+        // credentialed request from the web frontend. Wave-16 M2.
         allowOrigins: isProd
           ? ['https://app.chimera.aws'] // Production domain
-          : apigw.Cors.ALL_ORIGINS, // Allow all origins in dev/test
+          : [
+              'https://staging.chimera.aws',
+              'http://localhost:5173', // Vite dev server
+              'http://localhost:8080', // alt dev server
+              'http://localhost:9999', // alt dev server
+            ],
         allowMethods: apigw.Cors.ALL_METHODS,
         allowHeaders: [
           'Content-Type',
@@ -430,7 +441,7 @@ export class ApiStack extends cdk.Stack {
     // ======================================================================
     const wsAccessLog = new logs.LogGroup(this, 'WsAccessLog', {
       logGroupName: '/chimera/' + props.envName + '/api-gateway/websocket',
-      retention: isProd ? logs.RetentionDays.SIX_MONTHS : logs.RetentionDays.ONE_WEEK,
+      retention: logRetentionFor('app', isProd),
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
