@@ -21,6 +21,22 @@ Wave-15d hardening pass (2026-04-22) closed these items:
     docstring + ec2_tools cross-ref)
 Remaining: 23 items (1 spike-blocked, 5 infra-refactor, 4 ts-hardening,
   0 docs, 0 ops-runbooks, 5 obs-emitter, 3 cost-reduction, 7 cleanup).
+Wave-16c (2026-04-22) closed 2 cleanup items:
+  cleanup #5 E2E for agent-loop timeout + circuit breaker → resolved
+    (packages/agents/tests/test_agent_loop_circuit_breaker.py,
+    integration-gated; asserts loop exits ≤ _AGENT_MAX_ITERATIONS
+    and loop_iterations metric is emitted)
+  cleanup #6 code-coverage artifacts → resolved
+    (.github/workflows/ci.yml emits coverage-typescript-lcov +
+    coverage-python-cobertura via actions/upload-artifact@v4;
+    Codecov hookup documented for when a token is provisioned)
+Wave-16a (2026-04-22) closed 2 items:
+  typescript-hardening #3 Zod at shared-type boundary → resolved
+    (packages/shared/src/schemas/: TenantConfig + Skill + AgentSession +
+    AuditEvent + helpers; 53 round-trip tests; downstream ad-hoc
+    validation rewrites deferred via TODO in schemas/index.ts)
+  cleanup #3 workflow.ts stubs triage → resolved
+    (KEEP-WITH-SIMPLIFICATION; see docs/reviews/wave16-workflow-ts-triage.md)
 -->
 
 # Chimera — Open Punch List
@@ -31,19 +47,19 @@ source of truth. Use this to file seeds issues.
 
 ## Quick stats
 
-**19 open items** across the categories below (8 closed in Wave-15):
+**15 open items** across the categories below (8 closed in Wave-15, 2 in Wave-16c, 2 in Wave-16a):
 
 | Category | Count |
 |----------|-------|
 | spike-blocked | 1 |
 | infra-refactor | 3 |
 | python-hardening | 0 |
-| typescript-hardening | 2 |
+| typescript-hardening | 1 |
 | docs | 0 |
 | ops-runbooks | 0 |
 | observability-emitter | 3 |
 | cost-reduction | 3 |
-| cleanup | 7 |
+| cleanup | 4 |
 
 No severity conflicts across review docs; classifications consistent after dedup.
 
@@ -58,12 +74,12 @@ No severity conflicts across review docs; classifications consistent after dedup
 
 ## Top-7 highest-ROI (non-spike-blocked)
 
-1. **Per-tenant model tier-violation metric** — 2d. $360/mo/100-Basic-sessions if missing. *(Note: landed in c29745c — verify wiring.)*
+1. ~~**Per-tenant model tier-violation metric**~~ — landed Wave-15a (c29745c) + Wave-16b dashboard/alarm wired. Emission: `packages/core/src/evolution/model-router.ts:208-218` (`enforceTierCeiling` → `Chimera/Agent::tier_violation_count`). Unit test: `packages/core/src/evolution/__tests__/model-router.test.ts:285-371`. CloudWatch alarm + platform dashboard widget: `infra/lib/observability-stack.ts::TierViolationCountAlarm` (fires at >=5 violations / 10min).
 2. ~~**Per-tenant hourly cost metric**~~ — landed Wave-15d (see `docs/architecture/observability.md`).
 3. ~~**Tool invocation `success_rate_percent`**~~ — landed Wave-15d via CloudWatch Metric Math; duration_ms from Wave-12 (35f8073).
 4. ~~**Bare-except sweep re-verification**~~ — resolved Wave-15d (9 sites narrowed in code_interpreter_tools + swarm_tools; gateway_instrumentation retained intentionally).
 5. **Global `strict: true` + `any` quarantine (793 sites)** — 2d. Separate PR.
-6. **Log retention harmonization** — 1d. Chat-stack (6mo) vs evolution-stack (1mo) drift.
+6. ~~**Log retention harmonization**~~ — landed Wave-16b (see infra-refactor #2).
 7. **Cost-opt: VPC interface endpoints + S3 Intelligent-Tiering** — 0.5d each. See `docs/research/cost-optimization-2026-04-23/RECOMMENDATIONS.md`.
 
 ## By category
@@ -73,7 +89,7 @@ No severity conflicts across review docs; classifications consistent after dedup
 | # | Item | Effort | Why it matters |
 |---|------|--------|---------------|
 | 1 | DAX SG narrowing to chat-gateway task SG (requires NetworkStack refactor) | 0.5-1d | Closes DAX blast radius (wave4 flagged; blocked by circular dep) |
-| 2 | CloudWatch log retention harmonization + S3 archive | 1d | $80-120/mo; fixes chat-stack (6mo) vs evolution-stack (1mo) drift |
+| 2 | ~~CloudWatch log retention harmonization~~ (S3 archive still open) | 1d | ~~$80-120/mo; fixed chat-stack (6mo) vs evolution-stack (1mo) drift~~ **landed Wave-16b** via `infra/constructs/log-retention.ts` (`logRetentionFor('app'/'security'/'debug', isProd)` refactored 24 log-group sites; VPC flow logs keep 1yr prod floor; WAF logs raised to 90d) |
 | 3 | DDB provisioned vs on-demand rightsizing (rate-limits first) | 1-2d | $100-200/mo — needs 4+ weeks prod traffic metrics first |
 
 Resolved in Wave-15c + Wave-15e verification:
@@ -93,13 +109,13 @@ All items resolved in Wave-15d hardening pass (2026-04-22):
   `dynamodb_tools.py`, and `swarm_tools.py` now pass `_BOTO_CONFIG`.
   All callable `boto3.client`/`boto3.resource` sites verified.
 
-### typescript-hardening (2)
+### typescript-hardening (1)
 
 | # | Item | Effort |
 |---|------|--------|
 | 1 | ~~`sendWithRetry` additional integration tests~~ — resolved Wave-15d (retry-exhaustion + 4-code parametrized test; `RETRYABLE_ERROR_NAMES` widened to include `TooManyRequestsException` + `ProvisionedThroughputExceededException`) | ✅ |
 | 2 | Global `strict: true` + `any` quarantine (793 sites) | 2d (separate PR) |
-| 3 | Zod at shared-type boundary (packages/shared) | 1d |
+| 3 | ~~Zod at shared-type boundary (packages/shared)~~ — resolved Wave-16a (schemas for TenantConfig / Skill / AgentSession / AuditEvent in `packages/shared/src/schemas/`; 53 round-trip tests; downstream rewrites deferred via TODO in schemas/index.ts) | ✅ |
 | 4 | ~~Tier-ceiling vs retry ordering comment in `bedrock-model.ts`~~ — resolved Wave-15d | ✅ |
 
 ### docs (0)
@@ -130,7 +146,7 @@ Per `cost-observability-audit.md`; 2 of 5 landed in Wave-15d:
 
 | # | Metric | Namespace | Dimensions | Emitter | Status |
 |---|--------|-----------|------------|---------|--------|
-| 1 | `tier_violation_count` | Chimera/Agent | tenant_id, tier, model_requested | model-router.ts | landed (c29745c — verify wiring) |
+| 1 | `tier_violation_count` | Chimera/Agent | tenant_id, tier, model_requested | model-router.ts | **landed + alarmed Wave-16b** (emission c29745c; infra alarm + dashboard widget in `observability-stack.ts::TierViolationCountAlarm`; unit test `model-router.test.ts:285-371`) |
 | 2 | `loop_iterations` | Chimera/Agent | tenant_id, session_id | chimera_agent.py ⚠️ emits ceiling (20) until Strands exposes iteration_count — do NOT wire alarms yet (see `TODO(rabbithole-02)`) | landed (partial; alarms blocked) |
 | 3 | `tool_invocation_duration_ms` | Chimera/Tools | Service, TenantId, Tier, ToolName | `gateway_instrumentation.py` | **landed Wave-12** (35f8073) |
 | 4 | `tool:success_rate_percent` | Chimera/Tools | Service, TenantId, Tier, ToolName | **computed via CloudWatch Metric Math** from `Success` (see `docs/architecture/observability.md`) | **landed Wave-15d** |
@@ -141,17 +157,17 @@ Remaining open (3): verification of #1 wiring, alarm-readiness for #2 (unblocked
 ### cost-reduction (3)
 
 1. DAX cache-hit-rate monitoring + rightsize (potential $1,200-1,500/mo).
-2. Model-router Opus-fallback live verification.
+2. ~~Model-router Opus-fallback live verification~~ — landed Wave-16b. Integration test at `packages/core/src/evolution/__tests__/model-router.integration.test.ts` covers construct-time downgrade, metric emission, and per-turn override; live Bedrock assertion gated on `CHIMERA_RUN_BEDROCK_INTEGRATION=1`.
 3. Region-specific resource audit.
 
-### cleanup (8)
+### cleanup (4)
 
 1. Replace task-decomposer heuristic with LLM.
 2. Implement skill-registry persistence (currently in-memory).
-3. Triage `workflow.ts` stubs (wait-for-agent, JSONPath, map iteration).
+3. ~~Triage `workflow.ts` stubs (wait-for-agent, JSONPath, map iteration)~~ — resolved Wave-16a. **Verdict: KEEP-WITH-SIMPLIFICATION.** Keep the file + Wave-15a throw-stubs, treat `WorkflowEngine` as experimental, do NOT implement JSONPath / map / wait-for-agent in-process. When multi-agent orchestration is needed, build a Step Functions adapter (AWS-native, durable, already used by tenant-onboarding + skill-pipeline stacks). Full triage + research in `docs/reviews/wave16-workflow-ts-triage.md`.
 4. Fix chat-gateway test exclusion (Bun CJS/ESM).
-5. Add E2E for agent-loop timeout + circuit breaker.
-6. Publish code-coverage artifacts.
+5. ~~Add E2E for agent-loop timeout + circuit breaker~~ — resolved Wave-16c (`packages/agents/tests/test_agent_loop_circuit_breaker.py`, integration-gated).
+6. ~~Publish code-coverage artifacts~~ — resolved Wave-16c (CI emits `coverage-typescript-lcov` + `coverage-python-cobertura` artifacts; Codecov hookup ready via `codecov/codecov-action@v4` once token is provisioned).
 7. ~~Document `_tid` variable semantics in tool gate blocks~~ — resolved Wave-15d (canonical module docstring in `s3_tools.py`; cross-ref in `ec2_tools.py`). The pattern is now self-documenting for the other 19 tool files.
 8. Remove the `aws-tools/strands-agents.{ts,d.ts}` shim once the real `strands-agents` npm package is published. Currently imported by **~30 files** across `packages/core/src/aws-tools/` and `packages/core/src/discovery/`; cannot be deleted until those callers migrate to `@strands-agents/sdk` (already declared as a type-only module in `strands-agents-shim.d.ts`). Track alongside the Gateway migration cutover.
 
