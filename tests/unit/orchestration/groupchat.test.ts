@@ -7,7 +7,7 @@
  * `packages/core/src/orchestration/__tests__/group-chat.test.ts`.
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   GroupChat,
   createGroupChat,

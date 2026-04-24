@@ -330,14 +330,17 @@ describe('DataStack', () => {
           });
         });
 
-        it('should not have TTL (2-year retention for billing)', () => {
+        it('should have TTL on `ttl` attribute (2-year retention enforced at DDB; Wave-14 H1)', () => {
           const table = template.findResources('AWS::DynamoDB::GlobalTable', {
             Properties: {
               TableName: 'chimera-cost-tracking-dev',
             },
           });
           const tableResource = Object.values(table)[0] as any;
-          expect(tableResource.Properties.TimeToLiveSpecification).toBeUndefined();
+          expect(tableResource.Properties.TimeToLiveSpecification).toEqual({
+            AttributeName: 'ttl',
+            Enabled: true,
+          });
         });
       });
 

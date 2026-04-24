@@ -156,7 +156,7 @@ describe('SecurityStack', () => {
         template.resourceCountIs('AWS::Cognito::UserPoolClient', 2);
       });
 
-      it('should create web client with OAuth flows', () => {
+      it('should create web client with OAuth flows + 7-day refresh + revocation (Wave-15 H3/M1)', () => {
         template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
           ClientName: 'chimera-web',
           AllowedOAuthFlows: ['code'],
@@ -166,17 +166,19 @@ describe('SecurityStack', () => {
           // CDK converts hours/days to minutes internally
           AccessTokenValidity: 60, // 1 hour = 60 minutes
           IdTokenValidity: 60, // 1 hour = 60 minutes
-          RefreshTokenValidity: 43200, // 30 days = 43200 minutes
+          RefreshTokenValidity: 10080, // 7 days = 10080 minutes (Wave-15 M1)
+          EnableTokenRevocation: true,
         });
       });
 
-      it('should create CLI client with SRP auth', () => {
+      it('should create CLI client with SRP auth + 1-day refresh + revocation (Wave-15 H3/M1)', () => {
         template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
           ClientName: 'chimera-cli',
           ExplicitAuthFlows: Match.arrayWith(['ALLOW_USER_SRP_AUTH']),
           // CDK converts hours/days to minutes internally
           AccessTokenValidity: 480, // 8 hours = 480 minutes
-          RefreshTokenValidity: 43200, // 30 days = 43200 minutes
+          RefreshTokenValidity: 1440, // 1 day = 1440 minutes (Wave-15 M1)
+          EnableTokenRevocation: true,
         });
       });
     });
@@ -230,7 +232,7 @@ describe('SecurityStack', () => {
         });
       });
 
-      it('should include rate limiting rule (priority 2)', () => {
+      it('should include rate limiting rule (priority 2, Wave-15 M2 bot/DDoS backstop at 10k)', () => {
         template.hasResourceProperties('AWS::WAFv2::WebACL', {
           Rules: Match.arrayWith([
             Match.objectLike({
@@ -239,7 +241,7 @@ describe('SecurityStack', () => {
               Action: { Block: {} },
               Statement: {
                 RateBasedStatement: {
-                  Limit: 2000,
+                  Limit: 10000,
                   AggregateKeyType: 'IP',
                 },
               },

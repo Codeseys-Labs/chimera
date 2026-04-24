@@ -125,7 +125,7 @@ describe('NetworkStack', () => {
     });
 
     describe('Interface Endpoints', () => {
-      it('should create 7 interface VPC endpoints', () => {
+      it('should create 13 interface VPC endpoints (7 original + 6 Wave-15c cost-opt additions)', () => {
         const template = Template.fromStack(stack);
         const endpoints = template.findResources('AWS::EC2::VPCEndpoint', {
           Properties: {
@@ -133,7 +133,7 @@ describe('NetworkStack', () => {
           },
         });
 
-        expect(Object.keys(endpoints).length).toBe(7);
+        expect(Object.keys(endpoints).length).toBe(13);
       });
 
       it('should enable private DNS for interface endpoints', () => {
