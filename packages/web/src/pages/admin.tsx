@@ -205,7 +205,21 @@ export function AdminPage() {
                           {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : 'Never'}
                         </TableCell>
                         <TableCell>
-                          <Button variant="destructive" size="sm">
+                          {/*
+                           * Wave-18 I2: Revoke button had no onClick and looked
+                           * destructive. The full wire-up (apiDelete + React
+                           * Query invalidation + confirmation dialog) needs the
+                           * DELETE /tenants/:id/api-keys/:keyId endpoint which
+                           * is not yet implemented — disable until then so
+                           * operators see the intent without a misleading
+                           * no-op button. See OPEN-PUNCH-LIST for tracking.
+                           */}
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled
+                            title="API key revocation UI coming soon — use the DELETE API directly until then"
+                          >
                             Revoke
                           </Button>
                         </TableCell>
