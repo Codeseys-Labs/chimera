@@ -8,6 +8,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sns from 'aws-cdk-lib/aws-sns';
+import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
@@ -159,6 +160,28 @@ export class PipelineStack extends cdk.Stack {
       topicName: `chimera-pipeline-alarms-${props.envName}`,
       displayName: `Chimera Pipeline Alarms (${props.envName})`,
     });
+
+    // Wave-17 C2: subscribe ops channels in prod. Without these, the
+    // two pipeline alarms (ErrorRate + Latency at lines ~1366, ~1384)
+    // fired into a black hole — auto-rollback still worked via Step
+    // Functions, but human operators were never paged. On-call arriving
+    // to a silent-but-broken canary is the worst kind of incident.
+    if (isProd) {
+      const opsEmail = this.node.tryGetContext('opsEmail');
+      const pagerDutyEndpoint = this.node.tryGetContext('pagerDutyEndpoint');
+      if (pagerDutyEndpoint) {
+        pipelineAlarmTopic.addSubscription(
+          new subscriptions.UrlSubscription(pagerDutyEndpoint, {
+            protocol: sns.SubscriptionProtocol.HTTPS,
+          })
+        );
+      }
+      if (opsEmail) {
+        pipelineAlarmTopic.addSubscription(
+          new subscriptions.EmailSubscription(opsEmail)
+        );
+      }
+    }
 
     // ======================================================================
     // CodeBuild Project for Build Stage
