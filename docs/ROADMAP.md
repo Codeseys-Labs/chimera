@@ -1,8 +1,8 @@
 # AWS Chimera - Implementation Roadmap
 
-> **Status:** Platform 90% complete. Phases 0-6 delivered. First CDK deploy ready — pending execution.
+> **Status:** Platform 90% complete. Phases 0-6 delivered. v0.6.3 released — first CDK deploy complete (14/14 stacks live in `baladita+Bedrock-Admin`). Waves 15-20 closed all Wave-17 security-ops + Wave-18 carryovers; no open tactical items.
 >
-> **Last Updated:** 2026-04-18 (verified via codebase audit after Waves 1-7)
+> **Last Updated:** 2026-04-25 (post Wave-20)
 
 ---
 
@@ -18,7 +18,7 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 ---
 
-## Current State (2026-04-18)
+## Current State (2026-04-25, v0.6.3)
 
 ### What's Built (Verified)
 
@@ -44,20 +44,30 @@ AWS Chimera is an **Agent-as-a-Service platform** built on AWS Bedrock AgentCore
 
 ### What Remains
 
-For the authoritative, prioritized list of **54 open items** across infra-refactor, python-hardening, typescript-hardening, docs, ops-runbooks, observability-emitter, cost-reduction, and cleanup, see [docs/reviews/OPEN-PUNCH-LIST.md](reviews/OPEN-PUNCH-LIST.md).
+For the full audit of open work see [docs/reviews/wave20-backlog-audit.md](reviews/wave20-backlog-audit.md).
 
 | Area | Gap | Priority |
 |------|-----|----------|
-| **First CDK Deploy** | No stack has been deployed. All 14 stacks synthesise cleanly — ready to deploy. | **Blocking** |
-| **OAC + Bedrock Model Deploy** | Code fixes committed (c3c6585), need `cdk deploy FrontendStack ChatStack` to take effect | **Blocking** |
-| **E2E Verification** | chimera-0092: verify chat works end-to-end with system prompt + tools | High |
-| **ADR-034 Registry spike** | Per-tenant Registry vs shared (tenant-scoped records) — 1 week spike; see [docs/designs/agentcore-registry-spike.md](designs/agentcore-registry-spike.md) | High (gates Phase-2+) |
-| **DR runbooks** | PITR restore, tenant-breach playbook, CDK deploy-failure recovery — 3-4d total (blocks GA per punch-list) | High |
-| **Per-tenant observability metrics** | Tier-violation, hourly cost, tool invocation duration/success — 6d total | High |
-| **E2E Test Scripts** | chimera-2087: CLI E2E integration test scripts (needs live environment) | Medium |
-| **Strands Shim Removal** | chimera-b7af: remove strands-agents.ts once package publishes to npm | Medium |
+| **chimera-0092** | E2E chat validation — verify `chimera chat "list S3 buckets"` with real agent reasoning | **Blocked on deploy** |
+| **chimera-d123** | Re-push to CodeCommit + retrigger pipeline to activate OAC + Bedrock model fixes | **P0 in_progress** |
+| **chimera-bbbc** | Configure agent system prompt + AWS tools + tenant context (post-deploy) | **P0** |
+| **chimera-2087 / chimera-9035** | CLI E2E integration test scripts (needs live environment, `RUN_E2E=1` gated) | Medium (blocked) |
+| **chimera-b7af** | Migrate `strands-agents.ts` shim → `@strands-agents/sdk` (Zod→JSON-Schema adapter; SDK at 1.0.0-rc.5, wait for GA) | Medium |
+| **chimera-76b9** | LLM-based task decomposer (current is heuristic) | Low |
+| **chimera-2b2a** | EventBridge scheduled recurring agent tasks | Low |
+| **chimera-59ee** | Webhook delivery for task lifecycle events | Low |
+| **chimera-606c** | DGM evolution integration (composite fitness, lineage) | Backlog |
+| **ADR-034 Registry spike** | Per-tenant Registry vs shared — 1 week spike; see [docs/designs/agentcore-registry-spike.md](designs/agentcore-registry-spike.md) | High (gates Phase-2+) |
 | **TS `strict: true` + `any` quarantine** | 793 sites — 2d | Medium |
 | **Chat Platform Integration** | Complete Slack/Discord/Teams OAuth + event handlers | Low |
+
+**Closed since 2026-04-18:**
+- ✅ First CDK deploy executed (14/14 stacks live)
+- ✅ DR runbooks (`scripts/dr/*.sh` + `docs/runbooks/cognito-recovery.md`, Wave 18)
+- ✅ Per-tenant observability metrics (tier-violation, EMF tool-invocation, Waves 16-17)
+- ✅ All Wave-17 security-ops findings (C-1 accepted, H-1 aliased CMKs, H-2 ALB logs, M-1 API log CMK, M-2 ECR IMMUTABLE, Wave 19)
+- ✅ All Wave-18 carryovers (I1 chat-gateway CI, I4 alarm runbooks, Wave 19)
+- ✅ chimera-982e NACL defense-in-depth (Wave 20)
 
 ---
 
@@ -469,12 +479,22 @@ Phase 2               Phase 3           Phase 7
 
 ### Remaining (Backlog)
 
+As of Wave 20 (2026-04-25). Run `sd list` for live state.
+
 | ID | Title | Status |
 |----|-------|--------|
-| `chimera-0092` | Verify chimera chat works end-to-end with system prompt + tools | open (blocked on deploy) |
-| `chimera-2087` | Create CLI E2E integration test scripts | open (blocked on deploy) |
-| `chimera-b7af` | P1: Remove strands-agents.ts shim when package published | open |
+| `chimera-0092` | Verify chimera chat works end-to-end with system prompt + tools | blocked on deploy |
+| `chimera-2087` | Create CLI E2E integration test scripts | blocked on deploy |
+| `chimera-9035` | CLI integration test scripts for end-to-end validation | in_progress |
+| `chimera-d123` | Re-push to CodeCommit after timeout fix + retrigger pipeline | in_progress |
+| `chimera-bbbc` | Configure Chimera agent: system prompt + AWS tools + tenant context | open (High) |
+| `chimera-b7af` | P1: Migrate shim → @strands-agents/sdk (Zod vs JSON Schema mismatch) | open |
 | `chimera-76b9` | P2: Implement LLM-based task decomposer | open |
+| `chimera-2b2a` | FUTURE: EventBridge scheduled recurring agent tasks | open |
+| `chimera-59ee` | FUTURE: Webhook delivery for task lifecycle events | open |
+| `chimera-606c` | FUTURE: DGM evolution integration (composite fitness, lineage) | open |
+
+**Closed in Wave 20:** `chimera-982e` (VPC NACLs for isolated subnet tier).
 
 ---
 
