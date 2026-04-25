@@ -174,9 +174,10 @@ describe('ObservabilityStack', () => {
         // fires when >=5 downgrades occur in 10min. Prevents silent
         // cost-leak regressions (a Basic tenant repeatedly hitting Opus).
         //
-        // CDK synthesizes alarms built from a Metric (not MetricName+Namespace
-        // top-level props) into the Metrics[] array shape, so we match the
-        // nested namespace + metric name alongside the alarm-level threshold.
+        // Emitter writes the metric with dimensions {tenant_id, tier,
+        // model_requested}; CloudWatch EMF does not auto-create a
+        // zero-dimension rollup, so the alarm uses a SEARCH MathExpression
+        // that sums across all dimension combinations.
         template.hasResourceProperties('AWS::CloudWatch::Alarm', {
           AlarmName: 'chimera-dev-tier-violation-count-high',
           Threshold: 5,
@@ -185,13 +186,9 @@ describe('ObservabilityStack', () => {
           TreatMissingData: 'notBreaching',
           Metrics: Match.arrayWith([
             Match.objectLike({
-              MetricStat: Match.objectLike({
-                Metric: Match.objectLike({
-                  Namespace: 'Chimera/Agent',
-                  MetricName: 'tier_violation_count',
-                }),
-                Stat: 'Sum',
-              }),
+              Expression: Match.stringLikeRegexp(
+                'SEARCH\\(.*Chimera/Agent.*tier_violation_count.*\\)'
+              ),
             }),
           ]),
         });

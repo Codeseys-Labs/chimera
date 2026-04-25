@@ -1200,6 +1200,23 @@ exports.handler = async () => {
     // a single misbehaving client surfaces quickly, but brief spikes
     // from legitimate retries stay quiet.
     // ======================================================================
+    // NOTE: enforceTierCeiling() in packages/core/src/evolution/model-router.ts
+    // emits EMF with dimensions {tenant_id, tier, model_requested}. CloudWatch
+    // EMF does NOT auto-create a zero-dimension rollup, so a plain Metric
+    // without Dimensions never matches the published timeseries and the alarm
+    // silently stays in INSUFFICIENT_DATA. We use a SEARCH MathExpression to
+    // aggregate across all dimension combinations instead.
+    const tierViolationSearchExpression = new cloudwatch.MathExpression({
+      expression:
+        "SUM(SEARCH('{Chimera/Agent,tenant_id,tier,model_requested} MetricName=\"tier_violation_count\"', 'Sum', 300))",
+      period: cdk.Duration.minutes(5),
+      label: 'Tier violations (Sum, all tenants)',
+      usingMetrics: {},
+    });
+
+    // Dashboard widget continues to use a dimensionless Metric so the
+    // chart renders even before any data points arrive; the alarm-critical
+    // aggregation lives on the SEARCH expression above.
     const tierViolationCountMetric = new cloudwatch.Metric({
       namespace: 'Chimera/Agent',
       metricName: 'tier_violation_count',
@@ -1234,7 +1251,7 @@ exports.handler = async () => {
         `Tier-ceiling enforcement downgraded >=5 requests in 10 minutes. ` +
         `Emitted from enforceTierCeiling() in packages/core/src/evolution/model-router.ts. ` +
         `RUNBOOK: ${tierViolationRunbook}`,
-      metric: tierViolationCountMetric,
+      metric: tierViolationSearchExpression,
       threshold: 5,
       evaluationPeriods: 2,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
