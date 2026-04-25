@@ -287,6 +287,8 @@ export class ObservabilityStack extends cdk.Stack {
       });
       throttleAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
       throttleAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
+      throttleAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+      throttleAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
     }
 
     if (ddbWidgets.length > 0) {
@@ -444,6 +446,8 @@ export class ObservabilityStack extends cdk.Stack {
     });
     apiErrorRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
     apiErrorRateAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
+    apiErrorRateAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+    apiErrorRateAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
 
     // Cost Anomaly Detection alarm
     // Tracks monthly spend in cost-tracking table via custom metric filter
@@ -470,6 +474,8 @@ export class ObservabilityStack extends cdk.Stack {
     });
     costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
     costAnomalyAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic)); // Keep legacy topic
+    costAnomalyAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+    costAnomalyAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
 
     // ======================================================================
     // Cost Metric Publisher: Scheduled Lambda that reads cost-tracking table
@@ -664,6 +670,8 @@ exports.handler = async () => {
       });
       pitrAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
       pitrAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+      pitrAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+      pitrAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
       this.pitrComplianceAlarm = pitrAlarm;
 
       // Real-time fan-out: EventBridge -> SNS on every compliance change so
@@ -706,6 +714,8 @@ exports.handler = async () => {
       });
       backupFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
       backupFailureAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+      backupFailureAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.highAlarmTopic));
+      backupFailureAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
 
       // Composite "backup protection compromised" alarm: OR of PITR
       // non-compliance and AWS Backup job failure. Provides a single
@@ -985,6 +995,8 @@ exports.handler = async () => {
       });
       crossRegionAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
       crossRegionAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
+      crossRegionAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.criticalAlarmTopic));
+      crossRegionAlarm.addOkAction(new cloudwatch_actions.SnsAction(this.alarmTopic));
     }
 
     // ======================================================================
