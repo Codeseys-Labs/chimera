@@ -34,8 +34,26 @@ function useCurrentPath(): string {
     const handler = (): void => {
       setPath(window.location.pathname.replace(/\/$/, '') || '/');
     };
+    // Browser fires popstate on back/forward navigation but NOT on
+    // programmatic history.pushState / replaceState calls. Patch both to
+    // dispatch a custom event so any in-app code (e.g., auth redirects)
+    // using pushState directly still triggers re-render. Wave-18 I6.
+    const origPush = window.history.pushState.bind(window.history);
+    const origReplace = window.history.replaceState.bind(window.history);
+    window.history.pushState = (...args: Parameters<typeof origPush>) => {
+      origPush(...args);
+      handler();
+    };
+    window.history.replaceState = (...args: Parameters<typeof origReplace>) => {
+      origReplace(...args);
+      handler();
+    };
     window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
+    return () => {
+      window.history.pushState = origPush;
+      window.history.replaceState = origReplace;
+      window.removeEventListener('popstate', handler);
+    };
   }, []);
 
   return path;
