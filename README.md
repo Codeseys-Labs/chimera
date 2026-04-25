@@ -117,7 +117,7 @@ Platform Adapters (Web, Slack, Discord, Teams, Telegram)
 curl -L https://github.com/Codeseys-Labs/chimera/releases/latest/download/chimera-darwin-arm64.tar.gz | tar xz
 chmod +x chimera-darwin-arm64
 sudo mv chimera-darwin-arm64 /usr/local/bin/chimera
-chimera --version   # should print v0.6.0
+chimera --version   # should print v0.6.2
 
 # Or build from source
 git clone https://github.com/Codeseys-Labs/chimera.git
@@ -172,7 +172,7 @@ chimera/
 
 ## Current Status
 
-**Platform: Production — v0.6.0** — All 14 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary.
+**Platform: Production — v0.6.2** — All 14 CDK stacks deploy and destroy cleanly. Full lifecycle verified with the released CLI binary. Live in `baladita+Bedrock-Admin` (us-west-2).
 
 > **First-time deploy?** See [`docs/runbooks/first-deploy-baladita.md`](docs/runbooks/first-deploy-baladita.md) for a pre-flight checklist including Bedrock model approvals, service quota requirements, and the 7 risk items a Wave-10 code review flagged in `chimera deploy`.
 

@@ -121,10 +121,16 @@ new codepipeline_actions.CodeCommitSourceAction({
 When either writer (CLI or agent) lands a commit on `main`, CodeCommit emits a `referenceUpdated` event. The EventBridge rule in the Pipeline stack fires CodePipeline, which then:
 
 1. **Source stage** — pulls the tree from CodeCommit.
-2. **Build stage** — runs `bun install && bun test && bunx cdk synth`.
+2. **Build stage** — runs `bun install && bun test && npx cdk synth --all`.
+   **Note:** `npx cdk`, NEVER `bunx cdk`. Bun's module resolution creates
+   different class instances for aws-cdk-lib constructs, breaking
+   `instanceof` checks (`TypeError: peer.canInlineRule is not a function`).
+   See ADR-021 + CLAUDE.md.
 3. **Test stage** — integration + E2E.
 4. **Deploy stage** — `npx cdk deploy --all` (see `cdk.json::app`).
-5. **Rollout stage** — canary, 10% → 50% → 100% via the Canary Orchestration state machine.
+5. **Rollout stage** — progressive canary: **5% → 25% → 50% → 100%** via the
+   Canary Orchestration state machine (see `pipeline-stack.ts`). Aligns with
+   `docs/architecture/system-architecture.md` §8 as the canonical source.
 
 Crucially, the CLI never invokes the pipeline. It doesn't know about the pipeline. It just writes to `CodeCommit`. The pipeline is what the stack deployed, and it runs itself.
 

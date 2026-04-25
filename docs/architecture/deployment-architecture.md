@@ -2,14 +2,14 @@
 title: "Chimera Deployment Architecture"
 version: 1.0.0
 status: canonical
-last_updated: 2026-03-27
+last_updated: 2026-04-24
 ---
 
 # Chimera Deployment Architecture
 
 ## Overview
 
-Chimera uses AWS CDK (TypeScript) to define and synthesize 13 CloudFormation stacks. All stacks are synthesized under the `Chimera-{envName}` prefix (default: `Chimera-dev`). The CDK app entry point is `infra/bin/chimera.ts`.
+Chimera uses AWS CDK (TypeScript) to define and synthesize **14** CloudFormation stacks. All stacks are synthesized under the `Chimera-{envName}` prefix (default: `Chimera-dev`). The CDK app entry point is `infra/bin/chimera.ts`.
 
 CDK commands must use `npx cdk` (Node runtime), not `bunx cdk`. Bun's module resolution breaks CDK `instanceof` checks, causing errors like `TypeError: peer.canInlineRule is not a function`.
 
@@ -19,10 +19,10 @@ CDK commands must use `npx cdk` (Node runtime), not `bunx cdk`. Bun's module res
 
 | # | Stack | Resources | Dependencies |
 |---|-------|-----------|--------------|
-| 1 | `Network` | VPC, subnets, NAT gateways, VPC endpoints, security groups | — |
+| 1 | `Network` | VPC, subnets, NAT gateways, VPC endpoints (13 interface), security groups | — |
 | 2 | `Data` | 6 DynamoDB tables, 3 S3 buckets, DAX cluster | Network |
-| 3 | `Security` | Cognito user pool, WAF WebACL, KMS CMK | — |
-| 4 | `Observability` | CloudWatch dashboard, SNS alarm topic, DDB throttle alarms | Data, Security |
+| 3 | `Security` | Cognito user pool (MFA required in prod), WAF WebACL, KMS CMK | — |
+| 4 | `Observability` | CloudWatch dashboard, SNS alarm topics (4 severity tiers), DDB throttle alarms | Data, Security |
 | 5 | `Api` | REST API (v1 + WebSocket), JWT authorizer, webhook routes | Security |
 | 6 | `Pipeline` | CodePipeline, CodeCommit, CodeBuild, ECR repositories | — |
 | 7 | `SkillPipeline` | Step Functions 7-stage skill security scanner | Data |
@@ -32,6 +32,7 @@ CDK commands must use `npx cdk` (Node runtime), not `bunx cdk`. Bun's module res
 | 11 | `TenantOnboarding` | Step Functions provisioning workflow, Cedar policy store, Lambdas | Data, Security, Observability |
 | 12 | `Email` | SES receipt rules, S3 inbound bucket, parser/sender Lambdas, SQS | Data, Orchestration |
 | 13 | `Frontend` | S3 + CloudFront (OAC), React SPA hosting | — |
+| 14 | `Discovery` | Cloud Map namespace (`chimera-{env}`) for service discovery + AgentCore Gateway registration target | — |
 
 ---
 
@@ -82,7 +83,7 @@ This creates the `CDKToolkit` stack with:
 
 ## CDK Nag Compliance
 
-All 13 stacks are checked by the `AwsSolutionsChecks` CDK Nag pack. As of the CDK synth validation pass on 2026-03-27, all 478 initial findings have documented suppressions in `infra/cdk-nag-suppressions.ts`.
+All 14 stacks are checked by the `AwsSolutionsChecks` CDK Nag pack. Suppressions documented in `infra/cdk-nag-suppressions.ts`.
 
 Suppressions are applied from `bin/chimera.ts` after each stack is created, using per-stack functions (`applyNetworkStackSuppressions`, `applyDataStackSuppressions`, etc.).
 
