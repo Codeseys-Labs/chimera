@@ -42,7 +42,7 @@
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "commander": "^11.1.0",
-    "ink": "^5.0.1",
+    "ink": "^7.0.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "inquirer": "^9.2.0",
