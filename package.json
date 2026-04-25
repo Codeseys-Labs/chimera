@@ -24,6 +24,7 @@
     "test:all": "bun run test:shared && bun run test:core && bun run test:sse-bridge && bun run test:chat-gateway && bun run test:cli && bun run test:infra && bun run test:integration",
     "test:integration": "cd tests && bun run test:integration",
     "test:e2e": "cd tests && bun run test:e2e",
+    "test:smoke": "CHIMERA_E2E=1 scripts/test-e2e.sh",
     "test:playwright": "npx playwright test",
     "test:load": "cd tests && bun run test:load",
     "test:shared": "cd packages/shared && bun test",
