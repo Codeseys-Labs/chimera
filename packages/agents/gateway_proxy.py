@@ -199,12 +199,29 @@ def create_gateway_proxy_tool(tool_def: GatewayToolDefinition, tenant_id: str) -
             # a malicious target cannot smuggle instruction tokens via the
             # error/result payload. See _format_tool_error / _format_tool_result.
             if isinstance(result, dict) and result.get('statusCode', 200) >= 400:
+                # Log the full Lambda error payload *before* it gets
+                # truncated/enveloped for the LLM response. Operators debugging
+                # via CloudWatch otherwise only see the 500-char snippet.
+                logger.error(
+                    "Gateway proxy tool %s returned error (statusCode=%s): %r",
+                    name,
+                    result.get('statusCode'),
+                    result.get('error', result),
+                )
                 return _format_tool_error(name, result.get('error', result))
             if isinstance(result, dict) and 'result' in result:
                 return _format_tool_result(name, result['result'])
             return _format_tool_result(name, result)
         except Exception as exc:
-            logger.error("Gateway proxy error for tool %s: %s", name, exc)
+            # Emit the full exception (with traceback) before returning the
+            # truncated, agent-facing envelope. The LLM response continues to
+            # be length-bounded; operators get the real stack trace in logs.
+            logger.error(
+                "Gateway proxy error for tool %s: %s",
+                name,
+                exc,
+                exc_info=True,
+            )
             return _format_tool_error(name, f"invocation failed: {exc}")
 
     # Set metadata before applying @tool so Strands picks up correct name/description
