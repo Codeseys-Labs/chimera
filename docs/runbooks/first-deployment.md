@@ -287,6 +287,58 @@ If this command fails with "Stack not found", confirm all stacks completed deplo
 
 ---
 
+## Step 6b: Build + Upload Frontend SPA
+
+**The FrontendStack creates an empty S3 bucket.** The CDK deploy does not
+build or upload the React SPA — this is a separate step. Without it,
+`https://{frontendDomain}/` returns **HTTP 403** from CloudFront because
+the origin bucket has no `index.html`.
+
+Wave-21 closed the common "Frontend 403" confusion — the root cause was
+always an empty bucket, not an OAC or CDN misconfiguration.
+
+Build with the just-fetched endpoints embedded at build time:
+
+```bash
+# 1. Get values from chimera.toml or CloudFormation
+export BUCKET=$(aws cloudformation describe-stacks \
+  --stack-name Chimera-${env}-Frontend \
+  --query 'Stacks[0].Outputs[?OutputKey==`FrontendBucketName`].OutputValue' --output text)
+export DIST_ID=$(aws cloudformation describe-stacks \
+  --stack-name Chimera-${env}-Frontend \
+  --query 'Stacks[0].Outputs[?OutputKey==`FrontendDistributionId`].OutputValue' --output text)
+
+# 2. Build with env vars wired into Vite
+cd packages/web
+VITE_API_URL="<ApiUrl from Step 6>" \
+VITE_WEBSOCKET_URL="<WebSocketUrl>" \
+VITE_CHAT_URL="<CloudFrontUrl from Chat stack>" \
+VITE_USER_POOL_ID="<UserPoolId>" \
+VITE_USER_POOL_CLIENT_ID="<WebClientId>" \
+VITE_AWS_REGION="us-west-2" \
+bun run build
+
+# 3. Sync to S3 with correct cache headers (hashed assets = immutable; index = no-cache)
+aws s3 sync dist/ s3://$BUCKET/ \
+  --exclude "index.html" \
+  --cache-control "public, max-age=31536000, immutable" \
+  --delete
+aws s3 cp dist/index.html s3://$BUCKET/index.html \
+  --cache-control "no-cache, no-store, must-revalidate" \
+  --content-type "text/html"
+
+# 4. Invalidate CloudFront so users see the new bundle immediately
+aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+```
+
+Verify: `curl -sI https://{frontendDomain}/` → HTTP 200 with
+`content-type: text/html`.
+
+> **Future automation:** This step should become a `chimera deploy --upload-web`
+> flag or a CodeBuild post-deploy phase. Tracked as a low-priority follow-up.
+
+---
+
 ## Step 7: Validate Deployment
 
 Run pre-flight checks to confirm all services are healthy:
