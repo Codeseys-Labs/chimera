@@ -90,7 +90,7 @@ def start_background_task(
         )
     """
     try:
-        _tid = require_tenant_id()
+        tenant_id = require_tenant_id()
     except TenantContextError as e:
         return f"Error: {e}"
     try:
@@ -100,8 +100,11 @@ def start_background_task(
         event_bus_name = os.environ.get('EVENT_BUS_NAME', f'chimera-agents-{env_name}')
         sessions_table = os.environ.get('SESSIONS_TABLE', f'chimera-sessions-{env_name}')
 
-        # Extract tenant context from environment (set by AgentCore runtime)
-        tenant_id = os.environ.get('TENANT_ID', 'default-tenant')
+        # tenant_id comes from require_tenant_id() ContextVar above — NOT os.environ.
+        # Prior bug (Wave-17 C1): read TENANT_ID from os.environ which is
+        # process-wide and not request-scoped; caused cross-tenant writes in
+        # shared ECS containers. Fixed per ADR-033. agent_id + session_id
+        # remain process-scoped (set at AgentCore entrypoint spawn).
         source_agent_id = os.environ.get('AGENT_ID', 'chimera-agent')
         session_id = os.environ.get('SESSION_ID', 'unknown-session')
 
@@ -199,14 +202,14 @@ def check_background_task(task_id: str) -> str:
         check_background_task(task_id="bg-task-1234567890-abc123")
     """
     try:
-        _tid = require_tenant_id()
+        tenant_id = require_tenant_id()
     except TenantContextError as e:
         return f"Error: {e}"
     try:
         # Get environment configuration
         env_name = os.environ.get('CHIMERA_ENV', 'dev')
         sessions_table = os.environ.get('SESSIONS_TABLE', f'chimera-sessions-{env_name}')
-        tenant_id = os.environ.get('TENANT_ID', 'default-tenant')
+        # tenant_id from ContextVar (above) — NOT os.environ. Wave-17 C1 fix.
 
         # Query DynamoDB for task metadata
         response = dynamodb.get_item(
