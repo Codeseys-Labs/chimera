@@ -39,10 +39,22 @@ export class ChimeraTable extends Construct {
   constructor(scope: Construct, id: string, props: ChimeraTableProps) {
     super(scope, id);
 
+    // Named aliases are critical: without one, the auto-created key is
+    // identified only by an AWS-generated UUID, invisible in the KMS console
+    // by name and unreferenceable symbolically in IAM. Aliases also survive
+    // key deletion, so a RETAIN'd key can be rebound if the stack is recreated.
+    // `props.tableName` already includes the env suffix (e.g.
+    // "chimera-tenants-dev"), so the alias reads as `alias/chimera-tenants-dev`.
+    // Wave-17 H-1.
     this.encryptionKey = props.encryptionKey ?? new kms.Key(this, 'Key', {
+      alias: props.tableName,
       description: `CMK for ${props.tableName}`,
       enableKeyRotation: true,
-      removalPolicy: props.removalPolicy ?? cdk.RemovalPolicy.RETAIN,
+      // Keys are ALWAYS retained — even in non-prod. A destroyed CMK renders
+      // prior S3-backup ciphertext permanently unreadable, which breaks the
+      // disaster-recovery contract. The table itself can DESTROY for cost
+      // reasons; the key cannot.
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     this.table = new dynamodb.TableV2(this, 'Table', {

@@ -69,12 +69,25 @@ describe('DataStack', () => {
         });
       });
 
-      it('should create KMS alias for audit key', () => {
-        template.resourceCountIs('AWS::KMS::Alias', 1);
+      it('should create KMS aliases for every CMK (Wave-17 H-1)', () => {
+        // 6 CMKs total: 1 explicit audit key + 5 per-table keys
+        // (tenants, sessions, skills, rate-limits, cost-tracking) created by
+        // ChimeraTable. All must be aliased for KMS-console visibility and
+        // IAM symbolic references.
+        template.resourceCountIs('AWS::KMS::Alias', 6);
 
-        template.hasResourceProperties('AWS::KMS::Alias', {
-          AliasName: 'alias/chimera-audit-dev',
-        });
+        for (const tableName of [
+          'chimera-audit-dev',
+          'chimera-tenants-dev',
+          'chimera-sessions-dev',
+          'chimera-skills-dev',
+          'chimera-rate-limits-dev',
+          'chimera-cost-tracking-dev',
+        ]) {
+          template.hasResourceProperties('AWS::KMS::Alias', {
+            AliasName: `alias/${tableName}`,
+          });
+        }
       });
     });
 
