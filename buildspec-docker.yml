@@ -53,6 +53,7 @@ artifacts:
 env:
   exported-variables:
     - IMAGE_URI
+    - IMAGE_TAG
     - CHAT_GATEWAY_IMAGE_URI
     - AGENT_IMAGE_URI
 

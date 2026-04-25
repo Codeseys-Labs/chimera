@@ -309,9 +309,25 @@ export class ChatStack extends cdk.Stack {
     // Image: packages/chat-gateway built via Docker
     // Port: 8080 (Express/Fastify)
     // Environment variables for runtime configuration
-    // ======================================================================
+    //
+    // Image tag resolution (Wave-23):
+    //   1. `-c chatGatewayImageTag=<SHA>` context from pipeline (preferred).
+    //      The buildspec's $IMAGE_TAG (git-SHA-8) is threaded through by the
+    //      pipeline Deploy stage; this keeps ECS task defs in lockstep with
+    //      the actual Docker image built from THIS pipeline run.
+    //   2. Fallback to 'latest' for local `cdk deploy` runs before any
+    //      pipeline has executed. This tag won't exist in the repo once
+    //      IMMUTABLE is enforced (Wave-19 M-2), so local deploys will fail
+    //      unless an image was pre-pushed — which is correct behavior.
+    //
+    // Wave-19 / Wave-23 history: Wave-19 made ECR repos IMMUTABLE and the
+    // buildspec stopped pushing `:latest`. Hardcoding `latest` here kept
+    // ECS running the 2026-04-22 image through every subsequent deploy
+    // because CDK saw no change. Wave-22 chat-gateway fixes never reached
+    // ECS until this wiring was fixed.
+    const imageTag = this.node.tryGetContext('chatGatewayImageTag') ?? 'latest';
     const containerImage = props.ecrRepository
-      ? ecs.ContainerImage.fromEcrRepository(props.ecrRepository, 'latest')
+      ? ecs.ContainerImage.fromEcrRepository(props.ecrRepository, imageTag)
       : ecs.ContainerImage.fromRegistry('public.ecr.aws/docker/library/node:20-alpine');
 
     const container = this.taskDefinition.addContainer('ChatGatewayContainer', {

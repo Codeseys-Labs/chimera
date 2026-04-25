@@ -382,7 +382,11 @@ export class PipelineStack extends cdk.Stack {
           },
           build: {
             commands: [
-              'cd infra && npx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" && cd ..',
+              // CHAT_GATEWAY_IMAGE_TAG is threaded in from the Build stage
+              // via #{DockerVars.IMAGE_TAG}. Passed as a CDK context variable
+              // consumed by chat-stack.ts to pin ECS to the freshly-built
+              // SHA (Wave-19 made ECR IMMUTABLE; :latest no longer exists).
+              'cd infra && npx cdk deploy --all --require-approval never --concurrency 3 --context environment="$ENV_NAME" --context repositoryName="chimera" --context chatGatewayImageTag="${CHAT_GATEWAY_IMAGE_TAG:-latest}" && cd ..',
             ],
           },
         },
@@ -1352,6 +1356,17 @@ def handler(event, context):
               project: deployProject,
               input: sourceOutput,
               runOrder: 1,
+              // Pass the Docker SHA tag from the Build stage through to CDK
+              // via a CDK context variable. Without this, chat-stack.ts
+              // pins ECS to `:latest` — which doesn't exist once Wave-19
+              // made repos IMMUTABLE and the buildspec stopped pushing it.
+              // Wave-23: `#{DockerVars.IMAGE_TAG}` is the git-SHA-8 set by
+              // buildspec-docker.yml `export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)`.
+              environmentVariables: {
+                CHAT_GATEWAY_IMAGE_TAG: {
+                  value: '#{DockerVars.IMAGE_TAG}',
+                },
+              },
             }),
             new codepipeline_actions.CodeBuildAction({
               actionName: 'Frontend_Deploy',
