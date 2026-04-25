@@ -4,6 +4,13 @@
  * Decomposes vague user requests into concrete, executable subtasks.
  * Supports multiple decomposition strategies: tree-of-thought, plan-and-execute,
  * recursive refinement, goal decomposition, and dependency-aware planning.
+ *
+ * Wave 24: decomposition logic moved behind a `DecompositionProvider`
+ * abstraction. The built-in heuristic templates (decomposeTreeOfThought,
+ * decomposePlanAndExecute, decomposeRecursive) remain as the default
+ * fallback. Pass `config.provider = new LlmDecompositionProvider(...)` to
+ * replace the fallback with Bedrock-powered generation. On LLM failure the
+ * heuristic still runs — LLM hiccups never surface as task failures.
  */
 
 import type {
@@ -14,6 +21,7 @@ import type {
   TaskPriority,
   TaskStatus,
 } from './types';
+import type { DecompositionProvider } from './decomposition-provider';
 
 /**
  * Configuration for task decomposer
@@ -30,6 +38,13 @@ export interface DecomposerConfig {
 
   /** Tenant identifier */
   tenantId: string;
+
+  /**
+   * Optional primary decomposition provider (e.g., LlmDecompositionProvider).
+   * When set, the decomposer tries it first and falls back to the built-in
+   * heuristic templates on failure. Wave-24 (chimera-76b9).
+   */
+  provider?: DecompositionProvider;
 }
 
 /**
@@ -44,10 +59,12 @@ export class TaskDecomposer {
       maxSubtasks: config.maxSubtasks || 20,
       maxDepth: config.maxDepth || 3,
       tenantId: config.tenantId || 'default',
+      // Optional; stays undefined when omitted (heuristic-only mode).
+      provider: config.provider,
     };
 
     console.log(
-      `[TaskDecomposer] Initialized with strategy=${this.config.defaultStrategy}, maxSubtasks=${this.config.maxSubtasks}, maxDepth=${this.config.maxDepth}`
+      `[TaskDecomposer] Initialized with strategy=${this.config.defaultStrategy}, maxSubtasks=${this.config.maxSubtasks}, maxDepth=${this.config.maxDepth}, provider=${this.config.provider?.kind ?? 'heuristic'}`
     );
   }
 
@@ -66,28 +83,34 @@ export class TaskDecomposer {
     const strategy = this.config.defaultStrategy;
     const startTime = Date.now();
 
-    // Select strategy-specific decomposition
     let subtasks: Subtask[];
-    switch (strategy) {
-      case 'tree-of-thought':
-        subtasks = await this.decomposeTreeOfThought(request, context);
-        break;
-      case 'plan-and-execute':
-        subtasks = await this.decomposePlanAndExecute(request, context);
-        break;
-      case 'recursive':
-        subtasks = await this.decomposeRecursive(request, context, 0);
-        break;
-      case 'goal-decomposition':
-        // Use plan-and-execute as fallback for now
-        subtasks = await this.decomposePlanAndExecute(request, context);
-        break;
-      case 'dependency-aware':
-        // Use plan-and-execute as fallback for now
-        subtasks = await this.decomposePlanAndExecute(request, context);
-        break;
-      default:
-        subtasks = await this.decomposePlanAndExecute(request, context);
+    let providerUsed: DecompositionProvider['kind'] = 'heuristic';
+    let modelId: string | undefined;
+
+    // Try the injected primary provider first (typically LLM-backed).
+    // On any failure, log and fall through to the heuristic templates —
+    // LLM hiccups must never bubble up as task-decomposition failures.
+    if (this.config.provider) {
+      try {
+        const result = await this.config.provider.decompose(
+          request,
+          context,
+          strategy,
+        );
+        subtasks = result.subtasks;
+        providerUsed = this.config.provider.kind;
+        modelId = result.modelId;
+        console.log(
+          `[TaskDecomposer] Primary provider=${providerUsed} returned ${subtasks.length} subtasks${modelId ? ` (model=${modelId})` : ''}`,
+        );
+      } catch (err) {
+        console.warn(
+          `[TaskDecomposer] Primary provider failed (${err instanceof Error ? err.message : String(err)}); falling back to heuristic`,
+        );
+        subtasks = await this.heuristicDispatch(strategy, request, context);
+      }
+    } else {
+      subtasks = await this.heuristicDispatch(strategy, request, context);
     }
 
     // Enforce max subtasks limit
@@ -240,6 +263,32 @@ export class TaskDecomposer {
     );
 
     return checkpoints;
+  }
+
+  /**
+   * Dispatch to the built-in heuristic strategy templates. Used both as the
+   * default when no provider is injected and as the fallback when the
+   * primary provider fails. Kept private so the heuristic remains an
+   * implementation detail — callers wanting heuristic-only behavior just
+   * leave `config.provider` unset.
+   */
+  private async heuristicDispatch(
+    strategy: DecompositionStrategy,
+    request: string,
+    context: DecompositionContext,
+  ): Promise<Subtask[]> {
+    switch (strategy) {
+      case 'tree-of-thought':
+        return this.decomposeTreeOfThought(request, context);
+      case 'plan-and-execute':
+        return this.decomposePlanAndExecute(request, context);
+      case 'recursive':
+        return this.decomposeRecursive(request, context, 0);
+      case 'goal-decomposition':
+      case 'dependency-aware':
+      default:
+        return this.decomposePlanAndExecute(request, context);
+    }
   }
 
   /**

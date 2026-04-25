@@ -83,6 +83,17 @@ export {
   type DecomposerConfig,
 } from './task-decomposer';
 
+export type {
+  DecompositionProvider,
+  DecompositionProviderResult,
+} from './decomposition-provider';
+
+export {
+  LlmDecompositionProvider,
+  LlmDecompositionError,
+  type LlmDecompositionProviderConfig,
+} from './llm-decomposition-provider';
+
 // ============================================================
 // Blocker Resolver
 // ============================================================
