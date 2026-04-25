@@ -333,12 +333,22 @@ async function monitorStackEvents(client: CloudFormationClient, stackName: strin
 
   const seenIds = new Set<string>();
   let currentStatus = '';
+  // Bail out if the stack never appears: CloudFormation returns
+  // ValidationError while a stack is pre-creation OR if the caller typed
+  // the wrong name. Without a ceiling, the latter case hangs forever at
+  // 10s/poll. 60 consecutive ValidationErrors == 10 minutes, well past
+  // the "stack is creating" window.
+  const MAX_VALIDATION_ERRORS = 60;
+  let validationErrorCount = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       const stackResp = await client.send(new DescribeStacksCommand({ StackName: stackName }));
       currentStatus = stackResp.Stacks?.[0]?.StackStatus ?? '';
+      // Reset the retry counter once the stack materializes so a later
+      // transient ValidationError doesn't compound with earlier ones.
+      validationErrorCount = 0;
 
       const eventsResp = await client.send(
         new DescribeStackEventsCommand({ StackName: stackName })
@@ -365,6 +375,18 @@ async function monitorStackEvents(client: CloudFormationClient, stackName: strin
       if (terminalStatuses.has(currentStatus)) break;
     } catch (error: any) {
       if (error.name === 'ValidationError') {
+        validationErrorCount += 1;
+        if (validationErrorCount > MAX_VALIDATION_ERRORS) {
+          console.log(
+            color.red(
+              `\n✗ Stack ${stackName} did not appear after ` +
+                `${MAX_VALIDATION_ERRORS * 10}s of ValidationError responses. ` +
+                `Verify the stack name is correct and that CloudFormation ` +
+                `has started provisioning it.`
+            )
+          );
+          break;
+        }
         console.log(color.gray(`Stack ${stackName} not yet available — waiting...`));
       } else {
         throw error;
