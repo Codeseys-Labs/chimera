@@ -168,16 +168,23 @@ describe('ObservabilityStack', () => {
         expect(Object.keys(alarms)).toHaveLength(0);
       });
 
-      it('should create tier-violation-count alarm on Chimera/Agent EMF metric', () => {
+      it('should create tier-violation-count alarm on dimensionless aggregate metric', () => {
         // Wires enforceTierCeiling() EMF output in
         // packages/core/src/evolution/model-router.ts to an alarm that
         // fires when >=5 downgrades occur in 10min. Prevents silent
         // cost-leak regressions (a Basic tenant repeatedly hitting Opus).
         //
-        // Emitter writes the metric with dimensions {tenant_id, tier,
-        // model_requested}; CloudWatch EMF does not auto-create a
-        // zero-dimension rollup, so the alarm uses a SEARCH MathExpression
-        // that sums across all dimension combinations.
+        // Wave-23: alarm watches `tier_violation_count_total` (the
+        // dimensionless companion metric emitted alongside the dimensional
+        // `tier_violation_count`). The earlier Wave-18 fix used
+        // SUM(SEARCH(...)) which CloudWatch rejects at CFN create time
+        // ("SEARCH is not supported on Metric Alarms"). Dashboards still
+        // use SEARCH for per-tenant slicing.
+        //
+        // CDK synth note: when a Metric is constructed with explicit
+        // period/label, CDK emits the modern `Metrics: [{MetricStat:{...}}]`
+        // format rather than top-level Namespace/MetricName. Both are valid
+        // CFN shapes; we assert against the nested MetricStat.
         template.hasResourceProperties('AWS::CloudWatch::Alarm', {
           AlarmName: 'chimera-dev-tier-violation-count-high',
           Threshold: 5,
@@ -186,9 +193,13 @@ describe('ObservabilityStack', () => {
           TreatMissingData: 'notBreaching',
           Metrics: Match.arrayWith([
             Match.objectLike({
-              Expression: Match.stringLikeRegexp(
-                'SEARCH\\(.*Chimera/Agent.*tier_violation_count.*\\)'
-              ),
+              MetricStat: Match.objectLike({
+                Metric: Match.objectLike({
+                  Namespace: 'Chimera/Agent',
+                  MetricName: 'tier_violation_count_total',
+                }),
+                Stat: 'Sum',
+              }),
             }),
           ]),
         });

@@ -323,43 +323,61 @@ describe('enforceTierCeiling EMF metric emission', () => {
     return payloads;
   };
 
-  it('emits an EMF metric line when a disallowed model falls back', () => {
+  it('emits both dimensional and dimensionless EMF metrics on downgrade', () => {
+    // Wave-23: enforceTierCeiling now emits TWO metrics per violation.
+    //   1. `tier_violation_count`       — dimensional, for dashboards
+    //   2. `tier_violation_count_total` — dimensionless, for alarms
+    // See observability-stack.ts TierViolationCountAlarm for why.
     enforceTierCeiling(OPUS, 'basic', 'tenant-leak');
 
     const payloads = parseEmfCalls();
-    expect(payloads).toHaveLength(1);
-    const payload = payloads[0] as Record<string, unknown>;
+    expect(payloads).toHaveLength(2);
 
-    // EMF envelope has the documented shape.
-    const aws = payload['_aws'] as {
-      Timestamp: number;
+    // First payload: dimensional per-tenant metric.
+    const dimensional = payloads[0] as Record<string, unknown>;
+    const awsDim = dimensional['_aws'] as {
       CloudWatchMetrics: Array<{
         Namespace: string;
         Dimensions: string[][];
         Metrics: Array<{ Name: string; Unit: string }>;
       }>;
     };
-    expect(aws.CloudWatchMetrics[0]?.Namespace).toBe('Chimera/Agent');
-    expect(aws.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe('tier_violation_count');
-    expect(aws.CloudWatchMetrics[0]?.Metrics[0]?.Unit).toBe('Count');
-    // Dimension names match the audit spec: tenant_id, tier, model_requested.
-    const dimNames = aws.CloudWatchMetrics[0]?.Dimensions[0] ?? [];
+    expect(awsDim.CloudWatchMetrics[0]?.Namespace).toBe('Chimera/Agent');
+    expect(awsDim.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe('tier_violation_count');
+    expect(awsDim.CloudWatchMetrics[0]?.Metrics[0]?.Unit).toBe('Count');
+    const dimNames = awsDim.CloudWatchMetrics[0]?.Dimensions[0] ?? [];
     expect(dimNames).toContain('tenant_id');
     expect(dimNames).toContain('tier');
     expect(dimNames).toContain('model_requested');
+    expect(dimensional['tenant_id']).toBe('tenant-leak');
+    expect(dimensional['tier']).toBe('basic');
+    expect(dimensional['model_requested']).toBe(OPUS);
+    expect(dimensional['tier_violation_count']).toBe(1);
 
-    // Dimension values + metric value are attached as top-level keys.
-    expect(payload['tenant_id']).toBe('tenant-leak');
-    expect(payload['tier']).toBe('basic');
-    expect(payload['model_requested']).toBe(OPUS);
-    expect(payload['tier_violation_count']).toBe(1);
+    // Second payload: dimensionless alarm-friendly aggregate.
+    const total = payloads[1] as Record<string, unknown>;
+    const awsTotal = total['_aws'] as {
+      CloudWatchMetrics: Array<{
+        Namespace: string;
+        Dimensions: string[][];
+        Metrics: Array<{ Name: string }>;
+      }>;
+    };
+    expect(awsTotal.CloudWatchMetrics[0]?.Namespace).toBe('Chimera/Agent');
+    expect(awsTotal.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe(
+      'tier_violation_count_total'
+    );
+    // Dimensionless: empty dimension set (list of one empty list).
+    expect(awsTotal.CloudWatchMetrics[0]?.Dimensions).toEqual([[]]);
+    expect(total['tier_violation_count_total']).toBe(1);
   });
 
   it('falls back tenant_id to "unknown" when none is supplied', () => {
     enforceTierCeiling(OPUS, 'basic');
 
+    // Two emissions per call (dimensional + dimensionless — see test above).
     const payloads = parseEmfCalls();
-    expect(payloads).toHaveLength(1);
+    expect(payloads).toHaveLength(2);
     expect(payloads[0]?.['tenant_id']).toBe('unknown');
   });
 

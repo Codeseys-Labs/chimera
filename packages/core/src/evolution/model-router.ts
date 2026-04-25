@@ -203,7 +203,18 @@ export function enforceTierCeiling(
     `[model-router] Tier ceiling enforcement: tier='${tier}' requested modelId='${modelId}' is not in the tier allowlist. Falling back to cheapest allowed model '${fallback}'.`
   );
 
-  // Emit observability signal so cost-leak alarms can fire.
+  // Emit TWO EMF metrics so both dashboards and alarms work:
+  //   1. Dimensional — for per-tenant/tier/model slicing in dashboards.
+  //   2. Dimensionless — for the ObservabilityStack alarm.
+  //
+  // Why both: CloudWatch rejects SEARCH() math expressions as the watched
+  // metric of a single-value alarm ("SEARCH is not supported on Metric
+  // Alarms") — the Wave-18 fix that tried to use SEARCH over the
+  // dimensional metric failed at CFN create-time in Wave-23.
+  // Dashboards CAN use SEARCH(), so the dimensional metric still feeds the
+  // per-tenant breakdown widget. The alarm watches the dimensionless
+  // aggregate total.
+  //
   // See docs/reviews/cost-observability-audit.md §"tier_violation_count".
   emitEmfMetric(
     'Chimera/Agent',
@@ -215,6 +226,15 @@ export function enforceTierCeiling(
       tier,
       model_requested: modelId,
     }
+  );
+  // Dimensionless aggregate for the alarm. Explicit empty Dimensions array
+  // tells CloudWatch to treat this as a namespace-level metric (no dims).
+  emitEmfMetric(
+    'Chimera/Agent',
+    'tier_violation_count_total',
+    1,
+    'Count',
+    {}
   );
 
   return fallback;

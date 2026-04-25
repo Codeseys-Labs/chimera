@@ -123,29 +123,40 @@ describe('[integration] BedrockModel basic-tier tenant requests Opus', () => {
     expect([HAIKU, SONNET]).toContain(actual);
   });
 
-  it('emits exactly one tier_violation_count EMF metric on construct-time downgrade', () => {
+  it('emits both dimensional + dimensionless tier_violation_count metrics on construct-time downgrade', () => {
     new BedrockModel({
       modelId: OPUS,
       tier: 'basic',
       client: new RecordingBedrockClient(okResponse()) as any,
     });
 
+    // Wave-23: enforceTierCeiling emits TWO metrics per violation.
     const payloads = parseEmfPayloads(logSpy.mock.calls as any[][]);
-    expect(payloads).toHaveLength(1);
+    expect(payloads).toHaveLength(2);
 
-    const payload = payloads[0] as Record<string, unknown>;
-    const aws = payload['_aws'] as {
+    // Dimensional (dashboard).
+    const dimensional = payloads[0] as Record<string, unknown>;
+    const awsDim = dimensional['_aws'] as {
       CloudWatchMetrics: Array<{
         Namespace: string;
-        Dimensions: string[][];
         Metrics: Array<{ Name: string; Unit: string }>;
       }>;
     };
-    expect(aws.CloudWatchMetrics[0]?.Namespace).toBe('Chimera/Agent');
-    expect(aws.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe('tier_violation_count');
-    expect(payload['tier']).toBe('basic');
-    expect(payload['model_requested']).toBe(OPUS);
-    expect(payload['tier_violation_count']).toBe(1);
+    expect(awsDim.CloudWatchMetrics[0]?.Namespace).toBe('Chimera/Agent');
+    expect(awsDim.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe('tier_violation_count');
+    expect(dimensional['tier']).toBe('basic');
+    expect(dimensional['model_requested']).toBe(OPUS);
+    expect(dimensional['tier_violation_count']).toBe(1);
+
+    // Dimensionless (alarm).
+    const total = payloads[1] as Record<string, unknown>;
+    const awsTotal = total['_aws'] as {
+      CloudWatchMetrics: Array<{ Metrics: Array<{ Name: string }> }>;
+    };
+    expect(awsTotal.CloudWatchMetrics[0]?.Metrics[0]?.Name).toBe(
+      'tier_violation_count_total'
+    );
+    expect(total['tier_violation_count_total']).toBe(1);
   });
 
   it('does NOT emit a metric when the requested model is already in the basic allowlist', () => {

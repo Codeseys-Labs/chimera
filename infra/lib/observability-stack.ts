@@ -1201,28 +1201,34 @@ exports.handler = async () => {
     // from legitimate retries stay quiet.
     // ======================================================================
     // NOTE: enforceTierCeiling() in packages/core/src/evolution/model-router.ts
-    // emits EMF with dimensions {tenant_id, tier, model_requested}. CloudWatch
-    // EMF does NOT auto-create a zero-dimension rollup, so a plain Metric
-    // without Dimensions never matches the published timeseries and the alarm
-    // silently stays in INSUFFICIENT_DATA. We use a SEARCH MathExpression to
-    // aggregate across all dimension combinations instead.
-    const tierViolationSearchExpression = new cloudwatch.MathExpression({
-      expression:
-        "SUM(SEARCH('{Chimera/Agent,tenant_id,tier,model_requested} MetricName=\"tier_violation_count\"', 'Sum', 300))",
+    // emits TWO EMF metrics on every tier violation:
+    //   1. `tier_violation_count` with dimensions {tenant_id, tier, model_requested}
+    //      — feeds the per-tenant breakdown dashboard widget.
+    //   2. `tier_violation_count_total` dimensionless — feeds this alarm.
+    //
+    // History (Wave-18 → Wave-23): Wave-18 attempted `SUM(SEARCH(...))` as the
+    // alarm metric to aggregate over the dimensional series. CloudWatch
+    // rejects this at CFN create time with "SEARCH is not supported on
+    // Metric Alarms." The Wave-23 fix adds a second, dimensionless metric
+    // emission so the alarm watches a concrete metric that actually exists.
+    // SEARCH() remains valid in dashboard widgets (see Wave-23 retrospective).
+    const tierViolationTotalMetric = new cloudwatch.Metric({
+      namespace: 'Chimera/Agent',
+      metricName: 'tier_violation_count_total',
+      statistic: 'Sum',
       period: cdk.Duration.minutes(5),
-      label: 'Tier violations (Sum, all tenants)',
-      usingMetrics: {},
+      label: 'Tier violations total (dimensionless, for alarm)',
     });
 
-    // Dashboard widget continues to use a dimensionless Metric so the
-    // chart renders even before any data points arrive; the alarm-critical
-    // aggregation lives on the SEARCH expression above.
+    // Dashboard widget uses the dimensional metric (no Dimensions filter set,
+    // so CloudWatch's dimension-collapsed rollup is shown — acceptable for
+    // dashboards even though not for alarms).
     const tierViolationCountMetric = new cloudwatch.Metric({
       namespace: 'Chimera/Agent',
       metricName: 'tier_violation_count',
       statistic: 'Sum',
       period: cdk.Duration.minutes(5),
-      label: 'Tier violations (Sum)',
+      label: 'Tier violations (Sum, by tenant/tier/model)',
     });
 
     this.platformDashboard.addWidgets(
@@ -1251,7 +1257,7 @@ exports.handler = async () => {
         `Tier-ceiling enforcement downgraded >=5 requests in 10 minutes. ` +
         `Emitted from enforceTierCeiling() in packages/core/src/evolution/model-router.ts. ` +
         `RUNBOOK: ${tierViolationRunbook}`,
-      metric: tierViolationSearchExpression,
+      metric: tierViolationTotalMetric,
       threshold: 5,
       evaluationPeriods: 2,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
