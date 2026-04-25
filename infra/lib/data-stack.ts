@@ -272,7 +272,14 @@ export class DataStack extends cdk.Stack {
       replicationFactor: daxNodeCount,
       subnetGroupName: daxSubnetGroup.subnetGroupName,
       securityGroupIds: [this.daxSecurityGroup.securityGroupId],
-      // SSE encryption at rest (AWS-managed key)
+      // SSE encryption at rest. AWS-managed key only — DAX does not support
+      // customer-managed KMS keys (per AWS docs: "When creating a new DAX
+      // cluster with encryption at rest enabled, an AWS managed key is used"
+      // — https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/
+      // EncryptionAtRest.html). The 6 underlying DDB tables use per-table
+      // CMKs; their ciphertext is what DAX caches, but DAX's in-cluster
+      // cache is re-encrypted with an AWS-managed key. Accepted limitation
+      // documented in docs/architecture/cmk-coverage.md. Wave-17 C-1.
       sseSpecification: {
         sseEnabled: true,
       },
