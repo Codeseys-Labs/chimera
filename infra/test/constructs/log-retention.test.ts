@@ -61,6 +61,16 @@ describe('logRetentionFor', () => {
       });
       expect(result).toBe(RetentionDays.ONE_WEEK);
     });
+
+    it('returns INFINITE when floor is INFINITE (Math.max would silently downgrade)', () => {
+      // RetentionDays.INFINITE is encoded as 0, not a large integer. A
+      // naive Math.max(90, 0) returns 90, erasing the caller's explicit
+      // "keep forever" intent. Guard against this regression.
+      const result = logRetentionFor('security', true, {
+        prodMinimumDays: RetentionDays.INFINITE,
+      });
+      expect(result).toBe(RetentionDays.INFINITE);
+    });
   });
 
   describe('LOG_RETENTION_BY_CLASS table', () => {

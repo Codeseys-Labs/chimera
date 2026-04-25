@@ -96,8 +96,14 @@ export function logRetentionFor(
   }
   const baseline = band.prod;
   if (options.prodMinimumDays !== undefined) {
-    // RetentionDays enum values are the numeric day counts themselves,
-    // so a numeric max yields the longer retention.
+    // RetentionDays.INFINITE is encoded as 0 (not a large integer), so
+    // Math.max(N, INFINITE) would return N and silently downgrade an
+    // "infinite retention" floor into a finite one. Short-circuit first.
+    if (options.prodMinimumDays === RetentionDays.INFINITE) {
+      return RetentionDays.INFINITE;
+    }
+    // RetentionDays enum values for finite durations ARE the numeric day
+    // counts themselves, so a numeric max yields the longer retention.
     return Math.max(baseline, options.prodMinimumDays) as RetentionDays;
   }
   return baseline;
