@@ -54,9 +54,12 @@ _FORBIDDEN_CDK_PATTERNS: list[tuple[str, str]] = [
     # IAM escalation
     ("AdministratorAccess", "AdministratorAccess managed policy is forbidden"),
     ("PowerUserAccess", "PowerUserAccess managed policy is forbidden"),
+    # Match `.addToPolicy(` not `.addToRolePolicy(` — the latter is the
+    # canonical least-privilege L2 pattern and must NOT be rejected.
+    # Wave-17 L2.
     (
-        "addToPolicy",
-        "Direct IAM policy mutations are forbidden — use pre-approved constructs",
+        ".addToPolicy(",
+        "Direct IAM policy mutations are forbidden — use addToRolePolicy with scoped resources",
     ),
     ("grantAdmin", "IAM admin grants are forbidden"),
     ("grant(*)", "Wildcard IAM grants are forbidden"),
@@ -551,7 +554,20 @@ def list_evolution_history(
 
 
 def _check_kill_switch(region: str = "us-east-1") -> dict:
-    """Read SSM kill switch for self-evolution. Fails open if parameter is missing."""
+    """Read SSM kill switch for self-evolution.
+
+    SECURITY (Wave-17 H4): Fail CLOSED on ParameterNotFound. If the kill
+    switch parameter has never been provisioned (e.g. a fresh deployment
+    where ops has not yet created /chimera/evolution/self-modify-enabled/
+    {env}), evolution MUST be denied — not silently enabled. Prior behavior
+    failed open on all errors, which combined with Cedar + rate-limit
+    (both also fail-open) meant a fresh deploy had no active safety gates.
+
+    Fail OPEN (allow) is retained for transient errors (throttle, network)
+    so that a momentary SSM outage doesn't block an already-approved
+    evolution. The distinction matters: "param missing" is operational
+    misconfiguration; "throttle" is a transient condition.
+    """
     try:
         ssm = boto3.client("ssm", region_name=region, config=_BOTO_CONFIG)
         env_name = os.environ.get("CHIMERA_ENV_NAME", "dev")
@@ -560,9 +576,24 @@ def _check_kill_switch(region: str = "us-east-1") -> dict:
         )
         enabled = resp["Parameter"]["Value"].lower() == "true"
         return {"enabled": enabled, "reason": "" if enabled else "Kill switch is off"}
-    except (ClientError, BotoCoreError) as exc:
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code == "ParameterNotFound":
+            logger.error(
+                "Kill switch SSM param missing — denying evolution. "
+                "Create /chimera/evolution/self-modify-enabled/{env} to enable."
+            )
+            return {
+                "enabled": False,
+                "reason": "Kill switch parameter not configured (operator must create it to enable evolution)",
+            }
         logger.warning(
-            "Kill switch SSM param not found, defaulting to enabled: %s", exc
+            "Kill switch SSM transient error, defaulting to enabled: %s", exc
+        )
+        return {"enabled": True, "reason": ""}
+    except BotoCoreError as exc:
+        logger.warning(
+            "Kill switch SSM transient error, defaulting to enabled: %s", exc
         )
         return {"enabled": True, "reason": ""}
 

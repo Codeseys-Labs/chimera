@@ -73,10 +73,27 @@ class TestCheckKillSwitch:
         assert result["enabled"] is False
         assert "off" in result["reason"].lower()
 
-    def test_fails_open_when_ssm_raises(self, mocker):
+    def test_fails_closed_when_ssm_param_not_found(self, mocker):
+        """Wave-17 H4: ParameterNotFound means the kill switch was never
+        configured — deny evolution rather than silently enable it."""
         mock_ssm = MagicMock()
         mock_ssm.get_parameter.side_effect = ClientError(
             {"Error": {"Code": "ParameterNotFound", "Message": "ParameterNotFound"}},
+            "GetParameter",
+        )
+        mocker.patch("tools.evolution_tools.boto3.client", return_value=mock_ssm)
+
+        result = _check_kill_switch()
+
+        assert result["enabled"] is False
+        assert "not configured" in result["reason"].lower()
+
+    def test_fails_open_on_transient_ssm_error(self, mocker):
+        """Transient errors (throttle, network) still fail open so a
+        momentary SSM outage doesn't block an already-approved evolution."""
+        mock_ssm = MagicMock()
+        mock_ssm.get_parameter.side_effect = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
             "GetParameter",
         )
         mocker.patch("tools.evolution_tools.boto3.client", return_value=mock_ssm)
