@@ -163,25 +163,60 @@ export class SkillRegistry {
       expressionValues[':query'] = queryLower;
     }
 
-    const params: {
-      TableName: string;
-      FilterExpression: string;
-      ExpressionAttributeValues: Record<string, any>;
-      ExpressionAttributeNames?: Record<string, string>;
-      Limit: number;
-    } = {
-      TableName: this.config.skillsTableName,
-      FilterExpression: filterExpressions.join(' AND '),
-      ExpressionAttributeValues: expressionValues,
-      ExpressionAttributeNames: request.query ? { '#name': 'name' } : undefined,
-      Limit: limit,
-    };
+    // DynamoDB Scan Limit is applied PRE-filter: with 10k items in the
+    // table and Limit=20, a single scan may evaluate 20 items and match
+    // zero after the tenantId/category/etc. filters. To return up to
+    // `limit` post-filter META items, paginate with ExclusiveStartKey
+    // until enough results accumulate or we hit a safety ceiling.
+    //
+    // Safety ceiling: MAX_SCANNED_ITEMS bounds total items examined so
+    // an unrelated tenant's 100k-skill table can't turn a stray search
+    // into an unbounded read. A 2000-item ceiling at ~1 KB average is
+    // ~1 MB read, which is 250 RCUs (eventual consistency) — well under
+    // DDB per-request soft limits.
+    const MAX_SCANNED_ITEMS = 2000;
+    // Per-page scan size: 400 balances round-trips vs. over-reading.
+    const PAGE_SIZE = 400;
 
-    const result = await this.config.dynamodb.scan(params);
-    const skills = (result.Items || []) as Skill[];
+    const metaSkills: Skill[] = [];
+    let scannedCount = 0;
+    let exclusiveStartKey: Record<string, any> | undefined = undefined;
 
-    // Filter to only META items (not VERSION items)
-    const metaSkills = skills.filter(skill => skill.SK === 'META');
+    do {
+      const params: {
+        TableName: string;
+        FilterExpression: string;
+        ExpressionAttributeValues: Record<string, any>;
+        ExpressionAttributeNames?: Record<string, string>;
+        Limit: number;
+        ExclusiveStartKey?: Record<string, any>;
+      } = {
+        TableName: this.config.skillsTableName,
+        FilterExpression: filterExpressions.join(' AND '),
+        ExpressionAttributeValues: expressionValues,
+        ExpressionAttributeNames: request.query ? { '#name': 'name' } : undefined,
+        Limit: PAGE_SIZE,
+        ExclusiveStartKey: exclusiveStartKey,
+      };
+
+      const result = await this.config.dynamodb.scan(params);
+      const pageSkills = (result.Items || []) as Skill[];
+      scannedCount += result.ScannedCount ?? pageSkills.length;
+
+      // Filter to only META items (not VERSION items)
+      for (const skill of pageSkills) {
+        if (skill.SK === 'META') {
+          metaSkills.push(skill);
+        }
+      }
+
+      exclusiveStartKey = result.LastEvaluatedKey;
+
+      // Stop once we have enough to fulfill `offset + limit` OR we've
+      // hit the safety ceiling.
+      if (metaSkills.length >= offset + limit) break;
+      if (scannedCount >= MAX_SCANNED_ITEMS) break;
+    } while (exclusiveStartKey !== undefined);
 
     return {
       skills: metaSkills.slice(offset, offset + limit),
