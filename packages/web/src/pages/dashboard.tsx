@@ -37,7 +37,18 @@ export function DashboardPage() {
         />
         <OverviewCard
           title="Monthly Cost"
-          value={tenant ? `$${tenant.monthlyCostUsd.toFixed(2)}` : undefined}
+          // `tenant` may be present (fetched) while `monthlyCostUsd` is
+          // still undefined — brand-new tenants have no cost aggregates
+          // until the first billing rollup runs, and manually-seeded
+          // tenants skip the full profile schema. Guard the numeric
+          // format call too; otherwise ErrorBoundary catches a
+          // TypeError and replaces the whole dashboard with a crash
+          // banner. Wave-24 live regression.
+          value={
+            typeof tenant?.monthlyCostUsd === 'number'
+              ? `$${tenant.monthlyCostUsd.toFixed(2)}`
+              : undefined
+          }
           loading={tenantLoading}
         />
       </div>

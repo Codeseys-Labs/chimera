@@ -69,15 +69,19 @@ export const ChatMessageSchema = z
  *     but enforcing it here catches malformed requests before any agent work).
  *   - `tenantId` must be a non-empty string. Tenant isolation is load-bearing;
  *     an empty tenant id is never acceptable.
- *   - Optional fields (`sessionId`, `userId`, `platform`) are omitted rather
- *     than nullable to match the existing TypeScript interface.
+ *   - Optional fields (`sessionId`, `userId`, `platform`) accept null, undefined,
+ *     or string. The SPA client initializes React state with `null` before the
+ *     user has selected an existing session, so a plain `.optional()` (which
+ *     only permits `undefined | string` in Zod) rejected every first-message
+ *     request with "Expected string, received null". Wave-24 regression.
  */
 export const ChatRequestSchema = z.object({
   messages: z.array(ChatMessageSchema).min(1, 'messages array cannot be empty'),
   tenantId: z.string().min(1, 'tenantId is required'),
-  sessionId: z.string().optional(),
-  userId: z.string().optional(),
-  platform: z.enum(['web', 'slack', 'teams', 'telegram', 'discord']).optional(),
+  // `.nullish()` = `.nullable().optional()` — accepts null | undefined | string.
+  sessionId: z.string().nullish(),
+  userId: z.string().nullish(),
+  platform: z.enum(['web', 'slack', 'teams', 'telegram', 'discord']).nullish(),
 });
 
 /**
@@ -95,14 +99,19 @@ export interface ChatRequest {
   /** Tenant identifier (required for multi-tenant isolation) */
   tenantId: string;
 
-  /** Optional session ID to resume existing conversation */
-  sessionId?: string;
+  /**
+   * Optional session ID to resume existing conversation.
+   * Nullable because the SPA initializes React state with `null` before the
+   * user picks a session — rejecting `null` here breaks the first-message
+   * flow in the web client (Wave-24 regression).
+   */
+  sessionId?: string | null;
 
-  /** Optional user identifier */
-  userId?: string;
+  /** Optional user identifier. Same null-vs-undefined rationale as sessionId. */
+  userId?: string | null;
 
-  /** Platform type (default: 'web') */
-  platform?: 'web' | 'slack' | 'teams' | 'telegram' | 'discord';
+  /** Platform type (default: 'web'). Null-tolerant for same reason. */
+  platform?: 'web' | 'slack' | 'teams' | 'telegram' | 'discord' | null;
 }
 
 /**

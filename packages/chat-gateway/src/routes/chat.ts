@@ -505,7 +505,9 @@ router.post('/stream', async (c: Context) => {
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId,
-      sessionId: body.sessionId,
+      // body.sessionId is `string | null | undefined` (SPA sends null before
+      // the user picks a session); createAgent wants `string | undefined`.
+      sessionId: body.sessionId ?? undefined,
       tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
       loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
       model: config.bedrock.enabled
@@ -931,7 +933,9 @@ router.post('/message', async (c: Context) => {
       systemPrompt: createDefaultSystemPrompt(),
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId,
-      sessionId: body.sessionId,
+      // body.sessionId is `string | null | undefined` (SPA sends null before
+      // the user picks a session); createAgent wants `string | undefined`.
+      sessionId: body.sessionId ?? undefined,
       tier: tenantContext.tier as 'basic' | 'advanced' | 'premium',
       loadedTools: loadedTools.length > 0 ? loadedTools : undefined,
       model: config.bedrock.enabled
