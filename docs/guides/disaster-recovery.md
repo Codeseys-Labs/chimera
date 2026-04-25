@@ -1,12 +1,12 @@
 # Chimera Disaster Recovery Guide
 
-> **Status: DRAFT** — This guide describes planned DR procedures. Referenced scripts (scripts/dr/*.sh) and DR stacks have not yet been created.
-
 > Comprehensive disaster recovery procedures, RTO/RPO targets, and data protection strategies
 
-**Last Updated:** 2026-03-21
+**Last Updated:** 2026-04-22
 **Audience:** SREs, platform engineers, disaster recovery coordinators
-**Related:** [Incident Response Runbook](../runbooks/incident-response.md)
+**Related:** [Incident Response Runbook](../runbooks/incident-response.md), [DDB PITR Restore Runbook](../runbooks/ddb-pitr-restore.md), [Cognito Recovery Runbook](../runbooks/cognito-recovery.md)
+
+**Operator scripts:** All shell scripts referenced in this document live under [`scripts/dr/`](../../scripts/dr/). Every script supports `--dry-run` and a `--help` flag, and emits structured JSON to STDOUT for pipeline consumption.
 
 ---
 
@@ -75,8 +75,16 @@ aws cloudformation list-stacks \
 # - chimera-platform-runtime-dr
 # - chimera-chat-dr
 
-# Step 2b: Restore DynamoDB tables from PITR backups
-./scripts/dr/restore-dynamodb-from-pitr.sh us-west-2
+# Step 2b: Restore each DynamoDB table from PITR into the DR region.
+# Signature: restore-dynamodb-from-pitr.sh <source-table> <restore-time|latest> <new-table> [--dry-run] [--yes]
+# Run once per table (scripted loop):
+for t in tenants sessions skills rate-limits cost-tracking audit; do
+  AWS_REGION=us-west-2 ./scripts/dr/restore-dynamodb-from-pitr.sh \
+    "chimera-${t}-prod" \
+    latest \
+    "chimera-${t}-dr-$(date -u +%s)" \
+    --yes
+done
 
 # Step 2c: Promote DynamoDB global table replicas (if configured)
 # Global tables automatically handle cross-region replication
@@ -234,13 +242,11 @@ aws dynamodb scan \
 bunx cdk deploy ChimeraDataStack --context tenantsTableName=chimera-tenants-restored-1234567890
 
 # Option B: Data migration script (zero downtime)
-# Copy restored data back to production table
-# (Requires custom migration script — see scripts/dr/migrate-table.sh)
-./scripts/dr/migrate-table.sh \
-  chimera-tenants-restored-1234567890 \
-  chimera-tenants-prod \
-  --mode incremental \
-  --verify
+# Copy restored data back to production table.
+# NOTE: scripts/dr/migrate-table.sh is NOT YET IMPLEMENTED — see seeds
+# issue for the zero-downtime migration helper. Until it lands, use
+# Option A (blue-green swap) or write a one-off copy via
+# `aws dynamodb scan | aws dynamodb batch-write-item`.
 ```
 
 #### Step 5: Remove Emergency Freeze (5 min)
@@ -393,8 +399,14 @@ bunx cdk destroy ChimeraDataStack ChimeraSecurityStack --force
 git checkout tags/v1.2.3  # Last known-good release
 bunx cdk deploy --all --require-approval never
 
-# Restore data from PITR backups
-./scripts/dr/restore-all-tables.sh
+# Restore data from PITR backups — loop over all 6 tables
+for t in tenants sessions skills rate-limits cost-tracking audit; do
+  ./scripts/dr/restore-dynamodb-from-pitr.sh \
+    "chimera-${t}-prod" \
+    latest \
+    "chimera-${t}-recovered-$(date -u +%s)" \
+    --yes
+done
 
 # Re-deploy ECS tasks with fresh container images
 aws ecs update-service \
@@ -602,13 +614,63 @@ aws ecs describe-services \
 
 ---
 
-## DR Testing Schedule
+## Drill Schedule
+
+DR readiness is enforced through three layers: a weekly automated smoke test, quarterly human-driven tabletops, and an annual live regional failover. Missing any one of these is a **SOC-2 audit finding**.
+
+### Weekly — automated smoke test
+
+Runs every Monday at 14:00 UTC via EventBridge Scheduler, which invokes a CodeBuild project that executes:
+
+```bash
+./scripts/dr/dr-runbook-smoke.sh \
+  --env prod \
+  --dev-table chimera-tenants-dev \
+  --user-pool-id $COGNITO_USER_POOL_ID \
+  --bucket chimera-backups-$ACCOUNT-$REGION
+```
+
+The script orchestrates the three sub-steps and emits a single-line JSON record:
+
+1. `verify-backup-health.sh` — PITR + Config compliance across all 6 tables
+2. `restore-dynamodb-from-pitr.sh --dry-run` — against `chimera-tenants-dev`
+3. `export-cognito-users.sh` — writes `users.jsonl` to the backup bucket
+
+Any non-`ok` result raises a CloudWatch alarm → SNS → `#chimera-incidents`.
+
+**Operator responsibility:** on-call reviews the previous week's JSON records every Monday morning before scrum. Three consecutive `fail` runs escalate to SEV2.
+
+### Quarterly — tabletop exercise
+
+| Cadence | Duration | Scope |
+|---------|----------|-------|
+| Quarterly | 2 hours | Walk every playbook in this guide + the three scenarios below, assign named operators, time each step |
+
+Scenarios rotated per quarter:
+
+- Q1: Scenario 1 — Regional failover (this guide §Scenario 1)
+- Q2: Scenario 2 — Data corruption + PITR restore ([DDB PITR Restore runbook](../runbooks/ddb-pitr-restore.md))
+- Q3: Cognito pool deletion + user replay ([Cognito Recovery runbook](../runbooks/cognito-recovery.md))
+- Q4: Scenario 3 — Security breach / credential compromise
+
+Each tabletop produces (a) a timeline artefact stored in `docs/dr-drill-logs/YYYY-QN.md`, (b) seeds issues for every gap, (c) an updated RTO/RPO table if measurements drift from target.
+
+### Annual — live regional failover
+
+| Cadence | Duration | Scope |
+|---------|----------|-------|
+| Annual | 8 hours | Full live failover of non-prod (staging) into `us-west-2`, traffic cutover, smoke-test suite, failback |
+
+The annual exercise is scheduled in January alongside the SOC-2 audit kickoff so the drill report becomes an audit artefact. Prod is **not** failed over live unless an actual regional incident occurs — the simulation runs against staging with prod observability wired in for realism.
+
+### Historical schedule reference
 
 | Test Type | Frequency | Duration | Scope |
 |-----------|-----------|----------|-------|
-| **Tabletop Exercise** | Quarterly | 2 hours | All runbooks reviewed |
+| **Automated smoke test** | Weekly (Mon 14:00 UTC) | ~5 min | 6 DDB tables + Cognito backup |
+| **Tabletop Exercise** | Quarterly | 2 hours | All runbooks, rotated scenario |
 | **PITR Restore Test** | Monthly | 1 hour | Restore one table to test environment |
-| **Regional Failover Test** | Semi-annually | 4 hours | Full failover to us-west-2 |
+| **Regional Failover Exercise (live)** | Annually | 8 hours | Full failover of staging to us-west-2 |
 | **Security Breach Simulation** | Annually | 8 hours | Full compromise scenario |
 
 ---
@@ -645,6 +707,9 @@ After a disaster recovery event:
 - [Incident Response Runbook](../runbooks/incident-response.md)
 - [Alarm Runbooks](../runbooks/alarm-runbooks.md)
 - [Capacity Planning Runbook](../runbooks/capacity-planning.md)
+- [DDB PITR Restore Runbook](../runbooks/ddb-pitr-restore.md)
+- [Cognito Recovery Runbook](../runbooks/cognito-recovery.md)
+- [DR operator scripts](../../scripts/dr/)
 - [ObservabilityStack CDK](../../infra/lib/observability-stack.ts)
 - [DataStack CDK](../../infra/lib/data-stack.ts)
 
