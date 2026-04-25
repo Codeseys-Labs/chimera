@@ -59,6 +59,49 @@ export interface SkippedLargeFile {
 
 const IAC_SUSPECT_EXTENSIONS = new Set(['.ts', '.json', '.yaml', '.yml']);
 
+/**
+ * Retry a CodeCommit send() call with exponential backoff when the service
+ * returns a throttling response. CodeCommit silently drops CreateCommit
+ * calls under sustained load; without retries, `chimera sync` fails the
+ * whole deploy mid-batch instead of backing off for a few seconds.
+ *
+ * Retriable error names:
+ *   - ThrottlingException
+ *   - ProvisionedThroughputExceededException
+ *
+ * Backoff: 1s, 2s, 4s between attempts (3 retries total on top of the
+ * initial try, so worst-case wait is 7s before surfacing the error).
+ */
+async function withThrottleRetry<T>(op: () => Promise<T>): Promise<T> {
+  const RETRIABLE = new Set([
+    'ThrottlingException',
+    'ProvisionedThroughputExceededException',
+  ]);
+  const MAX_ATTEMPTS = 4; // initial + 3 retries
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      return await op();
+    } catch (error: any) {
+      attempt += 1;
+      const name = error?.name ?? '';
+      if (!RETRIABLE.has(name) || attempt >= MAX_ATTEMPTS) {
+        throw error;
+      }
+      // 1s, 2s, 4s
+      const delayMs = 1000 * Math.pow(2, attempt - 1);
+      console.log(
+        color.gray(
+          `  CodeCommit ${name} — retrying in ${Math.round(delayMs / 1000)}s ` +
+            `(attempt ${attempt}/${MAX_ATTEMPTS - 1})`,
+        ),
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 function isIacFile(relativePath: string): boolean {
   const parts = relativePath.split(path.sep);
   if (parts[0] !== 'infra') return false;
@@ -255,16 +298,18 @@ export async function pushToCodeCommit(
     }));
 
     try {
-      const createCommitResult = await client.send(
-        new CreateCommitCommand({
-          repositoryName: repoName,
-          branchName,
-          parentCommitId,
-          commitMessage: batchMsg,
-          authorName: 'Chimera CLI',
-          email: 'deploy@chimera.aws',
-          putFiles,
-        }),
+      const createCommitResult = await withThrottleRetry(() =>
+        client.send(
+          new CreateCommitCommand({
+            repositoryName: repoName,
+            branchName,
+            parentCommitId,
+            commitMessage: batchMsg,
+            authorName: 'Chimera CLI',
+            email: 'deploy@chimera.aws',
+            putFiles,
+          }),
+        ),
       );
       parentCommitId = createCommitResult.commitId;
     } catch (error: any) {
