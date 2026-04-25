@@ -43,9 +43,14 @@ jobs:
           AWS_SECRET_ACCESS_KEY: testing
           AWS_REGION: us-east-1
         run: |
-          # Excluding packages/cli (credential-dependent tests) and
-          # packages/chat-gateway (Bun CJS/ESM compat with @aws-sdk/lib-dynamodb).
-          # CLI tests run in isolation below; chat-gateway has 178 tests verified locally.
+          # Excluding packages/cli (credential-dependent tests) — run in isolation below.
+          # chat-gateway was previously excluded for "Bun CJS/ESM compat with
+          # @aws-sdk/lib-dynamodb"; Wave-19 (issue chimera-cc6f) root-caused it to an
+          # incomplete `mock.module('@aws-sdk/lib-dynamodb', ...)` stub in
+          # persistence-session.test.ts that polluted Bun's process-global module cache
+          # and broke the Teams/Discord/Telegram route tests. Mock now exposes every
+          # command name used across the codebase. See
+          # docs/reviews/wave19-chat-gateway-ci-investigation.md.
           # --coverage emits LCOV (Wave-16c §cleanup #6). Uploaded as artifact below.
           bun test \
             --coverage \
@@ -54,6 +59,7 @@ jobs:
             ./packages/shared/ \
             ./packages/core/ \
             ./packages/sse-bridge/ \
+            ./packages/chat-gateway/ \
             ./infra/ \
             ./tests/unit/orchestration/ \
             ./tests/unit/core/ \

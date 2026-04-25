@@ -34,36 +34,48 @@ mock.module('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: class MockDynamoDBClient {},
 }));
 
-// Mock @aws-sdk/lib-dynamodb — the module under test calls DynamoDBDocumentClient.from() at load time
+// Mock @aws-sdk/lib-dynamodb — the module under test calls DynamoDBDocumentClient.from() at load time.
+//
+// IMPORTANT: Bun's `mock.module` is process-global and persists across test files in the
+// same run. If this mock omits a named export that a sibling test's transitive import chain
+// needs (e.g., @chimera/core → routes/chat.ts imports QueryCommand), the sibling's module
+// evaluation fails with "Export named 'X' not found". For that reason, we provide stubs for
+// EVERY command used anywhere in the chimera codebase (chat-gateway + @chimera/core), not
+// just the ones persistence-listener itself needs. See Wave-19 investigation in
+// docs/reviews/wave19-chat-gateway-ci-investigation.md.
 mock.module('@aws-sdk/lib-dynamodb', () => {
-  class PutCommand {
-    _type = 'PutCommand';
-    input: any;
-    constructor(input: any) {
-      this.input = input;
-    }
-  }
-  class UpdateCommand {
-    _type = 'UpdateCommand';
-    input: any;
-    constructor(input: any) {
-      this.input = input;
-    }
-  }
-  class GetCommand {
-    _type = 'GetCommand';
-    input: any;
-    constructor(input: any) {
-      this.input = input;
-    }
-  }
+  // Factory: build a stub command class that captures input and tags itself with _type.
+  const makeCommand = (type: string) =>
+    class {
+      _type = type;
+      input: any;
+      constructor(input: any) {
+        this.input = input;
+      }
+    };
+
   return {
     DynamoDBDocumentClient: {
       from: () => ({ send: mockSend }),
     },
-    PutCommand,
-    UpdateCommand,
-    GetCommand,
+    // Commands actually used by persistence-listener (unit under test)
+    PutCommand: makeCommand('PutCommand'),
+    UpdateCommand: makeCommand('UpdateCommand'),
+    GetCommand: makeCommand('GetCommand'),
+    // Additional commands used by transitive imports from @chimera/core and
+    // sibling routes (chat.ts uses QueryCommand). Stubbed to prevent
+    // "Export named 'X' not found" errors when Bun evaluates those modules
+    // through this global mock during later test files.
+    QueryCommand: makeCommand('QueryCommand'),
+    DeleteCommand: makeCommand('DeleteCommand'),
+    ScanCommand: makeCommand('ScanCommand'),
+    BatchGetCommand: makeCommand('BatchGetCommand'),
+    BatchWriteCommand: makeCommand('BatchWriteCommand'),
+    TransactGetCommand: makeCommand('TransactGetCommand'),
+    TransactWriteCommand: makeCommand('TransactWriteCommand'),
+    ExecuteStatementCommand: makeCommand('ExecuteStatementCommand'),
+    ExecuteTransactionCommand: makeCommand('ExecuteTransactionCommand'),
+    BatchExecuteStatementCommand: makeCommand('BatchExecuteStatementCommand'),
   };
 });
 
