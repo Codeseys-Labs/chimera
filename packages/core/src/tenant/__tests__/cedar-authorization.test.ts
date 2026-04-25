@@ -95,7 +95,11 @@ describe('CedarAuthorization', () => {
       const result = cedar.authorize(request);
 
       expect(result.decision).toBe('Allow');
-      expect(result.reasons.length).toBeGreaterThan(0);
+      // Wave-18 I3: assert on the specific policy that granted access, not
+      // just that SOME reason exists. If cross-tenant-isolation accidentally
+      // didn't fire and a different permit policy matched, the loose check
+      // would still pass — hiding the regression.
+      expect(result.reasons).toContain('user-read-own-sessions');
     });
   });
 
