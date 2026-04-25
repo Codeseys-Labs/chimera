@@ -939,6 +939,297 @@ Defined in `infra/lib/pipeline-stack.ts` lines 1350–1383. These fire during th
 
 ---
 
+## Tool Instrumentation Alarms
+
+### Tool Success Rate Low Alarm
+
+**Alarm Name:** `chimera-{env}-tool-success-rate-low`
+
+**Trigger Condition:**
+- Metric: Metric Math `(SUM(Chimera/Tools::Success) / SAMPLE_COUNT(Chimera/Tools::Success)) * 100`
+- Threshold: `< 80%` (strict `LessThanThreshold`)
+- Period: 5 minutes
+- Evaluation: 2 consecutive periods (10-minute sustained dip)
+- `treatMissingData: NOT_BREACHING` — quiet tools stay silent
+- SNS target: `highAlarmTopic` (OK action also notifies on recovery)
+
+Defined in `infra/lib/observability-stack.ts` around line 1167. The metric is emitted by `packages/agents/tools/gateway_instrumentation.py` as EMF with the `Success` metric name; success rate is derived at query time via Metric Math (see `docs/architecture/observability.md`).
+
+**Impact:**
+- Agent tool invocations are failing at an elevated rate (>=20% failure)
+- User-facing agent responses degrade: skills return errors, missing data, or generic fallbacks
+- Sustained breach often masks a downstream dependency failure (Bedrock throttle, DDB throttle, MCP endpoint down, malformed tool schema after a deploy)
+- Cost impact: retries inflate Bedrock/model spend without delivering value
+
+**Investigation Commands:**
+
+```bash
+# Step 1: Pull the derived success-rate timeseries (last 1h, 5-min bins)
+aws cloudwatch get-metric-data \
+  --start-time "$(date -u -v-1H +%Y-%m-%dT%H:%M:%S)" \
+  --end-time   "$(date -u       +%Y-%m-%dT%H:%M:%S)" \
+  --metric-data-queries '[
+    {
+      "Id": "rate",
+      "Expression": "(m1 / m2) * 100",
+      "Period": 300,
+      "Label": "Tool success rate (%)"
+    },
+    {
+      "Id": "m1",
+      "MetricStat": {
+        "Metric": {"Namespace": "Chimera/Tools", "MetricName": "Success"},
+        "Period": 300,
+        "Stat": "Sum"
+      },
+      "ReturnData": false
+    },
+    {
+      "Id": "m2",
+      "MetricStat": {
+        "Metric": {"Namespace": "Chimera/Tools", "MetricName": "Success"},
+        "Period": 300,
+        "Stat": "SampleCount"
+      },
+      "ReturnData": false
+    }
+  ]'
+
+# Step 2: Break down failures by ToolName dimension (which tool regressed?)
+aws cloudwatch list-metrics \
+  --namespace Chimera/Tools \
+  --metric-name Success \
+  --query 'Metrics[].Dimensions[?Name==`ToolName`].Value' --output text \
+  | tr '\t' '\n' | sort -u
+
+# Then fetch Sum + SampleCount per ToolName (repeat for top suspects):
+TOOL_NAME="<tool-name-from-list-above>"
+aws cloudwatch get-metric-statistics \
+  --namespace Chimera/Tools --metric-name Success \
+  --dimensions Name=ToolName,Value=$TOOL_NAME \
+  --start-time "$(date -u -v-1H +%Y-%m-%dT%H:%M:%S)" \
+  --end-time   "$(date -u       +%Y-%m-%dT%H:%M:%S)" \
+  --period 300 --statistics Sum,SampleCount
+
+# Step 3: Pull raw gateway_instrumentation logs for the failing tool
+aws logs filter-log-events \
+  --log-group-name /chimera/prod/platform \
+  --start-time $(($(date +%s) - 1800))000 \
+  --filter-pattern "{ $.event_type = \"tool_invocation\" && $.success = false && $.tool_name = \"$TOOL_NAME\" }" \
+  | jq -r '.events[].message | fromjson | {tenant_id, error_type, error_message, duration_ms}' \
+  | sort | uniq -c | sort -rn | head -20
+
+# Step 4: Check for correlated upstream failures (Bedrock throttle, DDB throttle)
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Bedrock --metric-name ThrottledRequests \
+  --start-time "$(date -u -v-30M +%Y-%m-%dT%H:%M:%S)" \
+  --end-time   "$(date -u       +%Y-%m-%dT%H:%M:%S)" \
+  --period 300 --statistics Sum
+```
+
+**Resolution Steps:**
+
+1. **Identify the failing `ToolName`** from Step 2 above. If a single tool dominates failures, the blast radius is narrow and a targeted rollback is safe.
+2. **Check for a recent deploy** of the failing tool (CodePipeline history, ECS task definition revision, Lambda version). If a deploy landed in the last 60 minutes, roll back:
+   ```bash
+   aws ecs update-service --cluster chimera-chat-{env} \
+     --service chat-sdk \
+     --task-definition chimera-chat-sdk:<last-known-good-revision> \
+     --force-new-deployment
+   ```
+3. **If failure is Bedrock-driven** (error_type contains `ThrottlingException` or `ModelErrorException`): the platform auto-switches to the cross-region inference profile — verify the `chimera-{env}-bedrock-throttling` alarm is also firing and follow that runbook.
+4. **If failure is schema-driven** (error_type contains `ValidationException` or `SchemaError`): the tool's MCP contract drifted. Quarantine the tool via the skills registry:
+   ```bash
+   aws dynamodb update-item --table-name chimera-skills-{env} \
+     --key '{"PK":{"S":"SKILL#<id>"},"SK":{"S":"META"}}' \
+     --update-expression "SET #s = :q" \
+     --expression-attribute-names '{"#s":"status"}' \
+     --expression-attribute-values '{":q":{"S":"QUARANTINED"}}'
+   ```
+5. **Monitor for recovery** — alarm auto-resolves when success rate climbs back above 80% for 2 consecutive periods. OK action re-notifies `highAlarmTopic`.
+6. **If no single tool dominates** (broad regression): treat as a platform-wide incident and follow `api-error-rate` runbook in parallel.
+
+**Related:**
+- [ADR on observability Metric Math](../architecture/observability.md)
+- [API Error Rate Alarm](#api-error-rate-alarm) — commonly co-fires
+- [Bedrock Throttling Alarm](#bedrock-throttling-alarm) — common upstream cause
+- Source: `packages/agents/tools/gateway_instrumentation.py` (EMF emitter), `infra/lib/observability-stack.ts` line 1167 (alarm definition)
+
+---
+
+## Cost Governance Alarms
+
+### Tier Violation Count High Alarm
+
+**Alarm Name:** `chimera-{env}-tier-violation-count-high`
+
+**Trigger Condition:**
+- Metric: `SUM(SEARCH('{Chimera/Agent,tenant_id,tier,model_requested} MetricName="tier_violation_count"', 'Sum', 300))` — dimension-aware rollup via `SEARCH` because EMF does not auto-publish a zero-dimension aggregate
+- Threshold: `>= 5` violations per 5-minute window
+- Evaluation: 2 consecutive periods (10-minute sustained window)
+- `treatMissingData: NOT_BREACHING`
+- SNS target: `highAlarmTopic` (OK action also notifies)
+
+Defined in `infra/lib/observability-stack.ts` around line 1231. Emitted by `enforceTierCeiling()` in `packages/core/src/evolution/model-router.ts` whenever a tenant's requested model is rejected by the tier allowlist and downgraded to the cheapest tier-allowed fallback (e.g., Basic tier requesting Opus gets downgraded to Haiku/Sonnet).
+
+**Impact:**
+- **Cost leak prevention is working, but client misconfiguration is active.** Every emission represents a *prevented* cost leak — but frequent emissions mean real user-facing impact:
+  - Tenant's client code is pinning a premium model (e.g., Opus) the tier doesn't allow
+  - Agents silently receive a downgraded model, producing lower-quality output than the tenant expects
+  - Tenant will eventually notice quality regression and escalate
+- **Secondary signal:** could indicate a misconfigured internal service (e.g., eval harness pinning Opus for a Basic-tier scenario)
+- **NOT a security issue** — tier enforcement is working as designed. The alarm exists to catch misconfigurations, not attacks.
+
+**Investigation Commands:**
+
+```bash
+# Step 1: Pull dimension-aware breakdown — who is violating, for which model?
+# The alarm uses SEARCH; to investigate we list published dimension combos.
+aws cloudwatch list-metrics \
+  --namespace Chimera/Agent \
+  --metric-name tier_violation_count \
+  --query 'Metrics[].Dimensions' --output json \
+  | jq -r '.[] | map("\(.Name)=\(.Value)") | join(",")' \
+  | sort | uniq -c | sort -rn | head -20
+
+# Step 2: Get Sum per (tenant_id, tier, model_requested) combination for the
+# top offender identified above.
+TENANT_ID="<tenant-from-step-1>"
+TIER="<tier-from-step-1>"
+MODEL="<model-from-step-1>"
+aws cloudwatch get-metric-statistics \
+  --namespace Chimera/Agent --metric-name tier_violation_count \
+  --dimensions Name=tenant_id,Value=$TENANT_ID \
+               Name=tier,Value=$TIER \
+               Name=model_requested,Value=$MODEL \
+  --start-time "$(date -u -v-1H +%Y-%m-%dT%H:%M:%S)" \
+  --end-time   "$(date -u       +%Y-%m-%dT%H:%M:%S)" \
+  --period 300 --statistics Sum
+
+# Step 3: Pull model-router logs showing the downgrade decisions
+aws logs filter-log-events \
+  --log-group-name /chimera/{env}/platform \
+  --start-time $(($(date +%s) - 1800))000 \
+  --filter-pattern "{ $.event_type = \"tier_ceiling_enforcement\" && $.tenant_id = \"$TENANT_ID\" }" \
+  | jq -r '.events[].message | fromjson | {session_id, model_requested, model_downgraded_to, tier}'
+
+# Step 4: Confirm tenant's configured tier (sanity check)
+aws dynamodb get-item \
+  --table-name chimera-tenants-{env} \
+  --key '{"PK":{"S":"TENANT#'$TENANT_ID'"},"SK":{"S":"CONFIG#tier"}}' \
+  --projection-expression "tier,allowedModels"
+```
+
+**Resolution Steps:**
+
+1. **Identify the offending tenant** and the pinned model from Step 1–2 above.
+2. **Determine whether the pin is legitimate:**
+   - If the tenant is on a Basic/Standard tier and pinning a premium model — this is client misconfiguration. Contact the tenant's technical owner and ask them to remove the model pin (let the router pick) or upgrade their tier.
+   - If the tenant has a legitimate need (e.g., is running evals or needs deterministic model choice), upgrade their tier:
+     ```bash
+     aws dynamodb update-item --table-name chimera-tenants-{env} \
+       --key '{"PK":{"S":"TENANT#'$TENANT_ID'"},"SK":{"S":"CONFIG#tier"}}' \
+       --update-expression "SET tier = :t" \
+       --expression-attribute-values '{":t":{"S":"premium"}}'
+     ```
+3. **If the violator is an internal service** (tenant_id matches a platform component): update the service's model configuration to request a tier-compatible model by default. File a ticket to fix the hardcoded pin.
+4. **Do NOT disable tier enforcement** — the alarm firing proves the guardrail works. The fix is upstream (client config or tier assignment), not at the router.
+5. **Verify resolution:** alarm auto-clears when violations drop below 5/5min for 2 consecutive periods.
+
+**Related:**
+- Source: `packages/core/src/evolution/model-router.ts::enforceTierCeiling` (EMF emitter)
+- `infra/lib/observability-stack.ts` line 1231 (alarm definition)
+- [Cost Anomaly Alarm](#cost-anomaly-alarm) — fires when actual spend exceeds tier quota (different axis: this alarm catches *intent* before it becomes spend)
+- [docs/reviews/cost-observability-audit.md](../reviews/cost-observability-audit.md) — metrics catalog for cost-governance signals
+- Tenant tier config in `packages/core/src/tenant/` (see `enterprise` addition in commit `e00837c`)
+
+---
+
+## Compliance / Backup Alarms
+
+### DynamoDB PITR Disabled Alarm
+
+**Alarm Name:** `chimera-{env}-dynamodb-pitr-disabled`
+
+**Trigger Condition:**
+- Metric: `AWS/Config::ComplianceByConfigRule` with dimensions `RuleName=chimera-{env}-dynamodb-pitr-enabled, ComplianceType=NON_COMPLIANT`, statistic `Maximum`, period 15 minutes
+- Threshold: `>= 1` (any non-compliant DDB table)
+- Evaluation: 1 period
+- `treatMissingData: NOT_BREACHING`
+- SNS targets: `highAlarmTopic` + `alarmTopic` (both alarm + OK actions)
+- Additional signal: `onComplianceChange` EventBridge rule fan-out to `highAlarmTopic` on every compliance transition (so operators see the *change event*, not just sustained breach)
+
+**Gated on `-c enableConfigRules=true`** — AWS Config rules incur per-evaluation cost so they are opt-in via CDK context. If Config rules are not enabled, the alarm, managed rule, and EventBridge rule do not exist. Defined in `infra/lib/observability-stack.ts` around line 662. Uses the managed rule `DYNAMODB_PITR_ENABLED`.
+
+**Impact:**
+- **CRITICAL backup gap.** One or more DynamoDB tables is NOT covered by Point-In-Time Recovery. In a table-corruption or accidental-delete incident the RPO is whatever manual backup schedule exists (potentially 24h+ data loss).
+- **Compliance risk:** violates the "all prod DDB tables must have PITR" control documented in the security baseline.
+- **Composite alarm coupling (prod):** this alarm is combined with `chimera-{env}-backup-failure` into a single "backup protection compromised" signal — on-call sees one correlated alert, not two.
+- Most commonly fires because a **new DDB table was added without `pointInTimeRecoverySpecification`** in its CDK construct, or because someone manually disabled PITR via console/CLI on an existing table (CloudTrail: `UpdateContinuousBackups`).
+
+**Investigation Commands:**
+
+```bash
+# Step 1: List all non-compliant DDB resources for the Config rule
+aws configservice get-compliance-details-by-config-rule \
+  --config-rule-name chimera-{env}-dynamodb-pitr-enabled \
+  --compliance-types NON_COMPLIANT \
+  --query 'EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId' \
+  --output text
+
+# Step 2: For each offending table, confirm PITR status directly
+TABLE_NAME="<table-from-step-1>"
+aws dynamodb describe-continuous-backups \
+  --table-name $TABLE_NAME \
+  --query 'ContinuousBackupsDescription.PointInTimeRecoveryDescription'
+# Expected when compliant: PointInTimeRecoveryStatus = ENABLED
+
+# Step 3: Find out WHO/WHEN disabled PITR (CloudTrail)
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=UpdateContinuousBackups \
+  --start-time "$(date -u -v-7d +%Y-%m-%dT%H:%M:%S)" \
+  --end-time   "$(date -u       +%Y-%m-%dT%H:%M:%S)" \
+  --query 'Events[?Resources[?ResourceName==`'$TABLE_NAME'`]].{Time:EventTime,User:Username,Source:CloudTrailEvent}' \
+  --output json | jq '.'
+
+# Step 4: Check if data was modified during the unprotected window
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/DynamoDB --metric-name ConsumedWriteCapacityUnits \
+  --dimensions Name=TableName,Value=$TABLE_NAME \
+  --start-time "<timestamp-when-PITR-was-disabled>" \
+  --end-time   "$(date -u       +%Y-%m-%dT%H:%M:%S)" \
+  --period 3600 --statistics Sum
+```
+
+**Resolution Steps:**
+
+1. **Re-enable PITR immediately** on every non-compliant table:
+   ```bash
+   aws dynamodb update-continuous-backups \
+     --table-name $TABLE_NAME \
+     --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true
+   ```
+   PITR begins accumulating from the moment it is re-enabled — there is **no backfill**. Any writes during the unprotected window are not recoverable via PITR.
+2. **If data was modified while unprotected** (Step 4 showed writes during the gap): restore from the last PITR snapshot *before* PITR was disabled, if one exists. Coordinate with the data owner before overwriting — a restore creates a new table and may require downtime to cut over:
+   ```bash
+   aws dynamodb restore-table-to-point-in-time \
+     --source-table-name $TABLE_NAME \
+     --target-table-name $TABLE_NAME-restored \
+     --restore-date-time "<timestamp-before-PITR-disable>"
+   ```
+3. **File a SEV2 ticket** with CloudTrail evidence of who disabled PITR. If it was a human action, treat as a security incident (unauthorized modification of a compliance control). If it was an IaC drift, fix the CDK definition to include `pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true }` and redeploy.
+4. **Verify compliance recovers.** The Config rule re-evaluates on resource change; expect the alarm to transition to OK within ~15 minutes. The `onComplianceChange` EventBridge fan-out will confirm via `highAlarmTopic`.
+5. **For new tables added via CDK**, ensure `ChimeraTable` or equivalent L3 construct defaults PITR to enabled — the drift should be prevented at synth time, not caught by this alarm.
+
+**Related:**
+- [ADR: Config rules gated on `enableConfigRules` context flag](../../infra/lib/observability-stack.ts) (commit `1d7f77a` — gate AWS Config PITR rule behind context flag)
+- [Disaster Recovery Guide](../guides/disaster-recovery.md) — RTO/RPO procedures and PITR restore playbook
+- [Backup Failure Alarm](#queue-backlog-alarm) companion: `chimera-{env}-backup-failure` (AWS Backup job failures)
+- Composite alarm: `chimera-{env}-backup-protection-compromised` (prod-only, combines this alarm with backup-failure)
+- Source: `infra/lib/observability-stack.ts` line 662 (alarm + managed rule + EventBridge fan-out)
+
+---
+
 ## Alarm Response Checklist
 
 When an alarm fires:
