@@ -15,6 +15,7 @@ import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import { Construct } from 'constructs';
 import { ChimeraBucket } from '../constructs/chimera-bucket';
 import { logRetentionFor } from '../constructs/log-retention';
@@ -35,6 +36,14 @@ export interface PipelineStackProps extends cdk.StackProps {
   // Optional: Docker Hub credentials for rate limit avoidance.
   // Secret must contain JSON keys: username, token
   dockerHubSecretArn?: string;
+
+  /**
+   * Optional platform-wide CMK (from SecurityStack) used to encrypt the
+   * pipeline SNS alarm topic at rest. When omitted, the topic falls back
+   * to AWS-managed SNS encryption, which keeps prior behaviour for
+   * environments that don't yet thread the key through.
+   */
+  platformKey?: kms.IKey;
 }
 
 /**
@@ -159,6 +168,13 @@ export class PipelineStack extends cdk.Stack {
     const pipelineAlarmTopic = new sns.Topic(this, 'PipelineAlarmTopic', {
       topicName: `chimera-pipeline-alarms-${props.envName}`,
       displayName: `Chimera Pipeline Alarms (${props.envName})`,
+      // Encrypt alarm payloads at rest with the platform CMK when supplied
+      // (preferred). An SNS topic without a masterKey falls back to
+      // "SSE with AWS-owned CMK", which security audits flag because key
+      // usage isn't auditable via CloudTrail. When platformKey is omitted
+      // (e.g. early env bootstrap), SNS defaults apply and prior behaviour
+      // is preserved.
+      masterKey: props.platformKey,
     });
 
     // Wave-17 C2: subscribe ops channels in prod. Without these, the

@@ -147,7 +147,12 @@ const pipelineStack = new PipelineStack(app, `${prefix}-Pipeline`, {
   repositoryName: app.node.tryGetContext('repositoryName') ?? 'chimera',
   branch: app.node.tryGetContext('branch') ?? 'main',
   dockerHubSecretArn: app.node.tryGetContext('dockerHubSecretArn'),
+  // Encrypt PipelineAlarmTopic with the platform CMK so SNS usage is
+  // visible in CloudTrail (L-3, Wave-17-C). Creates a dependency on
+  // SecurityStack, which already owns the key.
+  platformKey: securityStack.platformKey,
 });
+pipelineStack.addDependency(securityStack);
 applyPipelineStackSuppressions(pipelineStack);
 
 // --- Stack 7: Skill Pipeline ---
