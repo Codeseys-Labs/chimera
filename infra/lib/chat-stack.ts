@@ -556,6 +556,11 @@ export class ChatStack extends cdk.Stack {
         : cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       enableIpv6: true,
+      // Pin the minimum TLS protocol explicitly: the CloudFormation default
+      // falls back to TLSv1 when no CNAMEs are configured, which fails
+      // PCI-DSS 3.2 / NIST SP 800-52 revision 2 guidance. TLS 1.2 (2021)
+      // also disables legacy ciphers that TLS 1.2 (2019) still permits.
+      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
       defaultBehavior: {
         origin: albOrigin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
