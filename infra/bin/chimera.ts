@@ -131,6 +131,10 @@ const apiStack = new ApiStack(app, `${prefix}-Api`, {
   tenantsTable: dataStack.tenantsTable,
   sessionsTable: dataStack.sessionsTable,
   skillsTable: dataStack.skillsTable,
+  // Encrypt API Gateway access logs + WebSocket access logs with the
+  // platform CMK. SecurityStack's platformKey already grants
+  // logs.amazonaws.com access via key policy (ADR-022). Wave-17 M-1.
+  platformKey: securityStack.platformKey,
 });
 applyApiStackSuppressions(apiStack);
 apiStack.addDependency(securityStack);

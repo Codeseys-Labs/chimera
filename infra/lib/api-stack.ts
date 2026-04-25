@@ -5,6 +5,7 @@ import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
@@ -23,6 +24,15 @@ export interface ApiStackProps extends cdk.StackProps {
   tenantsTable?: dynamodb.TableV2;
   sessionsTable?: dynamodb.TableV2;
   skillsTable?: dynamodb.TableV2;
+  /**
+   * Platform CMK for encrypting CloudWatch log groups. Access logs contain
+   * caller IPs, user IDs, resource paths, and (partial) Authorization
+   * headers; they must be encrypted with the same CMK as the rest of the
+   * platform so key-usage audit trail is uniform. Optional for backwards
+   * compatibility with test fixtures; production wiring always passes it.
+   * Wave-17 M-1.
+   */
+  platformKey?: kms.IKey;
 }
 
 /**
@@ -60,6 +70,13 @@ export class ApiStack extends cdk.Stack {
     const accessLogGroup = new logs.LogGroup(this, 'ApiAccessLogs', {
       logGroupName: `/aws/apigateway/chimera-api-${props.envName}`,
       retention: logRetentionFor('app', isProd),
+      // Encrypt with platform CMK when supplied (prod wiring). Access logs
+      // capture caller IPs, user IDs, and partial Authorization headers;
+      // CMK encryption aligns the audit surface with platform DDB / S3.
+      // KMS key policy grants for `logs.amazonaws.com` live on platformKey
+      // itself (SecurityStack) — adding a new encryption-key reference here
+      // is sufficient. Wave-17 M-1.
+      encryptionKey: props.platformKey,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -442,6 +459,7 @@ export class ApiStack extends cdk.Stack {
     const wsAccessLog = new logs.LogGroup(this, 'WsAccessLog', {
       logGroupName: '/chimera/' + props.envName + '/api-gateway/websocket',
       retention: logRetentionFor('app', isProd),
+      encryptionKey: props.platformKey,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
