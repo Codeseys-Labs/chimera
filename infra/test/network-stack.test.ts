@@ -126,6 +126,46 @@ describe('NetworkStack', () => {
       });
     });
 
+    describe('NACL (chimera-982e defense-in-depth)', () => {
+      it('should create exactly one NACL for the isolated subnet tier', () => {
+        template.resourceCountIs('AWS::EC2::NetworkAcl', 1);
+        template.hasResourceProperties('AWS::EC2::NetworkAcl', {
+          Tags: Match.arrayWith([
+            Match.objectLike({ Key: 'Name', Value: 'chimera-isolated-nacl-dev' }),
+          ]),
+        });
+      });
+
+      it('should ALLOW full TCP range from VPC CIDR on ingress', () => {
+        template.hasResourceProperties('AWS::EC2::NetworkAclEntry', {
+          Egress: false,
+          RuleAction: 'allow',
+          RuleNumber: 100,
+          Protocol: 6, // TCP
+          PortRange: { From: 1, To: 65535 },
+        });
+      });
+
+      it('should ALLOW full TCP range to VPC CIDR on egress', () => {
+        template.hasResourceProperties('AWS::EC2::NetworkAclEntry', {
+          Egress: true,
+          RuleAction: 'allow',
+          RuleNumber: 100,
+          Protocol: 6,
+          PortRange: { From: 1, To: 65535 },
+        });
+      });
+
+      it('should associate NACL with every isolated subnet', () => {
+        // Env-agnostic test stack → CDK defaults to 2 AZs. The subnet count
+        // check at line 43 ("should create 6 subnets (2 AZs × 3 tiers)")
+        // confirms the AZ count; associations must match the isolated-tier
+        // count (1 per AZ).
+        const associations = template.findResources('AWS::EC2::SubnetNetworkAclAssociation');
+        expect(Object.keys(associations).length).toBe(2);
+      });
+    });
+
     describe('Interface Endpoints', () => {
       it('should create 13 interface VPC endpoints (7 original + 6 Wave-15c cost-opt additions)', () => {
         const template = Template.fromStack(stack);

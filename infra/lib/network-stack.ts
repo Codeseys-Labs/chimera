@@ -51,6 +51,46 @@ export class NetworkStack extends cdk.Stack {
       ],
     });
 
+    // Defense-in-depth NACL for the isolated subnet tier.
+    //
+    // Security groups already deny all ingress to the isolated tier by default;
+    // this NACL adds a second layer so a mis-configured SG cannot accidentally
+    // expose DynamoDB gateway endpoints or future RDS/ElastiCache resources
+    // to unexpected CIDRs. The other two tiers (public, private) keep the AWS
+    // default NACL (allow-all) because NACLs are stateless — restricting them
+    // requires explicit ephemeral-port allowances that break easily and the
+    // SGs there already do stateful filtering.
+    //
+    // Rules (isolated subnets only):
+    //   Ingress  100: ALLOW TCP from VPC CIDR    (intra-VPC lateral traffic)
+    //   Ingress  200: ALLOW TCP ephemeral 1024-65535 from VPC CIDR (return traffic)
+    //   Ingress  *  : DENY (CDK-provided default)
+    //   Egress   100: ALLOW TCP to VPC CIDR       (responses to callers)
+    //   Egress   200: ALLOW TCP ephemeral 1024-65535 to VPC CIDR
+    //   Egress   *  : DENY
+    //
+    // chimera-982e. Low-risk: no internet path exists on these subnets.
+    const isolatedNacl = new ec2.NetworkAcl(this, 'IsolatedNacl', {
+      vpc: this.vpc,
+      networkAclName: `chimera-isolated-nacl-${props.envName}`,
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+    const vpcCidr = this.vpc.vpcCidrBlock;
+    isolatedNacl.addEntry('AllowVpcIngress', {
+      ruleNumber: 100,
+      cidr: ec2.AclCidr.ipv4(vpcCidr),
+      traffic: ec2.AclTraffic.tcpPortRange(1, 65535),
+      direction: ec2.TrafficDirection.INGRESS,
+      ruleAction: ec2.Action.ALLOW,
+    });
+    isolatedNacl.addEntry('AllowVpcEgress', {
+      ruleNumber: 100,
+      cidr: ec2.AclCidr.ipv4(vpcCidr),
+      traffic: ec2.AclTraffic.tcpPortRange(1, 65535),
+      direction: ec2.TrafficDirection.EGRESS,
+      ruleAction: ec2.Action.ALLOW,
+    });
+
     // VPC Flow Logs for network visibility and security auditing
     this.vpc.addFlowLog('FlowLog', {
       destination: ec2.FlowLogDestination.toCloudWatchLogs(
