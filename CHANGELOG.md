@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.6.3 (2026-04-25)
+
+Post-deploy security + ops hardening bundle. Closes all Wave-17 security-ops
+findings and all Wave-18 concurrent-reviewer findings. 90+ commits over 5
+waves since v0.6.2; no production regression in any wave.
+
+### Security
+
+- **Wave-17 H-1** DynamoDB table CMKs now have named aliases
+  (`alias/chimera-{table}-{env}`) and are hard-coded `RETAIN` regardless
+  of table removal policy. Prevents S3-backup data from becoming
+  permanently unreadable after a non-prod stack redeploy.
+- **Wave-17 M-1** API Gateway REST + WebSocket access log groups now
+  encrypted with the platform CMK (`chimera-platform-{env}`). Access logs
+  capture caller IPs, user IDs, resource paths, and partial Authorization
+  headers — now on the uniform CMK audit trail.
+- **Wave-17 M-2** Both ECR repositories set `imageTagMutability: IMMUTABLE`.
+  Buildspec drops the `:latest` tag; pipeline pushes only git-SHA-tagged
+  images. Guards against silent overwrite of a known-good tag.
+- **Wave-17 H-2** ALB access log bucket now wrapped in `ChimeraBucket`
+  with new `encryptionMode: 'aws-managed'` mode (ChimeraBucket previously
+  hardcoded CMK encryption, which AWS ELB log delivery does not support).
+- **Wave-17 C-1** DAX CMK encryption — accepted AWS-service limitation.
+  `AWS::DAX::Cluster` does not support CMKs. Mitigations documented in
+  `docs/architecture/cmk-coverage.md` (new canonical CMK coverage matrix
+  enumerating all 9 platform CMKs and the 3 AWS-service-imposed exceptions).
+
+### Fixed
+
+- **Wave-18 I1** `packages/chat-gateway` re-enabled in CI. 178 tests were
+  previously "verified locally" only. Root cause was not "Bun CJS/ESM
+  compat" as the exclusion comment claimed; it was a test-isolation bug
+  where an incomplete `mock.module('@aws-sdk/lib-dynamodb', ...)` stub
+  polluted Bun's process-global module cache and broke 3 sibling route
+  tests. Mock now exposes every command class the codebase imports.
+  Full investigation: `docs/reviews/wave19-chat-gateway-ci-investigation.md`.
+- **Wave-18 I4** 3 alarms (`tool-success-rate-low`,
+  `tier-violation-count-high`, `dynamodb-pitr-disabled`) now have runbook
+  entries with trigger conditions, investigation commands, and
+  resolution steps. `docs/runbooks/alarm-runbooks.md` heading count
+  18 → 21.
+
+### Added
+
+- `docs/architecture/cmk-coverage.md` — canonical CMK coverage matrix
+  for SOC-2 CC6.1 and similar audits.
+- `docs/reviews/wave19-concurrent-review.md` — pre-wave baseline audit
+  serving as the Wave-19 acceptance checklist.
+- `docs/reviews/WAVE-RETROSPECTIVE-19.md` — Wave-19 retrospective.
+
 ## v0.6.2 (2026-04-23)
 
 ### Added
