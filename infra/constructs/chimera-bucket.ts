@@ -6,8 +6,16 @@ import { Construct } from 'constructs';
 export interface ChimeraBucketProps {
   /** Bucket name */
   bucketName?: string;
-  /** KMS key for encryption — if not provided, a new key is created */
+  /** KMS key for encryption — if not provided, a new key is created. Ignored when encryptionMode is 'aws-managed'. */
   encryptionKey?: kms.IKey;
+  /**
+   * Encryption mode. Defaults to 'cmk' (customer-managed key via KMS) — required
+   * for all tenant / platform data. Set to 'aws-managed' ONLY for buckets that
+   * receive delivery from an AWS service which does not support CMKs (today:
+   * ALB / NLB access logs, CloudFront real-time logs). When 'aws-managed' is
+   * selected, `encryptionKey` is ignored and no CMK is created. Wave-17 H-2.
+   */
+  encryptionMode?: 'cmk' | 'aws-managed';
   /** External access log bucket — skip creating internal one */
   serverAccessLogsBucket?: s3.IBucket;
   /** Set true if this bucket IS the access log bucket (disables self-logging) */
@@ -42,7 +50,8 @@ export interface ChimeraBucketProps {
  */
 export class ChimeraBucket extends Construct {
   readonly bucket: s3.Bucket;
-  readonly encryptionKey: kms.IKey;
+  /** CMK used to encrypt this bucket, or undefined when encryptionMode === 'aws-managed'. */
+  readonly encryptionKey?: kms.IKey;
   readonly accessLogBucket?: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: ChimeraBucketProps = {}) {
@@ -51,16 +60,22 @@ export class ChimeraBucket extends Construct {
     const versioned = props.versioned ?? true;
     const removalPolicy = props.removalPolicy ?? cdk.RemovalPolicy.RETAIN;
     const autoDeleteObjects = props.autoDeleteObjects ?? false;
+    const encryptionMode = props.encryptionMode ?? 'cmk';
+    const useCmk = encryptionMode === 'cmk';
 
-    this.encryptionKey = props.encryptionKey ?? new kms.Key(this, 'Key', {
-      description: props.bucketName ? `CMK for ${props.bucketName}` : `CMK for bucket`,
-      enableKeyRotation: true,
-      removalPolicy,
-    });
+    this.encryptionKey = useCmk
+      ? (props.encryptionKey ?? new kms.Key(this, 'Key', {
+          description: props.bucketName ? `CMK for ${props.bucketName}` : `CMK for bucket`,
+          enableKeyRotation: true,
+          removalPolicy,
+        }))
+      : undefined;
 
-    // Create internal access log bucket if not an access log bucket and no external one provided
+    // Create internal access log bucket if not an access log bucket and no external one provided.
+    // AWS-managed-encryption buckets (e.g. ALB log destinations) don't get a sub-access-log
+    // bucket because the delivery service doesn't support an access-log chain anyway.
     let logBucket: s3.IBucket | undefined = props.serverAccessLogsBucket;
-    if (!props.isAccessLogBucket && !props.serverAccessLogsBucket) {
+    if (useCmk && !props.isAccessLogBucket && !props.serverAccessLogsBucket) {
       this.accessLogBucket = new s3.Bucket(this, 'AccessLogs', {
         bucketName: props.bucketName ? `${props.bucketName}-access-logs` : undefined,
         encryption: s3.BucketEncryption.KMS,
@@ -92,8 +107,8 @@ export class ChimeraBucket extends Construct {
 
     this.bucket = new s3.Bucket(this, 'Bucket', {
       bucketName: props.bucketName,
-      encryption: s3.BucketEncryption.KMS,
-      encryptionKey: this.encryptionKey,
+      encryption: useCmk ? s3.BucketEncryption.KMS : s3.BucketEncryption.KMS_MANAGED,
+      ...(useCmk ? { encryptionKey: this.encryptionKey } : {}),
       versioned,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,

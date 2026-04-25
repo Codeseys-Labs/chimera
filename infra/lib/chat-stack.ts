@@ -11,6 +11,7 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
+import { ChimeraBucket } from '../constructs/chimera-bucket';
 import { logRetentionFor } from '../constructs/log-retention';
 
 export interface ChatStackProps extends cdk.StackProps {
@@ -382,17 +383,18 @@ export class ChatStack extends cdk.Stack {
     const hasConcreteRegion = !cdk.Token.isUnresolved(this.region);
     if (isProd && hasConcreteRegion) {
       // ALB access logs require either SSE-S3 or SSE-KMS with an AWS-managed
-      // key (CMKs are not supported by the ELB log-delivery service). We use
-      // KMS_MANAGED so the bucket satisfies EncryptionAspect's `aws:kms`
-      // requirement while remaining compatible with the delivery service.
-      const albAccessLogsBucket = new s3.Bucket(this, 'AlbAccessLogsBucket', {
+      // key — customer-managed keys are NOT supported by the ELB log-delivery
+      // service. We use ChimeraBucket's `encryptionMode: 'aws-managed'` path
+      // which sets up KMS_MANAGED while preserving the construct's other
+      // invariants (block-public-access, SSL enforcement, lifecycle guards).
+      // This is one of three AWS-service-imposed CMK exceptions documented
+      // in docs/architecture/cmk-coverage.md. Wave-17 H-2.
+      const albLogsChimera = new ChimeraBucket(this, 'AlbAccessLogsBucket', {
         bucketName: `chimera-alb-logs-${this.account}-${this.region}-${props.envName}`,
-        encryption: s3.BucketEncryption.KMS_MANAGED,
-        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-        enforceSSL: true,
+        encryptionMode: 'aws-managed',
         versioned: false,
         removalPolicy: cdk.RemovalPolicy.RETAIN,
-        lifecycleRules: [
+        additionalLifecycleRules: [
           {
             id: 'expire-alb-access-logs-30d',
             enabled: true,
@@ -402,8 +404,8 @@ export class ChatStack extends cdk.Stack {
       });
       // ALB ships logs via ELB service principal; CDK wires the bucket policy
       // automatically inside logAccessLogs().
-      this.alb.logAccessLogs(albAccessLogsBucket, 'alb/chat-gateway');
-      this.albAccessLogsBucket = albAccessLogsBucket;
+      this.alb.logAccessLogs(albLogsChimera.bucket, 'alb/chat-gateway');
+      this.albAccessLogsBucket = albLogsChimera.bucket;
     }
 
     // CloudWatch access logs for ALB
