@@ -24,17 +24,18 @@ phases:
       # so the Docker image needs no workspace resolution at all — just copies dist/server.js
       - bun build packages/chat-gateway/src/server.ts --outdir packages/chat-gateway/dist --target bun
 
-      # Build and push chat-gateway image (pre-built bundle, no workspace resolution in Docker)
-      - docker build -t $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG -t $ECR_REPOSITORY_CHAT_GATEWAY:latest -f packages/chat-gateway/Dockerfile .
+      # Build and push chat-gateway image with immutable git-SHA tag only.
+      # ECR repositories are IMMUTABLE (Wave-17 M-2); pushing `:latest` would
+      # fail on the second run. Downstream consumers reference the SHA tag
+      # via $CHAT_GATEWAY_IMAGE_URI / $AGENT_IMAGE_URI exported below.
+      - docker build -t $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG -f packages/chat-gateway/Dockerfile .
       - docker push $ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG
-      - docker push $ECR_REPOSITORY_CHAT_GATEWAY:latest
       - echo "$ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG" > chat-gateway-image-uri.txt
       - export CHAT_GATEWAY_IMAGE_URI="$ECR_REPOSITORY_CHAT_GATEWAY:$IMAGE_TAG"
 
-      # Build and push agent image (Python + uv)
-      - docker build -t $ECR_REPOSITORY_AGENT:$IMAGE_TAG -t $ECR_REPOSITORY_AGENT:latest -f packages/agents/Dockerfile packages/agents/
+      # Build and push agent image (Python + uv) with SHA tag only.
+      - docker build -t $ECR_REPOSITORY_AGENT:$IMAGE_TAG -f packages/agents/Dockerfile packages/agents/
       - docker push $ECR_REPOSITORY_AGENT:$IMAGE_TAG
-      - docker push $ECR_REPOSITORY_AGENT:latest
       - echo "$ECR_REPOSITORY_AGENT:$IMAGE_TAG" > agent-image-uri.txt
       - export AGENT_IMAGE_URI="$ECR_REPOSITORY_AGENT:$IMAGE_TAG"
 

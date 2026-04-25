@@ -90,7 +90,12 @@ export class PipelineStack extends cdk.Stack {
     this.ecrRepository = new ecr.Repository(this, 'AgentRuntimeRepository', {
       repositoryName: `chimera-agent-runtime-${props.envName}`,
       imageScanOnPush: true,
-      imageTagMutability: ecr.TagMutability.MUTABLE,
+      // IMMUTABLE so a push to an existing tag fails rather than silently
+      // overwriting. Guards against a compromised build replacing a
+      // known-good image without a detectable artifact change.
+      // Rollback uses the prior git-SHA tag; `:latest` is no longer pushed
+      // (see buildspec-docker.yml). Wave-17 M-2.
+      imageTagMutability: ecr.TagMutability.IMMUTABLE,
       lifecycleRules: [
         {
           description: 'Remove untagged images after 7 days',
@@ -115,7 +120,12 @@ export class PipelineStack extends cdk.Stack {
     this.chatGatewayEcrRepository = new ecr.Repository(this, 'ChatGatewayRepository', {
       repositoryName: `chimera-chat-gateway-${props.envName}`,
       imageScanOnPush: true,
-      imageTagMutability: ecr.TagMutability.MUTABLE,
+      // IMMUTABLE so a push to an existing tag fails rather than silently
+      // overwriting. Guards against a compromised build replacing a
+      // known-good image without a detectable artifact change.
+      // Rollback uses the prior git-SHA tag; `:latest` is no longer pushed
+      // (see buildspec-docker.yml). Wave-17 M-2.
+      imageTagMutability: ecr.TagMutability.IMMUTABLE,
       lifecycleRules: [
         {
           description: 'Remove untagged images after 7 days',

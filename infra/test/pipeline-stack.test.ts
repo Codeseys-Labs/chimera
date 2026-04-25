@@ -53,10 +53,17 @@ describe('PipelineStack', () => {
         });
       });
 
-      it('should use MUTABLE image tags on ECR repositories', () => {
+      it('should use IMMUTABLE image tags on ECR repositories (Wave-17 M-2)', () => {
+        // IMMUTABLE guards against supply-chain attacks that silently overwrite
+        // a known-good tag (e.g. :latest) with a compromised image. Pipeline
+        // now pushes git-SHA tags only; rollback targets the prior SHA.
         template.hasResourceProperties('AWS::ECR::Repository', {
           RepositoryName: 'chimera-agent-runtime-dev',
-          ImageTagMutability: 'MUTABLE',
+          ImageTagMutability: 'IMMUTABLE',
+        });
+        template.hasResourceProperties('AWS::ECR::Repository', {
+          RepositoryName: 'chimera-chat-gateway-dev',
+          ImageTagMutability: 'IMMUTABLE',
         });
       });
 
