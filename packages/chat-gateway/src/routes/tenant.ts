@@ -12,11 +12,28 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { TenantService } from '@chimera/core';
 import { TenantTier, TenantStatus } from '@chimera/shared';
+import { DynamoDBClient as AwsDynamoDBClient } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+  DeleteCommand,
+  BatchGetCommand,
+  QueryCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { TenantContext } from '../types';
 
 const router = new Hono();
 
-// Local DynamoDBClient type (matches TenantService interface)
+// DynamoDB client matching TenantService's DynamoDBClient interface.
+//
+// Wave-22: this route previously used a no-op mock that returned {Item: null}
+// for every query, which made /tenants/:id always 404 in production against
+// a real DDB table. Replaced with a thin DynamoDBDocumentClient adapter so
+// the PROFILE items seeded by TenantOnboardingStack are actually visible.
+const docClient = DynamoDBDocumentClient.from(new AwsDynamoDBClient({}));
+
 interface DynamoDBClient {
   get(params: any): Promise<any>;
   put(params: any): Promise<any>;
@@ -26,31 +43,24 @@ interface DynamoDBClient {
   update(params: any): Promise<any>;
 }
 
-// Mock DynamoDB client for development
-const mockDynamoDBClient: DynamoDBClient = {
-  async get() {
-    return { Item: null };
-  },
-  async put() {
-    return {};
-  },
-  async delete() {
-    return {};
-  },
-  async batchGet() {
-    return { Responses: {} };
-  },
-  async query() {
-    return { Items: [] };
-  },
-  async update() {
-    return {};
-  },
+const ddbAdapter: DynamoDBClient = {
+  get: (params) => docClient.send(new GetCommand(params)),
+  put: (params) => docClient.send(new PutCommand(params)),
+  delete: (params) => docClient.send(new DeleteCommand(params)),
+  batchGet: (params) => docClient.send(new BatchGetCommand(params)),
+  query: (params) => docClient.send(new QueryCommand(params)),
+  update: (params) => docClient.send(new UpdateCommand(params)),
 };
 
 const tenantService = new TenantService({
-  tenantsTableName: process.env.TENANTS_TABLE_NAME || 'chimera-tenants',
-  dynamodb: mockDynamoDBClient,
+  // Must default to the env-scoped table; the previous 'chimera-tenants'
+  // default pointed at a non-existent table and compounded the mock-client
+  // silent-failure above.
+  tenantsTableName:
+    process.env.TENANTS_TABLE_NAME ||
+    process.env.CHIMERA_TENANTS_TABLE ||
+    'chimera-tenants-dev',
+  dynamodb: ddbAdapter,
 });
 
 /**

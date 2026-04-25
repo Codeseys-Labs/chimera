@@ -6,7 +6,11 @@ import { z } from 'zod';
 import { TenantTier } from '@chimera/shared';
 
 /**
- * Vercel AI SDK chat message format
+ * Vercel AI SDK chat message format — internal normalized shape.
+ *
+ * Requests from clients may arrive in v4 (`content` string) or v5 (`parts`
+ * array) shape; the platform adapter (adapters/web.ts) normalizes both into
+ * this single-content representation before the agent sees the message.
  */
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -16,17 +20,41 @@ export interface ChatMessage {
 /**
  * Zod schema for a single chat message.
  *
- * Enforces `role` is one of the allowed literals and that `content` is a string.
- * Used to validate incoming ChatRequest bodies at the route edge before any
- * stream is opened — malformed input mid-stream corrupts the SSE pipeline and
- * returns garbage to clients that have already been promised a stream.
+ * Accepts BOTH Vercel AI SDK v4 and v5 shapes:
+ *   v4: { role, content: "text" }
+ *   v5: { role, parts: [{ type: 'text', text: '...' }] } (+ optional id)
+ *
+ * The WebPlatformAdapter (adapters/web.ts) normalizes v5 `parts` into a
+ * single `content` string downstream. Validation only cares that the text
+ * payload is present in one form or the other; additional AI SDK fields
+ * (id, experimental flags, etc.) pass through unvalidated via .passthrough().
+ *
+ * Wave-22: previously this schema rejected v5 requests with a 400
+ * "Required" error on the `content` field before the adapter ran.
  */
-export const ChatMessageSchema = z.object({
-  role: z.enum(['user', 'assistant', 'system']),
-  // 32 KB cap: plenty for any legitimate chat turn; rejects 10MB DoS
-  // payloads at Zod validation before any streaming pipe is opened.
-  content: z.string().max(32768),
-});
+export const ChatMessageSchema = z
+  .object({
+    role: z.enum(['user', 'assistant', 'system']),
+    // v4: single content string. 32 KB cap rejects 10MB DoS payloads at the
+    // Zod layer before any streaming pipe is opened.
+    content: z.string().max(32768).optional(),
+    // v5: parts array. We only validate the text-part shape here; the adapter
+    // filters for `type === 'text'` and ignores other part types (tool calls,
+    // attachments, etc. — not used by this deployment today).
+    parts: z
+      .array(
+        z.object({
+          type: z.string(),
+          text: z.string().max(32768).optional(),
+        }).passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough()
+  .refine(
+    (msg) => typeof msg.content === 'string' || Array.isArray(msg.parts),
+    { message: 'Message must have either `content` (v4) or `parts` (v5)' },
+  );
 
 /**
  * Zod schema for a chat streaming request.
@@ -53,11 +81,16 @@ export const ChatRequestSchema = z.object({
 });
 
 /**
- * Chat streaming request
+ * Chat streaming request — raw input shape from clients.
+ *
+ * `messages` items may arrive as either AI SDK v4 (`content` string) or v5
+ * (`parts` array) — the platform adapter normalizes them into the `ChatMessage`
+ * shape used downstream. Do not narrow this type to `ChatMessage[]`; that
+ * would over-constrain the v5 path.
  */
 export interface ChatRequest {
-  /** Conversation messages */
-  messages: ChatMessage[];
+  /** Conversation messages (raw AI SDK v4 or v5 shape) */
+  messages: z.infer<typeof ChatMessageSchema>[];
 
   /** Tenant identifier (required for multi-tenant isolation) */
   tenantId: string;
