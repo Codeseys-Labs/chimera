@@ -37,9 +37,15 @@ def list_lambda_functions(region: str = "us-east-1") -> str:
         return f"Error: {e}"
     try:
         lambda_client = boto3.client('lambda', region_name=region, config=_BOTO_CONFIG)
-        response = lambda_client.list_functions()
 
-        functions = response.get('Functions', [])
+        # Paginate to avoid silently truncating at 50 results (list_functions
+        # default page size). Accounts with more than ~50 Lambdas otherwise
+        # appear incomplete to the agent.
+        paginator = lambda_client.get_paginator('list_functions')
+        functions: List[Dict[str, Any]] = []
+        for page in paginator.paginate():
+            functions.extend(page.get('Functions', []))
+
         if not functions:
             return f"No Lambda functions found in region {region}."
 
