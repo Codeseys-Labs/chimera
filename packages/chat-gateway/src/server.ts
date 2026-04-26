@@ -3,7 +3,18 @@
  *
  * HTTP gateway that accepts Vercel AI SDK chat requests and routes them
  * to multi-tenant agents via @chimera/core, streaming responses via SSE.
+ *
+ * AgentCore Observability (ADR-040) — the ADOT register module MUST be the
+ * very first import so auto-instrumentation wraps every downstream @aws-sdk
+ * client and HTTP call. The container runs a pre-built bun bundle (dist/
+ * server.js), so the `NODE_OPTIONS=--require` path does not apply; the
+ * import-side-effect is the only reliable way to initialize OTEL in-bundle.
+ * Gated on AGENT_OBSERVABILITY_ENABLED so local dev runs OTEL-free.
  */
+
+if (process.env.AGENT_OBSERVABILITY_ENABLED === 'true') {
+  await import('@aws/aws-distro-opentelemetry-node-autoinstrumentation/register');
+}
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
