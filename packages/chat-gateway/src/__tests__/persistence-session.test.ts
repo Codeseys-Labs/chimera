@@ -380,9 +380,11 @@ describe('PersistenceListener — session metadata', () => {
       await settle();
       capturedCommands.length = 0;
 
-      listener.onPart({ type: 'tool-input-start', id: 'tool_1', toolName: 'get_weather' });
-      listener.onPart({ type: 'tool-input-delta', delta: '{"loc":"NY"}' });
-      listener.onPart({ type: 'tool-result', id: 'tool_1', result: { temp: 72 } });
+      // AI SDK v5 wire shapes (Wave-24): toolCallId not id; inputTextDelta
+      // not delta; tool-output-available not tool-result.
+      listener.onPart({ type: 'tool-input-start', toolCallId: 'tool_1', toolName: 'get_weather' });
+      listener.onPart({ type: 'tool-input-delta', toolCallId: 'tool_1', inputTextDelta: '{"loc":"NY"}' });
+      listener.onPart({ type: 'tool-output-available', toolCallId: 'tool_1', output: { temp: 72 } });
 
       await listener.onComplete();
 

@@ -116,7 +116,8 @@ export type VercelDSPStreamPart =
   | VercelDSPTextEndPart
   | VercelDSPToolInputStartPart
   | VercelDSPToolInputDeltaPart
-  | VercelDSPToolResultPart
+  | VercelDSPToolOutputAvailablePart
+  | VercelDSPToolOutputErrorPart
   | VercelDSPReasoningStartPart
   | VercelDSPReasoningDeltaPart
   | VercelDSPReasoningEndPart
@@ -170,30 +171,47 @@ export interface VercelDSPTextEndPart {
 }
 
 // Tool calls
+//
+// AI SDK v5 wire format (from `ai/dist/index.d.ts`):
+//   tool-input-start       { toolCallId, toolName }
+//   tool-input-delta       { toolCallId, inputTextDelta }
+//   tool-output-available  { toolCallId, output }
+//   tool-output-error      { toolCallId, errorText }
+//
+// Wave-24 correction: the previous `id` + `delta` + `tool-result` shapes
+// were rejected by AI SDK v5's client-side Zod validator. Browser-based
+// tool-invoking prompts would throw `AI_TypeValidationError` mid-stream
+// and abort the chat. Server-side curl/unit tests didn't catch this
+// because they don't run the client parser.
 export interface VercelDSPToolInputStartPart {
   type: 'tool-input-start';
-  id: string;
+  toolCallId: string;
   toolName: string;
 }
 
 export interface VercelDSPToolInputDeltaPart {
   type: 'tool-input-delta';
-  id: string;
-  delta: string;
+  toolCallId: string;
+  inputTextDelta: string;
 }
 
-export interface VercelDSPToolResultPart {
-  type: 'tool-result';
-  id: string;
-  result: unknown;
-  /**
-   * Execution status of the tool call. Required so downstream consumers
-   * (web, Slack, Discord, persistence, etc.) can distinguish successful
-   * tool calls from errored ones and drive recovery/error UX correctly.
-   */
-  status: 'success' | 'error';
-  /** Optional human-readable error message when status === 'error' */
-  error?: string;
+/**
+ * Tool-output (formerly `tool-result`). AI SDK v5 splits success and
+ * error into distinct event types with different required fields.
+ * We emit exactly one of these per tool invocation; callers decide
+ * by inspecting `status` on the high-level wrapper before picking the
+ * wire shape.
+ */
+export interface VercelDSPToolOutputAvailablePart {
+  type: 'tool-output-available';
+  toolCallId: string;
+  output: unknown;
+}
+
+export interface VercelDSPToolOutputErrorPart {
+  type: 'tool-output-error';
+  toolCallId: string;
+  errorText: string;
 }
 
 // Reasoning (chain-of-thought)

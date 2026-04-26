@@ -32,12 +32,23 @@ mock.module('@aws-sdk/lib-dynamodb', () => ({
   UpdateCommand: class { constructor(public params: any) {} },
 }));
 
+// Bun's `mock.module()` writes to a process-global module registry that
+// persists across every test file in the same `bun test` run. If this stub
+// omits a named export that a sibling test's transitive import chain needs
+// (e.g., s3-tool.ts imports CopyObjectCommand), the sibling's module
+// evaluation fails with "Export named 'X' not found". So expose EVERY S3
+// command class used anywhere in packages/core/src/aws-tools/s3-tool.ts.
+// See Wave-19 chat-gateway investigation for the canonical repro of this
+// footgun; Wave-24 re-hit it with CopyObjectCommand.
 mock.module('@aws-sdk/client-s3', () => ({
   S3Client: class {
     send = mock(async (_cmd: any) => ({}));
   },
   PutObjectCommand: class { constructor(public params: any) {} },
   GetObjectCommand: class { constructor(public params: any) {} },
+  CopyObjectCommand: class { constructor(public params: any) {} },
+  DeleteObjectCommand: class { constructor(public params: any) {} },
+  ListObjectsV2Command: class { constructor(public params: any) {} },
 }));
 
 // ---------------------------------------------------------------------------

@@ -197,7 +197,7 @@ export class StrandsToDSPConverter {
 
       parts.push({
         type: 'tool-input-start',
-        id: toolId,
+        toolCallId: toolId,
         toolName,
       });
     }
@@ -247,7 +247,7 @@ export class StrandsToDSPConverter {
         this.state.currentToolName = 'unknown_tool';
         parts.push({
           type: 'tool-input-start',
-          id: toolId,
+          toolCallId: toolId,
           toolName: 'unknown_tool',
         });
       }
@@ -256,8 +256,8 @@ export class StrandsToDSPConverter {
 
       parts.push({
         type: 'tool-input-delta',
-        id: this.state.currentToolBlockId,
-        delta: event.delta.input,
+        toolCallId: this.state.currentToolBlockId,
+        inputTextDelta: event.delta.input,
       });
     }
 
@@ -390,18 +390,32 @@ export class StrandsToDSPConverter {
   }): VercelDSPStreamPart[] {
     // Fail-closed: if status is missing, treat as error so downstream
     // consumers cannot confuse a malformed event with a successful tool call.
+    //
+    // AI SDK v5 wire shape — emit either `tool-output-available` or
+    // `tool-output-error` (not a unified `tool-result`). The client
+    // validator rejects the unified shape at the Zod union boundary
+    // (Wave-24 regression).
     const status: 'success' | 'error' = event.status ?? 'error';
-    const errorMessage =
-      event.error ??
-      (status === 'error' ? this.extractErrorFromResult(event.result) : undefined);
+
+    if (status === 'error') {
+      const errorMessage =
+        event.error ??
+        this.extractErrorFromResult(event.result) ??
+        'Tool invocation failed';
+      return [
+        {
+          type: 'tool-output-error',
+          toolCallId: event.toolUseId,
+          errorText: errorMessage,
+        },
+      ];
+    }
 
     return [
       {
-        type: 'tool-result',
-        id: event.toolUseId,
-        result: event.result,
-        status,
-        ...(errorMessage !== undefined ? { error: errorMessage } : {}),
+        type: 'tool-output-available',
+        toolCallId: event.toolUseId,
+        output: event.result,
       },
     ];
   }

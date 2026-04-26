@@ -199,21 +199,39 @@ export function createPersistenceListener(opts: PersistenceOpts): StreamListener
       }
 
       // Track tool call lifecycle
+      //
+      // AI SDK v5 wire shapes (Wave-24):
+      //   tool-input-start       { toolCallId, toolName }
+      //   tool-input-delta       { toolCallId, inputTextDelta }
+      //   tool-output-available  { toolCallId, output }   -- success
+      //   tool-output-error      { toolCallId, errorText } -- failure
+      //
+      // We record both success and error outcomes in the session log so the
+      // replay UI can render tool failures distinctly from successes.
       if (part.type === 'tool-input-start') {
         currentToolCall = {
-          id: part.id || '',
+          id: part.toolCallId || '',
           name: part.toolName || '',
           input: '',
         };
       }
       if (part.type === 'tool-input-delta' && currentToolCall) {
-        currentToolCall.input += part.delta || '';
+        currentToolCall.input += part.inputTextDelta || '';
       }
-      if (part.type === 'tool-result') {
+      if (part.type === 'tool-output-available') {
         if (currentToolCall) {
           toolCalls.push({
             ...currentToolCall,
-            result: JSON.stringify(part.result ?? '').slice(0, 2000),
+            result: JSON.stringify(part.output ?? '').slice(0, 2000),
+          });
+          currentToolCall = null;
+        }
+      }
+      if (part.type === 'tool-output-error') {
+        if (currentToolCall) {
+          toolCalls.push({
+            ...currentToolCall,
+            result: JSON.stringify({ error: part.errorText }).slice(0, 2000),
           });
           currentToolCall = null;
         }

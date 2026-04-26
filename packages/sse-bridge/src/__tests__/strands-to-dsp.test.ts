@@ -179,7 +179,8 @@ describe('StrandsToDSPConverter', () => {
 
       const toolStart = allParts.find((p) => p.type === 'tool-input-start') as any;
       expect(toolStart.toolName).toBe('search');
-      expect(toolStart.id).toBe('tool_001');
+      // AI SDK v5 uses `toolCallId`, not `id`, for tool events (Wave-24).
+      expect(toolStart.toolCallId).toBe('tool_001');
     });
   });
 
@@ -232,7 +233,11 @@ describe('StrandsToDSPConverter', () => {
   });
 
   describe('Tool result handling', () => {
-    it('should convert toolResult event to tool-result part', () => {
+    // Wave-24: AI SDK v5 splits tool-result into two discriminated-union
+    // members (tool-output-available for success, tool-output-error for
+    // failure). The client validator rejects the legacy unified
+    // `tool-result` shape.
+    it('should convert successful toolResult to tool-output-available', () => {
       const event: StrandsStreamEvent = {
         type: 'toolResult',
         toolUseId: 'tool_001',
@@ -244,9 +249,26 @@ describe('StrandsToDSPConverter', () => {
 
       expect(result).toHaveLength(1);
       const part = result[0] as any;
-      expect(part.type).toBe('tool-result');
-      expect(part.id).toBe('tool_001');
-      expect(part.result).toEqual({ data: 'search results' });
+      expect(part.type).toBe('tool-output-available');
+      expect(part.toolCallId).toBe('tool_001');
+      expect(part.output).toEqual({ data: 'search results' });
+    });
+
+    it('should convert failed toolResult to tool-output-error', () => {
+      const event: StrandsStreamEvent = {
+        type: 'toolResult',
+        toolUseId: 'tool_002',
+        result: { error: 'Permission denied' },
+        status: 'error',
+      };
+
+      const result = converter.convert(event);
+
+      expect(result).toHaveLength(1);
+      const part = result[0] as any;
+      expect(part.type).toBe('tool-output-error');
+      expect(part.toolCallId).toBe('tool_002');
+      expect(part.errorText).toBe('Permission denied');
     });
 
     it('should handle tool stream updates', () => {
