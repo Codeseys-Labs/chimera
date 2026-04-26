@@ -29,15 +29,15 @@ phases:
       # in production even after the fix was deployed — the agent.ts
       # source change never reached dist. Wave-26.
       #
-      # Wave-27 refinement: invoke `bunx tsc` directly with the explicit
-      # tsconfig path rather than `bun run --cwd ... build`. The package
-      # scripts use `tsc --build` which relies on project references +
-      # tsbuildinfo that can get confused in a fresh CodeBuild checkout.
-      # Direct `tsc -p <path>` is unambiguous — compile this one project,
-      # emit dist, exit.
-      - bunx tsc -p packages/shared/tsconfig.json
-      - bunx tsc -p packages/core/tsconfig.json
-      - bunx tsc -p packages/sse-bridge/tsconfig.json
+      # Wave-27 refinement #2: use `tsc --build` from the ROOT so TS
+      # follows project references end-to-end and emits a matching
+      # .tsbuildinfo for each package. When dependent projects
+      # (packages/core) have `composite: true` they check that each
+      # referenced project's dist was built from a synchronized source
+      # via .tsbuildinfo; compiling packages individually without the
+      # reference graph trips TS6305 "Output file has not been built
+      # from source file". Root-level `tsc --build` fixes this.
+      - bunx tsc --build packages/shared/tsconfig.json packages/core/tsconfig.json packages/sse-bridge/tsconfig.json
 
       # Pre-bundle chat-gateway at CodeBuild time (full monorepo available here)
       # This resolves @chimera/shared, @chimera/core, @chimera/sse-bridge workspace deps
