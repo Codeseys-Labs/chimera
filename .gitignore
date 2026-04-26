@@ -112,3 +112,6 @@ infra/cdk.context.json
 docs/analysis/session-*-conversation.json
 .auth/
 infra/cdk.out/
+
+# Browser validation screenshots (session artifacts, not source)
+wave*-*.png
