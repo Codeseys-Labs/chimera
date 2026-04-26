@@ -13,7 +13,8 @@
  */
 
 if (process.env.AGENT_OBSERVABILITY_ENABLED === 'true') {
-  await import('@aws/aws-distro-opentelemetry-node-autoinstrumentation/register');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  require('@aws/aws-distro-opentelemetry-node-autoinstrumentation/register');
 }
 
 import { Hono } from 'hono';
