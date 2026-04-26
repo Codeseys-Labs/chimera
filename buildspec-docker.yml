@@ -19,6 +19,19 @@ phases:
     commands:
       - export IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
 
+      # Build workspace dependencies FIRST. @chimera/core, @chimera/shared,
+      # and @chimera/sse-bridge each compile TS → dist/*.js via `tsc`. The
+      # chat-gateway bundle below resolves `@chimera/core` to its `main`
+      # field (dist/index.js). Without this step, the bundler pulls in
+      # whatever dist was last committed in git — which is gitignored and
+      # will either be missing (build fails) or stale from a developer's
+      # machine (silent regression). This caused chimera-e026 to persist
+      # in production even after the fix was deployed — the agent.ts
+      # source change never reached dist. Wave-26.
+      - bun run --cwd packages/shared build
+      - bun run --cwd packages/core build
+      - bun run --cwd packages/sse-bridge build
+
       # Pre-bundle chat-gateway at CodeBuild time (full monorepo available here)
       # This resolves @chimera/shared, @chimera/core, @chimera/sse-bridge workspace deps
       # so the Docker image needs no workspace resolution at all — just copies dist/server.js
