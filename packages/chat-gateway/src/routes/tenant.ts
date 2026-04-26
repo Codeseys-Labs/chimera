@@ -22,6 +22,10 @@ import {
   QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import {
+  CognitoIdentityProviderClient,
+  ListUsersCommand,
+} from '@aws-sdk/client-cognito-identity-provider';
 import { TenantContext } from '../types';
 
 const router = new Hono();
@@ -62,6 +66,14 @@ const tenantService = new TenantService({
     'chimera-tenants-dev',
   dynamodb: ddbAdapter,
 });
+
+// Cognito client for the tenant-scoped user listing below. Uses the same
+// task IAM role as the rest of the gateway — production prod already
+// grants `cognito-idp:ListUsers` via ChatStack (see infra/lib/chat-stack.ts
+// taskRole). Region defaults to $AWS_REGION like every other AWS client
+// in this file.
+const cognitoClient = new CognitoIdentityProviderClient({});
+const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
 
 /**
  * Authorization helper: Check if request is from platform admin
@@ -499,6 +511,138 @@ router.get('/query/status/:status', async (c: Context) => {
       timestamp: new Date().toISOString(),
     }, 500);
   }
+});
+
+/**
+ * GET /tenants/:tenantId/users
+ *
+ * List Cognito users whose `custom:tenant_id` matches the given tenant.
+ * Backs the Admin page's Users tab. Cognito's `ListUsersCommand.Filter`
+ * supports equality on a single attribute; tenant_id is the natural
+ * scope. Callers outside their own tenant get 403.
+ *
+ * Wave-25 (chimera-c881): the Admin SPA previously called this path and
+ * hit a blanket 404 because the route didn't exist in the gateway. The
+ * nearest existing implementation was `/integrations/:id/users` — which
+ * returns PLATFORM pairings (Slack/Discord user → Cognito mapping),
+ * semantically different from "Cognito users in this tenant."
+ */
+router.get('/:tenantId/users', async (c: Context) => {
+  try {
+    const tenantId = c.req.param('tenantId')!;
+
+    if (!canAccessTenant(c, tenantId)) {
+      return c.json(
+        {
+          error: {
+            code: 'INSUFFICIENT_PERMISSIONS',
+            message: 'You can only access your own tenant',
+          },
+          timestamp: new Date().toISOString(),
+        },
+        403
+      );
+    }
+
+    if (!COGNITO_USER_POOL_ID) {
+      return c.json(
+        {
+          error: {
+            code: 'AUTH_NOT_CONFIGURED',
+            message: 'COGNITO_USER_POOL_ID is not set',
+          },
+          timestamp: new Date().toISOString(),
+        },
+        500
+      );
+    }
+
+    // Cognito filter syntax:
+    //   "custom:tenant_id = \"acme\""
+    // Whitespace matters; quotes must be literal inside the single string.
+    const filter = `"custom:tenant_id" = "${tenantId.replace(/"/g, '\\"')}"`;
+    const response = await cognitoClient.send(
+      new ListUsersCommand({
+        UserPoolId: COGNITO_USER_POOL_ID,
+        Filter: filter,
+        Limit: 60,
+      })
+    );
+
+    const users = (response.Users ?? []).map((u) => {
+      const attr = (name: string) =>
+        u.Attributes?.find((a) => a.Name === name)?.Value;
+      return {
+        sub: attr('sub') ?? u.Username ?? '',
+        email: attr('email') ?? '',
+        name: attr('name') ?? attr('given_name') ?? '',
+        status: u.UserStatus ?? 'UNKNOWN',
+        // Cognito doesn't return group membership on ListUsers — callers
+        // who need it must call AdminListGroupsForUser per user. The UI
+        // currently just displays the string, so an empty list is fine.
+        groups: [] as string[],
+      };
+    });
+
+    return c.json({
+      users,
+      count: users.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Get tenant users error:', error);
+    return c.json(
+      {
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: error instanceof Error ? error.message : 'Failed to list users',
+        },
+        timestamp: new Date().toISOString(),
+      },
+      500
+    );
+  }
+});
+
+/**
+ * GET /tenants/:tenantId/api-keys
+ *
+ * List API keys issued for a tenant. No persisted key store exists yet
+ * (tracked separately — admin UI is meant as a placeholder pre-GA), so
+ * this route returns an empty list with HTTP 200 rather than 404. The
+ * Admin page's `EmptyState` component renders the "No API keys" UI when
+ * the list is empty.
+ *
+ * Wave-25 (chimera-c881): fixing this to 200+empty unblocks the Admin
+ * page from surfacing a browser console error on every load. When the
+ * backing store lands, this handler swaps the empty-list for a real
+ * query without UI changes.
+ */
+router.get('/:tenantId/api-keys', async (c: Context) => {
+  const tenantId = c.req.param('tenantId')!;
+
+  if (!canAccessTenant(c, tenantId)) {
+    return c.json(
+      {
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'You can only access your own tenant',
+        },
+        timestamp: new Date().toISOString(),
+      },
+      403
+    );
+  }
+
+  return c.json({
+    keys: [] as Array<{ id: string; maskedKey: string; name: string; createdAt: string }>,
+    count: 0,
+    // `note` is an opt-in explanation for the Admin UI — the SPA ignores
+    // unknown fields, so this is safe to add.
+    note:
+      'API key issuance is not yet implemented. This endpoint will return actual keys once the per-tenant key store ships.',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 export default router;

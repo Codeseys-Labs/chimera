@@ -264,6 +264,22 @@ export class ChatStack extends cdk.Stack {
       })
     );
 
+    // Grant Cognito user-pool read access for the tenant-scoped admin
+    // endpoints (`GET /tenants/:tenantId/users` — see Wave-25
+    // chimera-c881). Resource is scoped to all pools in this account/region
+    // using a wildcard ARN; tighten to specific pool ARNs if a future
+    // audit demands finer scope.
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'cognito-idp:ListUsers',
+          'cognito-idp:AdminListGroupsForUser',
+        ],
+        resources: [`arn:aws:cognito-idp:${this.region}:${this.account}:userpool/*`],
+      })
+    );
+
     // Grant AgentCore Code Interpreter access for sandbox execution
     taskRole.addToPolicy(
       new iam.PolicyStatement({
