@@ -852,12 +852,22 @@ export class ChimeraAgent {
   }
 
   /**
-   * Stream agent responses
+   * Stream agent responses.
    *
-   * @param message - User input message
+   * @param message - User input message (the NEW turn's user message)
+   * @param priorMessages - Optional prior turns from session history, in
+   *   chronological order. Used to give the model conversational context
+   *   across turns. Without this, each call is a cold start — which caused
+   *   chimera-e026 (agent replied "I don't know your name" on turn 2 even
+   *   though turn 1 had supplied it). The chat-gateway route loads these
+   *   from DDB's session store (chimera-sessions-{env}) before calling
+   *   this method.
    * @returns Async iterator of streaming events
    */
-  async *stream(message: string): AsyncGenerator<StreamEvent, void, unknown> {
+  async *stream(
+    message: string,
+    priorMessages: Message[] = []
+  ): AsyncGenerator<StreamEvent, void, unknown> {
     // Ensure memory is initialized
     await this.ensureMemoryInitialized();
 
@@ -883,7 +893,13 @@ export class ChimeraAgent {
 
     const systemPrompt = this.config.systemPrompt.render(promptContext);
 
-    const messages: Message[] = [];
+    // Seed with conversation history so the model has cross-turn context.
+    // Bedrock's Converse API requires strict user/assistant alternation
+    // starting with `user` — the caller is responsible for ensuring that
+    // invariant. If a malformed history is passed, Bedrock rejects the
+    // request with ValidationException; we surface that as a stream error
+    // rather than silently dropping the history.
+    const messages: Message[] = [...priorMessages];
     messages.push({ role: 'user', content: [{ text: message }] });
 
     const toolSpecs =

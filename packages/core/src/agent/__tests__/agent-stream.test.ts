@@ -356,4 +356,81 @@ describe('ChimeraAgent.stream()', () => {
       expect(events.some(e => e.type === 'message_stop')).toBe(true);
     });
   });
+
+  describe('priorMessages (chimera-e026 regression)', () => {
+    // Before Wave-26, stream(message) created a fresh `messages: []`
+    // and seeded only with the new user turn. Multi-turn conversations
+    // showed no cross-turn memory — the agent would reply "I don't
+    // know your name" even if the previous turn supplied it. This
+    // test locks the fix: prior turns passed by the caller MUST
+    // reach the Bedrock Converse `messages` array.
+
+    // MockModel.callHistory stores a REFERENCE to the messages array the
+    // agent mutates. The ReAct loop pushes the assistant reply back into
+    // the array for the next iteration, so by the time we inspect
+    // getLastCall() the recorded array has one MORE entry than what was
+    // sent to the model. Assertions here check the PREFIX (priors + new
+    // user turn), ignoring anything the loop appended afterwards.
+
+    it('prepends priorMessages before the new user turn', async () => {
+      const model = new MockModel([mockTextResponse('Robin')]);
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model,
+      });
+
+      const priorMessages = [
+        { role: 'user' as const, content: [{ text: 'My name is Robin' }] },
+        { role: 'assistant' as const, content: [{ text: 'Got it.' }] },
+      ];
+
+      const events = [];
+      for await (const event of agent.stream("What's my name?", priorMessages)) {
+        events.push(event);
+      }
+
+      const call = model.getLastCall();
+      // At least 3 entries (priors + new user turn); the ReAct loop may
+      // append an assistant reply as a 4th. Check the PREFIX.
+      expect(call.messages.length).toBeGreaterThanOrEqual(3);
+      expect(call.messages[0].role).toBe('user');
+      expect(call.messages[0].content[0]).toEqual({ text: 'My name is Robin' });
+      expect(call.messages[1].role).toBe('assistant');
+      expect(call.messages[1].content[0]).toEqual({ text: 'Got it.' });
+      expect(call.messages[2].role).toBe('user');
+      expect(call.messages[2].content[0]).toEqual({ text: "What's my name?" });
+
+      // Stream shape unchanged — fix is additive, not behavior-breaking.
+      expect(events.some((e) => e.type === 'message_start')).toBe(true);
+      expect(events.some((e) => e.type === 'message_stop')).toBe(true);
+    });
+
+    it('defaults to empty priorMessages for single-turn chats', async () => {
+      const model = new MockModel([mockTextResponse('Hello!')]);
+      const agent = createAgent({
+        systemPrompt: createDefaultSystemPrompt(),
+        tenantId: 'test-tenant',
+        model,
+      });
+
+      const events = [];
+      // No second arg — covers the existing caller convention.
+      for await (const event of agent.stream('Hi')) {
+        events.push(event);
+      }
+
+      const call = model.getLastCall();
+      // Only the new user turn PLUS whatever ReAct appended (assistant
+      // reply). The minimum is 1 (the user turn we sent).
+      expect(call.messages.length).toBeGreaterThanOrEqual(1);
+      expect(call.messages[0].role).toBe('user');
+      expect(call.messages[0].content[0]).toEqual({ text: 'Hi' });
+      // No prior-turn leak from some other test's state.
+      const priorUserMsgs = call.messages
+        .slice(0, 1) // just the first element; it's the only "prior" slot
+        .filter((m: any) => m.content[0]?.text !== 'Hi');
+      expect(priorUserMsgs).toHaveLength(0);
+    });
+  });
 });

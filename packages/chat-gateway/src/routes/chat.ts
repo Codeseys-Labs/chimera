@@ -520,8 +520,24 @@ router.post('/stream', async (c: Context) => {
         : undefined,
     });
 
+    // Convert normalized-and-adapter-parsed messages into Bedrock Converse
+    // `Message` shape. The client (Vercel AI SDK v5) sends the full
+    // conversation history on every request — `messages[0..n-2]` are the
+    // prior turns, `messages[n-1]` is the new user turn. Without this, the
+    // agent had no cross-turn memory (chimera-e026 / Wave-26).
+    //
+    // Bedrock Converse requires strict user/assistant alternation starting
+    // with user. The adapter guarantees role validity already. If a
+    // malformed history slips in, Bedrock rejects with ValidationException;
+    // we surface that error into the SSE stream rather than silently
+    // dropping turns.
+    const priorMessages = messages.slice(0, -1).map((msg) => ({
+      role: msg.role === 'system' ? ('user' as const) : (msg.role as 'user' | 'assistant'),
+      content: [{ text: msg.content }],
+    }));
+
     // Build DSP part stream from agent
-    const agentStream = agent.stream(lastMessage.content);
+    const agentStream = agent.stream(lastMessage.content, priorMessages);
     const strandsStream = mapAgentStreamToStrands(agentStream);
     const bridge = new StrandsToDSPBridge(messageId);
     const dspStream = bridge.convertStream(strandsStream);
