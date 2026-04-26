@@ -27,6 +27,7 @@ import type { VercelDSPStreamPart } from '@chimera/sse-bridge';
 import { StreamTee } from '@chimera/sse-bridge';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { context as otelContext, propagation } from '@opentelemetry/api';
 import {
   ChatRequest,
   ChatRequestSchema,
@@ -536,8 +537,37 @@ router.post('/stream', async (c: Context) => {
       content: [{ text: msg.content }],
     }));
 
-    // Build DSP part stream from agent
-    const agentStream = agent.stream(lastMessage.content, priorMessages);
+    // AgentCore Observability (ADR-040 / chimera-301e):
+    //
+    // Attach OTEL baggage so every Bedrock Converse span emitted by the
+    // ADOT Node autoinstrumentation wrapper carries `session.id` and
+    // `tenant.id`. This is what CloudWatch GenAI Observability uses to
+    // correlate multi-turn conversations into a single logical session
+    // in the transaction search view.
+    //
+    // The stable sessionId is computed below for the persistence path;
+    // derive it here too so both layers tag the same value.
+    const resolvedSessionId = body.sessionId || `session_${Date.now()}`;
+    const baggageCtx = propagation.setBaggage(
+      otelContext.active(),
+      propagation.createBaggage({
+        'session.id': { value: resolvedSessionId },
+        'tenant.id': { value: tenantContext.tenantId },
+        'tenant.tier': { value: tenantContext.tier },
+        'user.id': { value: tenantContext.userId || 'unknown' },
+      }),
+    );
+
+    // Build DSP part stream from agent.
+    //
+    // `otelContext.with(baggageCtx, fn)` runs the synchronous setup inside
+    // the baggage context. Because `agent.stream(...)` is a synchronous call
+    // that returns an AsyncGenerator, the context is active at the moment
+    // downstream Bedrock calls are set up — which is enough for ADOT to
+    // capture it on the resulting spans.
+    const agentStream = otelContext.with(baggageCtx, () =>
+      agent.stream(lastMessage.content, priorMessages),
+    );
     const strandsStream = mapAgentStreamToStrands(agentStream);
     const bridge = new StrandsToDSPBridge(messageId);
     const dspStream = bridge.convertStream(strandsStream);
@@ -549,10 +579,14 @@ router.post('/stream', async (c: Context) => {
     // Attach DynamoDB persistence listener — writes messages as the stream progresses.
     // The persistence listener accumulates text in-memory and writes the final message
     // on completion. Agent generation continues even if the HTTP client disconnects.
-    const sessionId = body.sessionId || `session_${Date.now()}`;
+    //
+    // `resolvedSessionId` was computed above for OTEL baggage — reuse here so
+    // the persistence SK prefix matches what observability traces are tagged
+    // with. Makes it possible to join CloudWatch traces against
+    // chimera-sessions-dev rows on session.id == SK-derived session_id.
     const persistenceListener = createPersistenceListener({
       messageId,
-      sessionId,
+      sessionId: resolvedSessionId,
       tenantId: tenantContext.tenantId,
       userId: tenantContext.userId || 'unknown',
       userContent: lastMessage.content,
@@ -583,7 +617,7 @@ router.post('/stream', async (c: Context) => {
       headers: {
         ...VERCEL_DSP_HEADERS,
         'X-Message-Id': messageId,
-        'X-Session-Id': sessionId,
+        'X-Session-Id': resolvedSessionId,
       },
     });
   } catch (error) {

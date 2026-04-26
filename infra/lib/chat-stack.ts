@@ -280,6 +280,31 @@ export class ChatStack extends cdk.Stack {
       })
     );
 
+    // AgentCore Observability IAM (ADR-040 / chimera-301e).
+    //
+    // ADOT Node autoinstrumentation emits:
+    //   - X-Ray trace segments via the X-Ray API → resources '*' (the API
+    //     is account-scoped; PutTraceSegments doesn't accept narrower ARNs).
+    //   - OTEL structured logs to the task log group via PutLogEvents
+    //     (which is already granted by awslogs driver on the task def).
+    //
+    // CloudWatch Transaction Search is enabled account-wide (one-time
+    // manual step on 2026-04-26); the spans land in the aws/spans log
+    // group which X-Ray ingests automatically. No additional CW:* grants
+    // needed here beyond what the awslogs driver already provides.
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'xray:PutTraceSegments',
+          'xray:PutTelemetryRecords',
+          'xray:GetSamplingRules',
+          'xray:GetSamplingTargets',
+        ],
+        resources: ['*'],
+      })
+    );
+
     // Grant AgentCore Code Interpreter access for sandbox execution
     taskRole.addToPolicy(
       new iam.PolicyStatement({
@@ -370,6 +395,40 @@ export class ChatStack extends cdk.Stack {
         COGNITO_CLIENT_ID: props.cognitoUserPoolClientId ?? '',
         CODE_INTERPRETER_NETWORK_MODE: 'PUBLIC',
         CODE_INTERPRETER_SESSION_TTL: '3600',
+
+        // AgentCore Observability (ADR-040 / chimera-301e).
+        //
+        // ADOT Node autoinstrumentation registers a require hook at
+        // process start that wraps @aws-sdk/client-bedrock-runtime
+        // Converse calls with OTEL spans carrying GenAI semantic
+        // conventions (gen_ai.system_instructions,
+        // gen_ai.conversation.messages, gen_ai.tool.calls, token usage).
+        // Spans land in CloudWatch Logs' aws/spans group and surface
+        // in the CloudWatch GenAI Observability dashboard via X-Ray
+        // Transaction Search.
+        //
+        // The one-time account prereq (aws logs put-resource-policy +
+        // aws xray update-trace-segment-destination CloudWatchLogs)
+        // was run manually on 2026-04-26 and is idempotent.
+        AGENT_OBSERVABILITY_ENABLED: 'true',
+        OTEL_RESOURCE_ATTRIBUTES: [
+          'service.name=chimera-chat-gateway',
+          `service.version=${props.envName}`,
+          `aws.log.group.names=${taskLogGroup.logGroupName}`,
+          `cloud.resource_id=chimera-chat-gateway-${props.envName}`,
+        ].join(','),
+        OTEL_EXPORTER_OTLP_LOGS_HEADERS: [
+          `x-aws-log-group=${taskLogGroup.logGroupName}`,
+          'x-aws-log-stream=otel-logs',
+          'x-aws-metric-namespace=chimera-agent',
+        ].join(','),
+        OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+        OTEL_TRACES_EXPORTER: 'otlp',
+        // Loads ADOT autoinstrumentation at Node startup, before any
+        // application code imports the AWS SDK. Without this, spans
+        // are never emitted.
+        NODE_OPTIONS:
+          '--require @aws/aws-distro-opentelemetry-node-autoinstrumentation/register',
       },
       healthCheck: {
         command: ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1'],
