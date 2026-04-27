@@ -1,0 +1,6 @@
+import { Template } from "aws-cdk-lib/assertions";
+test("x", () => {
+  template.resourceCountIs("AWS::EC2::Subnet", 6);
+  expect(Object.keys(endpoints).length).toBe(14);
+  expect(template.findResources("AWS::EC2::VPC").length).toBe(1);
+});

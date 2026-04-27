@@ -30,6 +30,8 @@ import { diffCommand } from './commands/diff';
 import { triggerCommand } from './commands/trigger';
 import { logsCommand } from './commands/logs';
 import { ecsCommand } from './commands/ecs';
+import { registerTailPipelineCommand } from './commands/tail-pipeline';
+import { registerPredeployCommand } from './commands/predeploy';
 import { color } from './lib/color';
 
 // Version embedded at build time via `bun build --define '__CHIMERA_VERSION__="x.y.z"'`.
@@ -61,15 +63,17 @@ const COMMAND_GROUPS: Record<string, string[]> = {
     'cleanup',
     'redeploy',
     'monitor',
+    'tail-pipeline',
     'rollback',
     'trigger',
     'diff',
     'logs',
+    'ecs',
   ],
   Auth: ['login'],
   Agent: ['chat', 'session'],
   Admin: ['tenant', 'skill'],
-  Diagnostic: ['doctor', 'completion', 'ecs'],
+  Diagnostic: ['doctor', 'predeploy', 'completion'],
 };
 
 const program = new Command();
@@ -172,6 +176,8 @@ registerChatCommand(program);
 registerDoctorCommand(program);
 registerMonitorCommand(program);
 registerRollbackCommand(program);
+registerTailPipelineCommand(program);
+registerPredeployCommand(program);
 registerCompletionCommand(program);
 program.addCommand(diffCommand);
 program.addCommand(triggerCommand);

@@ -1,0 +1,5 @@
+phases:
+  build:
+    commands:
+      - bunx tsc --build packages/shared/tsconfig.json
+      - bunx tsc --build --force packages/core/tsconfig.json

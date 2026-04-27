@@ -1,0 +1,4 @@
+phases:
+  build:
+    commands:
+      - bunx tsc --build a

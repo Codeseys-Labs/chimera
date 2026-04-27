@@ -1,0 +1,5 @@
+version: 0.2
+phases:
+  build:
+    commands:
+      - bunx tsc --build packages/shared/tsconfig.json packages/core/tsconfig.json

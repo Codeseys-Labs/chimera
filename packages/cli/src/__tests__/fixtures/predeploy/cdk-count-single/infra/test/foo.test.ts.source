@@ -1,0 +1,1 @@
+test("x", () => { template.resourceCountIs("AWS::X", 1); });
