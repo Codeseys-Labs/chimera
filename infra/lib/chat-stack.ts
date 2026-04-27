@@ -305,6 +305,27 @@ export class ChatStack extends cdk.Stack {
       })
     );
 
+    // Wave-29: ADOT's OTLPAwsLogExporter signs its PutLogEvents /
+    // DescribeLog{Groups,Streams} calls with the TASK role, not the
+    // awslogs driver's execution role. Without these, the OTLP logs
+    // exporter silently drops every span-log and the aws/spans ingest
+    // for chat-gateway stays empty.
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'logs:PutLogEvents',
+          'logs:CreateLogStream',
+          'logs:DescribeLogGroups',
+          'logs:DescribeLogStreams',
+        ],
+        resources: [
+          `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:${taskLogGroup.logGroupName}:*`,
+          `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:aws/spans:*`,
+        ],
+      })
+    );
+
     // Grant AgentCore Code Interpreter access for sandbox execution
     taskRole.addToPolicy(
       new iam.PolicyStatement({

@@ -197,7 +197,19 @@ export {
   type MemoryEvolutionResult,
   type CronSuggestion,
   BEDROCK_MODELS,
+  // Wave-29: chimera-606c Phase 1 — composite fitness + lineage
+  type CompositeFitness,
+  type FitnessWeights,
+  type FitnessBaselines,
+  type LineageEdge,
+  DEFAULT_FITNESS_WEIGHTS,
+  computeCompositeFitness,
+  paretoDominates,
+  selectWinner,
 } from './evolution';
+
+// Chimera Forge (chimera-8681) — outer harness optimization loop
+export * from './forge';
 
 // AWS Tools module (Tier 1 first-class AWS service integration)
 export * from './aws-tools';

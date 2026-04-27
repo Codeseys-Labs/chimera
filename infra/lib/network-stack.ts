@@ -148,6 +148,11 @@ export class NetworkStack extends cdk.Stack {
       { id: 'Sns', service: 'sns' }, // pipeline + observability alarm topics
       { id: 'Sts', service: 'sts' }, // every boto3 AssumeRole hop
       { id: 'Kms', service: 'kms' }, // every CMK encrypt/decrypt call
+      // Wave-29: chat-gateway ADOT OTLP direct export. Without an xray
+      // PrivateLink, the Fargate task in private subnets can't reach
+      // https://xray.us-west-2.amazonaws.com/v1/traces and silently drops
+      // every span. (logs endpoint above already covers the /v1/logs path.)
+      { id: 'XRay', service: 'xray' },
     ];
 
     for (const ep of interfaceEndpointServices) {

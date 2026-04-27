@@ -15,6 +15,14 @@
 // Core types
 export * from './types';
 
+// Wave-29: Composite fitness + Pareto winner (chimera-606c Phase 1)
+export {
+  computeCompositeFitness,
+  paretoDominates,
+  selectWinner,
+  type FitnessBaselines,
+} from './composite-fitness';
+
 // Safety harness
 export {
   EvolutionSafetyHarness,

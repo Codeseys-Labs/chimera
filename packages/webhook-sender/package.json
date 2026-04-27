@@ -1,0 +1,35 @@
+{
+  "name": "@chimera/webhook-sender",
+  "version": "0.1.0",
+  "description": "Webhook delivery Lambda: HMAC-SHA256 signing, SSRF guard, and SQS-driven HTTPS fan-out for Chimera agent lifecycle events",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "watch": "tsc -w",
+    "test": "bun test",
+    "lint": "eslint src",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "webhook",
+    "hmac",
+    "sqs",
+    "lambda",
+    "chimera"
+  ],
+  "author": "Chimera Platform",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1016.0",
+    "@aws-sdk/client-secrets-manager": "^3.1016.0",
+    "@aws-sdk/lib-dynamodb": "^3.1016.0",
+    "ulidx": "^2.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.7.0"
+  }
+}

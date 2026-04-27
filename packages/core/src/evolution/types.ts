@@ -643,3 +643,79 @@ export const BEDROCK_MODELS: Record<string, number> = {
   'us.anthropic.claude-sonnet-4-6-v1:0': 0.009,
   'us.anthropic.claude-opus-4-6-v1:0': 0.045,
 };
+
+// ============================================================
+// Composite Fitness & Lineage (chimera-606c Phase 1)
+// ============================================================
+
+/**
+ * Multi-objective fitness score for a prompt variant.
+ *
+ * Replaces the single `avg_quality_score` used by A/B testing. Enables
+ * Pareto-dominance-based winner selection that accounts for cost, latency,
+ * and user satisfaction alongside task success. See
+ * `docs/designs/chimera-606c-dgm-evolution-integration.md` §3.1.
+ */
+export interface CompositeFitness {
+  /** Task success rate (0.0–1.0), derived from golden dataset pass rate */
+  taskSuccessRate: number;
+  /** Cost per 1,000 interactions in USD (lower is better) */
+  costPer1kInteractions: number;
+  /** p95 latency in milliseconds (lower is better) */
+  p95LatencyMs: number;
+  /** User satisfaction rate (0.0–1.0); -1 if no live signal yet */
+  userSatisfactionRate: number;
+  /** Number of evaluation samples backing this score */
+  sampleSize: number;
+  /** Weighted scalar for single-dimension ranking (0.0–1.0) */
+  compositeScore: number;
+  /** ISO 8601 timestamp when this score was computed */
+  computedAt: ISOTimestamp;
+}
+
+/**
+ * Weights for composite score computation. Must sum to ~1.0.
+ * Defaults in `DEFAULT_FITNESS_WEIGHTS`.
+ */
+export interface FitnessWeights {
+  /** Weight for taskSuccessRate (default 0.40) */
+  taskSuccessRate: number;
+  /** Weight for normalized cost efficiency (default 0.25) */
+  costEfficiency: number;
+  /** Weight for normalized latency efficiency (default 0.20) */
+  latencyEfficiency: number;
+  /** Weight for userSatisfactionRate (default 0.15) */
+  userSatisfaction: number;
+}
+
+/**
+ * Default fitness weights. Sum = 1.0.
+ * Overridable via SSM `/chimera/evolution/fitness-weights/{env}`.
+ */
+export const DEFAULT_FITNESS_WEIGHTS: FitnessWeights = {
+  taskSuccessRate: 0.40,
+  costEfficiency: 0.25,
+  latencyEfficiency: 0.20,
+  userSatisfaction: 0.15,
+};
+
+/**
+ * Parent-child edge in the variant lineage graph.
+ *
+ * Written once per variant creation to `chimera-evolution-state` via
+ * GSI3-lineage. Enables "what prompt did this winner descend from?"
+ * queries in a single DDB call. See design doc §3.2.
+ */
+export interface LineageEdge {
+  tenantId: string;
+  /** "ROOT" for generation-0 variants (no parent) */
+  parentVariantId: string;
+  childVariantId: string;
+  /** 0 for ROOT, N for N-th descendant */
+  generation: number;
+  /** child.compositeScore - parent.compositeScore */
+  fitnessDelta: number;
+  createdAt: ISOTimestamp;
+  /** Optional DDB TTL epoch seconds (default 90 days) */
+  ttl?: number;
+}
