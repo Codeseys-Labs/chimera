@@ -167,7 +167,7 @@ describe('NetworkStack', () => {
     });
 
     describe('Interface Endpoints', () => {
-      it('should create 13 interface VPC endpoints (7 original + 6 Wave-15c cost-opt additions)', () => {
+      it('should create 14 interface VPC endpoints (7 original + 6 Wave-15c + 1 Wave-29 xray)', () => {
         const template = Template.fromStack(stack);
         const endpoints = template.findResources('AWS::EC2::VPCEndpoint', {
           Properties: {
@@ -175,7 +175,10 @@ describe('NetworkStack', () => {
           },
         });
 
-        expect(Object.keys(endpoints).length).toBe(13);
+        // Wave-29: xray endpoint added so chat-gateway Fargate task in private
+        // subnets can reach https://xray.us-west-2.amazonaws.com/v1/traces
+        // for ADOT direct export (chimera-301e). See docs/designs/chimera-forge-meta-harness.md.
+        expect(Object.keys(endpoints).length).toBe(14);
       });
 
       it('should enable private DNS for interface endpoints', () => {
