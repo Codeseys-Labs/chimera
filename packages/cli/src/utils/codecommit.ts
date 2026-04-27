@@ -60,41 +60,93 @@ export interface SkippedLargeFile {
 const IAC_SUSPECT_EXTENSIONS = new Set(['.ts', '.json', '.yaml', '.yml']);
 
 /**
- * Retry a CodeCommit send() call with exponential backoff when the service
- * returns a throttling response. CodeCommit silently drops CreateCommit
- * calls under sustained load; without retries, `chimera sync` fails the
- * whole deploy mid-batch instead of backing off for a few seconds.
+ * Module-level token bucket paces CreateCommit calls below the CodeCommit
+ * account-wide write-API rate. A 67-batch deploy with zero pacing
+ * synchronizes on the throttle wall and triggers "Rate exceeded" even with
+ * retries. 2 tokens/sec with a 5-token burst keeps steady-state well under
+ * the observed ~5-10 TPS ceiling while still allowing small bursts.
+ */
+const CODECOMMIT_BUCKET = {
+  capacity: 5,
+  tokens: 5,
+  refillPerSec: 2,
+  lastRefill: Date.now(),
+};
+
+async function acquireCodeCommitToken(): Promise<void> {
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const now = Date.now();
+    const elapsedSec = (now - CODECOMMIT_BUCKET.lastRefill) / 1000;
+    CODECOMMIT_BUCKET.tokens = Math.min(
+      CODECOMMIT_BUCKET.capacity,
+      CODECOMMIT_BUCKET.tokens + elapsedSec * CODECOMMIT_BUCKET.refillPerSec,
+    );
+    CODECOMMIT_BUCKET.lastRefill = now;
+    if (CODECOMMIT_BUCKET.tokens >= 1) {
+      CODECOMMIT_BUCKET.tokens -= 1;
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/**
+ * Retry a CodeCommit send() call with exponential backoff + full jitter when
+ * the service returns a throttling response. CodeCommit silently drops
+ * CreateCommit calls under sustained load; without retries, `chimera sync`
+ * fails the whole deploy mid-batch instead of backing off.
  *
- * Retriable error names:
- *   - ThrottlingException
- *   - ProvisionedThroughputExceededException
+ * Token bucket (above) paces steady-state calls. This function handles the
+ * sporadic throttle spike that slips past the pacing, using AWS's recommended
+ * full-jitter backoff to avoid synchronized retries across parallel deploys.
  *
- * Backoff: 1s, 2s, 4s between attempts (3 retries total on top of the
- * initial try, so worst-case wait is 7s before surfacing the error).
+ * Retriable signals (Wave-30: expanded):
+ *   - name === ThrottlingException | ProvisionedThroughputExceededException |
+ *     RequestLimitExceeded | LimitExceededException | TooManyRequestsException
+ *   - $metadata.httpStatusCode === 429
+ *   - message contains "Rate exceeded" (legacy envelope from CodeCommit's
+ *     HTTP layer that doesn't populate `name` consistently)
+ *
+ * Backoff: exp with full jitter, base 500ms, cap 30s. Worst-case tail ~30s.
  */
 async function withThrottleRetry<T>(op: () => Promise<T>): Promise<T> {
-  const RETRIABLE = new Set([
+  const RETRIABLE_NAMES = new Set([
     'ThrottlingException',
     'ProvisionedThroughputExceededException',
+    'RequestLimitExceeded',
+    'LimitExceededException',
+    'TooManyRequestsException',
   ]);
-  const MAX_ATTEMPTS = 4; // initial + 3 retries
+  const MAX_ATTEMPTS = 6; // initial + 5 retries
+  const BASE_MS = 500;
+  const CAP_MS = 30_000;
+
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    await acquireCodeCommitToken();
     try {
       return await op();
     } catch (error: any) {
       attempt += 1;
       const name = error?.name ?? '';
-      if (!RETRIABLE.has(name) || attempt >= MAX_ATTEMPTS) {
+      const status = error?.$metadata?.httpStatusCode;
+      const msg = String(error?.message ?? '');
+      const retriable =
+        RETRIABLE_NAMES.has(name) || status === 429 || /Rate exceeded/i.test(msg);
+
+      if (!retriable || attempt >= MAX_ATTEMPTS) {
         throw error;
       }
-      // 1s, 2s, 4s
-      const delayMs = 1000 * Math.pow(2, attempt - 1);
+      // Full jitter: random(0, min(cap, base * 2^attempt))
+      const ceilingMs = Math.min(CAP_MS, BASE_MS * Math.pow(2, attempt));
+      const delayMs = Math.floor(Math.random() * ceilingMs);
+      const tag = name || (status === 429 ? 'HTTP 429' : 'Rate exceeded');
       console.log(
         color.gray(
-          `  CodeCommit ${name} — retrying in ${Math.round(delayMs / 1000)}s ` +
-            `(attempt ${attempt}/${MAX_ATTEMPTS - 1})`,
+          `  CodeCommit ${tag} — retrying in ${Math.round(delayMs / 100) / 10}s ` +
+            `(attempt ${attempt}/${MAX_ATTEMPTS - 1}, full jitter)`,
         ),
       );
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
