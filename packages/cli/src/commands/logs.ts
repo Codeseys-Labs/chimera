@@ -18,7 +18,7 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import { CodePipelineClient } from '@aws-sdk/client-codepipeline';
+import { CodePipelineClient, ListPipelineExecutionsCommand } from '@aws-sdk/client-codepipeline';
 import { CodeBuildClient } from '@aws-sdk/client-codebuild';
 import { CloudWatchLogsClient } from '@aws-sdk/client-cloudwatch-logs';
 import { loadWorkspaceConfig } from '../utils/workspace.js';
@@ -104,8 +104,18 @@ function printReport(report: FailedStageReport, tailLines: number): void {
     }
   }
   console.log('');
-  console.log(color.bold(`  Last ${report.tail?.length ?? 0} log lines:`));
-  printTail(report.tail);
+  if (report.logsFetchError) {
+    console.log(color.red('  ⚠  Could not fetch CodeBuild / CloudWatch Logs output:'));
+    console.log('    ' + report.logsFetchError);
+    console.log(
+      color.gray(
+        '    (Check IAM perms: codebuild:BatchGetBuilds, logs:GetLogEvents)',
+      ),
+    );
+  } else {
+    console.log(color.bold(`  Last ${report.tail?.length ?? 0} log lines:`));
+    printTail(report.tail);
+  }
   console.log('');
   console.log(
     color.gray(
@@ -246,11 +256,7 @@ async function runBuildLogs(
     let executionId = opts.executionId;
     if (!executionId) {
       const latest = (
-        await cp.send(
-          new (
-            await import('@aws-sdk/client-codepipeline')
-          ).ListPipelineExecutionsCommand({ pipelineName, maxResults: 1 }),
-        )
+        await cp.send(new ListPipelineExecutionsCommand({ pipelineName, maxResults: 1 }))
       ).pipelineExecutionSummaries?.[0];
       executionId = latest?.pipelineExecutionId;
     }

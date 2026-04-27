@@ -139,9 +139,12 @@ async function withThrottleRetry<T>(op: () => Promise<T>): Promise<T> {
       if (!retriable || attempt >= MAX_ATTEMPTS) {
         throw error;
       }
-      // Full jitter: random(0, min(cap, base * 2^attempt))
+      // Full jitter: random(0, min(cap, base * 2^attempt)), with a small
+      // floor so concurrent callers retrying in the same event-loop tick
+      // don't synchronize at zero delay (reviewed Wave-30).
+      const FLOOR_MS = 250;
       const ceilingMs = Math.min(CAP_MS, BASE_MS * Math.pow(2, attempt));
-      const delayMs = Math.floor(Math.random() * ceilingMs);
+      const delayMs = Math.max(FLOOR_MS, Math.floor(Math.random() * ceilingMs));
       const tag = name || (status === 429 ? 'HTTP 429' : 'Rate exceeded');
       console.log(
         color.gray(

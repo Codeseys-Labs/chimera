@@ -66,6 +66,14 @@ export interface FailedStageReport {
   tail?: LogLine[];
   logGroup?: string;
   logStream?: string;
+  /**
+   * Populated when the stage failed but we couldn't resolve CodeBuild /
+   * CloudWatch Logs output — typically an IAM permission gap on the
+   * caller (e.g. missing `codebuild:BatchGetBuilds` or
+   * `logs:GetLogEvents`). Lets callers distinguish "no logs to fetch"
+   * from "we have logs but can't read them."
+   */
+  logsFetchError?: string;
 }
 
 /**
@@ -279,10 +287,13 @@ export async function buildFailedStageReport(
         tailLines,
       );
     }
-  } catch {
+  } catch (err: any) {
     // Best-effort: if BatchGetBuilds / GetLogEvents fail (e.g. the action
-    // provider isn't CodeBuild), we still return the stage report so the
-    // caller can print what it has.
+    // provider isn't CodeBuild, or the caller lacks IAM perms), surface the
+    // error so callers can distinguish "logs unreadable" from "logs empty."
+    const name = err?.name ?? '';
+    const msg = err?.message ?? String(err);
+    report.logsFetchError = name ? `${name}: ${msg}` : msg;
   }
 
   return report;
