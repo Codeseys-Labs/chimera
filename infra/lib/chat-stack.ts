@@ -422,8 +422,15 @@ export class ChatStack extends cdk.Stack {
           'x-aws-log-stream=otel-logs',
           'x-aws-metric-namespace=chimera-agent',
         ].join(','),
+        // Agentless (no sidecar): ADOT sends traces and logs directly
+        // to CloudWatch's OTLP endpoints via SigV4-signed HTTP. Without
+        // these, ADOT defaults to http://localhost:4318 which has no
+        // listener in our Fargate task and drops every span silently.
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `https://xray.${cdk.Stack.of(this).region}.amazonaws.com/v1/traces`,
+        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `https://logs.${cdk.Stack.of(this).region}.amazonaws.com/v1/logs`,
         OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
         OTEL_TRACES_EXPORTER: 'otlp',
+        OTEL_LOGS_EXPORTER: 'otlp',
         // Loads ADOT autoinstrumentation at Node startup, before any
         // application code imports the AWS SDK. Without this, spans
         // are never emitted.
