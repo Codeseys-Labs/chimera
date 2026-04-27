@@ -38,6 +38,8 @@
     "@aws-sdk/client-cloudformation": "^3.0.0",
     "@aws-sdk/client-codecommit": "^3.0.0",
     "@aws-sdk/client-codepipeline": "^3.0.0",
+    "@aws-sdk/client-codebuild": "^3.0.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.0.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",

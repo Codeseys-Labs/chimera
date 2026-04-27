@@ -27,6 +27,7 @@ import { registerMonitorCommand } from './commands/monitor';
 import { registerCompletionCommand } from './commands/completion';
 import { diffCommand } from './commands/diff';
 import { triggerCommand } from './commands/trigger';
+import { logsCommand } from './commands/logs';
 import { color } from './lib/color';
 
 // Version embedded at build time via `bun build --define '__CHIMERA_VERSION__="x.y.z"'`.
@@ -60,6 +61,7 @@ const COMMAND_GROUPS: Record<string, string[]> = {
     'monitor',
     'trigger',
     'diff',
+    'logs',
   ],
   Auth: ['login'],
   Agent: ['chat', 'session'],
@@ -169,6 +171,7 @@ registerMonitorCommand(program);
 registerCompletionCommand(program);
 program.addCommand(diffCommand);
 program.addCommand(triggerCommand);
+program.addCommand(logsCommand);
 
 // exitOverride() converts Commander's process.exit() into thrown CommanderError.
 // Exit code semantics: 0 = success (help/version), 2 = usage error, 1 = runtime.
