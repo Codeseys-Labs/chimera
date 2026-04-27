@@ -24,10 +24,12 @@ import { registerLoginCommand } from './commands/login';
 import { registerChatCommand } from './commands/chat';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerMonitorCommand } from './commands/monitor';
+import { registerRollbackCommand } from './commands/rollback';
 import { registerCompletionCommand } from './commands/completion';
 import { diffCommand } from './commands/diff';
 import { triggerCommand } from './commands/trigger';
 import { logsCommand } from './commands/logs';
+import { ecsCommand } from './commands/ecs';
 import { color } from './lib/color';
 
 // Version embedded at build time via `bun build --define '__CHIMERA_VERSION__="x.y.z"'`.
@@ -59,6 +61,7 @@ const COMMAND_GROUPS: Record<string, string[]> = {
     'cleanup',
     'redeploy',
     'monitor',
+    'rollback',
     'trigger',
     'diff',
     'logs',
@@ -66,7 +69,7 @@ const COMMAND_GROUPS: Record<string, string[]> = {
   Auth: ['login'],
   Agent: ['chat', 'session'],
   Admin: ['tenant', 'skill'],
-  Diagnostic: ['doctor', 'completion'],
+  Diagnostic: ['doctor', 'completion', 'ecs'],
 };
 
 const program = new Command();
@@ -168,10 +171,12 @@ registerLoginCommand(program);
 registerChatCommand(program);
 registerDoctorCommand(program);
 registerMonitorCommand(program);
+registerRollbackCommand(program);
 registerCompletionCommand(program);
 program.addCommand(diffCommand);
 program.addCommand(triggerCommand);
 program.addCommand(logsCommand);
+program.addCommand(ecsCommand);
 
 // exitOverride() converts Commander's process.exit() into thrown CommanderError.
 // Exit code semantics: 0 = success (help/version), 2 = usage error, 1 = runtime.
