@@ -329,6 +329,79 @@ describe('CedarAuthorization', () => {
     });
   });
 
+  // chimera-2b2a: schedule policy coverage (design-review CRITICAL 2).
+  describe('authorize - Schedule policies', () => {
+    it('should DENY cross-tenant Schedule::Read via schedule-read-cross-tenant-deny', () => {
+      const request: AuthorizationRequest = {
+        principal: { type: 'User', id: 'user-123' },
+        action: { type: 'Schedule', id: 'Read' },
+        resource: {
+          type: 'Schedule',
+          id: 'sched-xyz',
+          attributes: { tenantId: 'tenant-b' },
+        },
+        context: {
+          tenantId: 'tenant-a',
+          userGroups: ['Users'],
+          isAdmin: false,
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      const result = cedar.authorize(request);
+      expect(result.decision).toBe('Deny');
+      // Reason-specificity: the Read-specific deny policy must fire, not
+      // just the generic Schedule::* forbid. If the id flips to the
+      // generic policy, the audit trail gets less precise and this test
+      // is the tripwire.
+      expect(result.reasons).toContain('schedule-read-cross-tenant-deny');
+    });
+
+    it('should DENY cross-tenant Schedule::Update via schedule-cross-tenant-deny', () => {
+      const request: AuthorizationRequest = {
+        principal: { type: 'User', id: 'admin-123' },
+        action: { type: 'Schedule', id: 'Update' },
+        resource: {
+          type: 'Schedule',
+          id: 'sched-xyz',
+          attributes: { tenantId: 'tenant-b' },
+        },
+        context: {
+          tenantId: 'tenant-a',
+          userGroups: ['Administrators'],
+          isAdmin: true,
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      const result = cedar.authorize(request);
+      expect(result.decision).toBe('Deny');
+      expect(result.reasons).toContain('schedule-cross-tenant-deny');
+    });
+
+    it('should ALLOW same-tenant Schedule::Read for regular users', () => {
+      const request: AuthorizationRequest = {
+        principal: { type: 'User', id: 'user-123' },
+        action: { type: 'Schedule', id: 'Read' },
+        resource: {
+          type: 'Schedule',
+          id: 'sched-xyz',
+          attributes: { tenantId: 'tenant-a' },
+        },
+        context: {
+          tenantId: 'tenant-a',
+          userGroups: ['Users'],
+          isAdmin: false,
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      const result = cedar.authorize(request);
+      expect(result.decision).toBe('Allow');
+      expect(result.reasons).toContain('schedule-read-own-tenant');
+    });
+  });
+
   describe('authorize - tier-based restrictions', () => {
     it('should DENY trial tenants from installing premium skills', () => {
       const request: AuthorizationRequest = {

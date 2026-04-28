@@ -457,3 +457,23 @@ export {
   type RevokeUserPairingParams,
   type ResolvedUserContext,
 } from './auth';
+
+// Scheduling module (chimera-2b2a EventBridge scheduled tasks)
+export {
+  ScheduleService,
+  ScheduleLimitExceededError,
+  InvalidScheduleExpressionError,
+  ScheduleNotFoundError,
+  SCHEDULE_LIMITS_BY_TIER,
+  type ScheduleServiceConfig,
+  type ScheduleDynamoDBClient,
+  type EventBridgeSchedulerClient,
+  type CreateScheduleParams,
+  type UpdateScheduleParams,
+  type ScheduleItem,
+  type ScheduleRun,
+  type ScheduleRunStatus,
+  type CreateScheduleInput,
+  type UpdateScheduleInput,
+  type ScheduleTenantTier,
+} from './scheduling';

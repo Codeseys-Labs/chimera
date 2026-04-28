@@ -1,0 +1,8 @@
+# Chimera schedule dispatcher dependencies.
+#
+# Both boto3 and requests are vendored with the Lambda Python 3.12 runtime
+# (boto3) or satisfied via the stdlib (urllib for HTTP + HMAC). This file
+# is kept for documentation + future-proofing so maintainers know which
+# libraries the handler relies on.
+boto3>=1.34.0
+requests>=2.31.0

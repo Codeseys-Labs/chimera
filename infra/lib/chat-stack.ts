@@ -36,6 +36,18 @@ export interface ChatStackProps extends cdk.StackProps {
    * If omitted, DataStack falls back to its legacy broad ECS-SG rule.
    */
   daxSecurityGroup?: ec2.ISecurityGroup;
+  /**
+   * chimera-2b2a wiring: ARN of the schedulerRole from OrchestrationStack.
+   * Chat-gateway's ECS task role gets scheduler:* permissions scoped to this
+   * role via iam:PassRole with PassedToService=scheduler.amazonaws.com.
+   */
+  schedulerRoleArn?: string;
+  /**
+   * chimera-2b2a wiring: ARN of the HMAC signing key secret from
+   * OrchestrationStack. Chat-gateway's schedule-token middleware reads it
+   * on dispatcher-originated requests to /chat/stream.
+   */
+  scheduleSigningKeySecretArn?: string;
 }
 
 /**
@@ -325,6 +337,64 @@ export class ChatStack extends cdk.Stack {
         ],
       })
     );
+
+    // chimera-2b2a: EventBridge Scheduler CRUD + passRole + signing-key read.
+    // Opt-in: only wired when the orchestration stack's outputs were passed in.
+    // Without these, schedule routes 4xx with a clear message; chat traffic
+    // is unaffected.
+    if (props.schedulerRoleArn) {
+      taskRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'dynamodb:GetItem',
+            'dynamodb:PutItem',
+            'dynamodb:UpdateItem',
+            'dynamodb:DeleteItem',
+            'dynamodb:Query',
+          ],
+          resources: [
+            `arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-schedules-${props.envName}`,
+            `arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-schedules-${props.envName}/index/*`,
+          ],
+        })
+      );
+      taskRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'scheduler:CreateSchedule',
+            'scheduler:UpdateSchedule',
+            'scheduler:DeleteSchedule',
+            'scheduler:GetSchedule',
+            'scheduler:ListSchedules',
+          ],
+          resources: [
+            `arn:aws:scheduler:${this.region}:${this.account}:schedule/chimera-agent-schedules-${props.envName}/*`,
+            `arn:aws:scheduler:${this.region}:${this.account}:schedule-group/chimera-agent-schedules-${props.envName}`,
+          ],
+        })
+      );
+      taskRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ['iam:PassRole'],
+          resources: [props.schedulerRoleArn],
+          conditions: {
+            StringEquals: { 'iam:PassedToService': 'scheduler.amazonaws.com' },
+          },
+        })
+      );
+      if (props.scheduleSigningKeySecretArn) {
+        taskRole.addToPolicy(
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ['secretsmanager:GetSecretValue'],
+            resources: [props.scheduleSigningKeySecretArn],
+          })
+        );
+      }
+    }
 
     // Grant AgentCore Code Interpreter access for sandbox execution
     taskRole.addToPolicy(

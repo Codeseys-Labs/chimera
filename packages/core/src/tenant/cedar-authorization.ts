@@ -137,6 +137,67 @@ export const DEFAULT_POLICIES: CedarPolicy[] = [
     conditions: ['resource.tier == "TRIAL"', 'resource.skillType == "premium"'],
     description: 'Trial tenants cannot install premium skills',
   },
+  // chimera-2b2a: EventBridge scheduled tasks (design doc §5).
+  // Admin-gated create/update, tenant-scoped reads, explicit cross-tenant
+  // deny covers the load-bearing forbid even though the generic
+  // cross-tenant-isolation forbid above would already catch it — a
+  // dedicated policy makes the audit trail explicit ("why was this
+  // denied? schedule-cross-tenant-deny, not a generic rule") per the
+  // CedarAuthorization reason-assertion pattern used in tests.
+  {
+    id: 'schedule-create-tenant-admin',
+    effect: 'permit',
+    principal: 'User::*',
+    action: 'Schedule::Create',
+    resource: 'Tenant::*',
+    conditions: ['context.isAdmin == true', 'context.tenantId == resource.tenantId'],
+    description: 'Tenant admins can create schedules in their own tenant',
+  },
+  {
+    id: 'schedule-read-own-tenant',
+    effect: 'permit',
+    principal: 'User::*',
+    action: 'Schedule::Read',
+    resource: 'Schedule::*',
+    conditions: ['context.tenantId == resource.tenantId'],
+    description: 'Users can read schedules in their own tenant',
+  },
+  {
+    id: 'schedule-update-tenant-admin',
+    effect: 'permit',
+    principal: 'User::*',
+    action: 'Schedule::Update',
+    resource: 'Schedule::*',
+    conditions: ['context.isAdmin == true', 'context.tenantId == resource.tenantId'],
+    description: 'Tenant admins can update schedules in their own tenant',
+  },
+  {
+    id: 'schedule-cross-tenant-deny',
+    effect: 'forbid',
+    principal: 'User::*',
+    action: 'Schedule::*',
+    resource: 'Schedule::*',
+    conditions: ['context.tenantId != resource.tenantId'],
+    description:
+      'Forbid cross-tenant schedule operations (Create/Read/Update/Delete) — explicit alongside cross-tenant-isolation for audit clarity',
+  },
+  // Design-review CRITICAL 2: Schedule::Read needs its own explicit
+  // cross-tenant deny alongside the Schedule::* catch-all. The reason
+  // assertion in cedar-authorization.test.ts pins the specific policy id;
+  // without this dedicated entry, a Read-side leak would surface
+  // schedule-cross-tenant-deny (generic) in the audit trail rather than
+  // the Read-specific rule — making cross-policy regressions harder to
+  // triage.
+  {
+    id: 'schedule-read-cross-tenant-deny',
+    effect: 'forbid',
+    principal: 'User::*',
+    action: 'Schedule::Read',
+    resource: 'Schedule::*',
+    conditions: ['context.tenantId != resource.tenantId'],
+    description:
+      'Forbid cross-tenant schedule reads (explicit companion to schedule-cross-tenant-deny)',
+  },
 ];
 
 /**

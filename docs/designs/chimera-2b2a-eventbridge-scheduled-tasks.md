@@ -277,3 +277,59 @@ the 10M account quota.
 Metric filters on dispatcher logs:
 - `schedule_dispatch_success_count`, `_failure_count`, `_skipped_count`
 Dashboard widget for per-tenant execution rate.
+
+---
+
+## Addendum (Wave-32 Phase-6 review): security + correctness amendments
+
+The design above was reviewed during Wave-32 build. Seven findings (4 CRITICAL, 6 HIGH, 3 MED) were resolved by the following mandatory amendments. Implementation MUST follow this section where it conflicts with earlier text.
+
+### CRITICAL-1: dispatcher tenantId derivation
+
+EB Scheduler `Input` must NOT carry `tenantId`. The dispatcher Lambda derives tenantId from `aws.scheduler.schedule-arn` context attribute (format `arn:aws:scheduler:*:*:schedule/chimera-agent-schedules-{env}/{tenantId}#{scheduleId}`), parses the name portion after the last `/`, splits on `#`. Cross-tenant forgery is impossible because the arn is provided by AWS, not the Input.
+
+The DDB GetItem key uses this parsed tenantId, and the post-fetch assert (`item.tenantId == parsed`) is now non-tautological.
+
+### CRITICAL-3: schedule-name tenant prefix
+
+`scheduler.CreateScheduleCommand.Name` = `{tenantId}#{scheduleId}` to enforce global uniqueness within the `chimera-agent-schedules-{env}` group. DDB key remains `(TENANT#{tenantId}, SCHEDULE#{scheduleId})` — the prefix is only at the EB Scheduler layer.
+
+### CRITICAL-5: HMAC binds body-hash
+
+Signing payload = `{tenantId}:{scheduleId}:{unixTs}:{sha256_hex(body)}`.
+
+Dispatcher (Python) computes `hashlib.sha256(body.encode()).hexdigest()` before calling HMAC. Middleware (TypeScript) buffers the request body and computes `crypto.createHash('sha256').update(body).digest('hex')` before verifying HMAC. 5-min timestamp tolerance preserved.
+
+Without body-hash binding, a captured token replays arbitrary bodies within the 5-min window under the victim tenant's context — unacceptable.
+
+### CRITICAL-2: Cedar `Schedule::Read` cross-tenant deny
+
+Add a fifth Cedar policy (originally §5 only covered Create/Update/Delete):
+
+```typescript
+{
+  id: 'schedule-read-cross-tenant-deny',
+  effect: 'forbid',
+  principal: 'User::*',
+  action: 'Schedule::Read',
+  resource: 'Schedule::*',
+  conditions: ['context.tenantId != resource.tenantId'],
+}
+```
+
+### HIGH amendments
+
+- **Expression validation**: reject `rate(N second)` — EB Scheduler doesn't guarantee sub-minute fire precision. Minimum accepted rate is `rate(1 minute)`. Document the ~60s variance on `rate(1 minute)` in API response.
+- **Stuck-RUNNING recovery**: DDB skip condition becomes `attribute_not_exists(lastRunStatus) OR lastRunStatus <> :running OR lastRunStartedAt < :fifteen_min_ago`. New attribute `lastRunStartedAt` (ISO) on every RUN start. Prevents permanent SKIP on Lambda crash.
+- **ALB discovery**: dispatcher Lambda is VPC-attached (ALB is private-subnet). Env var `CHAT_GATEWAY_ALB_DNS` populated from CDK output. Document ~1s ENI cold-start (correcting §2's "100-300ms" claim).
+- **SSE packaging**: dispatcher uses `urllib3` only (bundled with Python 3.12 Lambda runtime — no layer). Manual SSE parsing: stream is complete on HTTP close OR `data: [DONE]` sentinel (matches AI SDK v5 wire format).
+- **schedulerArn clarification**: the DDB-stored `schedulerArn` is the full EB Scheduler arn, not the name. Schedule-service composes arns from known pieces on delete/update.
+
+### MED amendments
+
+- **`expressionType` attribute**: new DDB attribute, derived at create-time via regex prefix (`rate(`/`cron(`/`at(`). Populates GSI2PK = `${tenantId}#${expressionType}`.
+- **timezone persistence**: set `ScheduleExpressionTimezone` on `CfnSchedule` AND store in DDB. Not just DDB.
+- **List pagination**: `GET /tenants/:tenantId/schedules` and `GET /tenants/:tenantId/schedules/:id/runs` accept `limit` (default 20, max 100) and `nextToken` (opaque base64 of DDB `LastEvaluatedKey`).
+- **Idempotency**: EB Scheduler retries (maxAttempts=3) can double-charge tokens if the first attempt completed partial agent work. Dispatcher writes `runId = aws.scheduler.execution-id` to DDB with `attribute_not_exists(SK)` condition — duplicate execution-id = 200 OK, no-op (idempotent).
+- **Signing key rotation**: dual-key verify window. Middleware tries HMAC with current key first, then previous key (15-minute overlap during rotation).
+

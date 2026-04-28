@@ -31,6 +31,7 @@ import slackRouter from './routes/slack';
 import teamsRouter from './routes/teams';
 import telegramRouter from './routes/telegram';
 import tenantRouter from './routes/tenant';
+import schedulesRouter from './routes/schedules';
 import { ErrorResponse } from './types';
 
 // Create Hono app
@@ -49,6 +50,11 @@ app.route('/auth', authRouter);
 app.use('/tenants/*', authenticateJWT);
 app.use('/tenants/*', extractTenantContext);
 app.route('/tenants', tenantRouter);
+
+// EventBridge Scheduler management (chimera-2b2a). Mounted at a more specific
+// path so Hono matches it before the generic tenant router. Inherits the
+// authenticateJWT + extractTenantContext middleware already applied above.
+app.route('/tenants/:tenantId/schedules', schedulesRouter);
 
 // Handle Slack URL verification before tenant middleware.
 // Slack sends challenges without tenant context during initial setup.

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -9,14 +10,43 @@ import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
 import { ChimeraQueue } from '../constructs/chimera-queue';
 import { ChimeraLambda } from '../constructs/chimera-lambda';
+import { ChimeraTable } from '../constructs/chimera-table';
 import { logRetentionFor } from '../constructs/log-retention';
 
 export interface OrchestrationStackProps extends cdk.StackProps {
   envName: string;
   platformKey: kms.IKey;
+  /**
+   * Internal chat-gateway URL the schedule dispatcher will POST to, including
+   * the `/chat/stream` path (e.g. `http://internal-alb.example.com/chat/stream`).
+   *
+   * Left optional so OrchestrationStack does not create a circular dependency
+   * on ChatStack: `chimera.ts` wires the concrete ALB DNS into this prop once
+   * ChatStack is synthesized. When omitted a deploy-time placeholder is used
+   * and the dispatcher Lambda will fail loudly if it is ever invoked.
+   */
+  chatGatewayInternalUrl?: string;
+  /**
+   * VPC to attach the schedule-dispatcher Lambda to. Required in production
+   * so the Lambda can reach the internal chat-gateway ALB; optional in tests.
+   * ENI-backed cold starts cost ~1–2s extra (HIGH 6) — acceptable because
+   * schedule firings are not latency-sensitive.
+   */
+  vpc?: ec2.IVpc;
+  /**
+   * ALB security group owned by ChatStack/NetworkStack. When provided, the
+   * dispatcher stack creates its own Lambda SG and registers an ingress rule
+   * on the ALB SG for port 80 so dispatcher -> ALB traffic flows without
+   * widening the ALB SG to the whole VPC.
+   */
+  albSecurityGroup?: ec2.ISecurityGroup;
 }
 
 /**
@@ -39,6 +69,11 @@ export class OrchestrationStack extends cdk.Stack {
   public readonly agentTaskQueue: sqs.Queue;
   public readonly agentMessageQueue: sqs.Queue;
   public readonly schedulerGroup: scheduler.CfnScheduleGroup;
+  public readonly schedulerRole: iam.Role;
+  public readonly schedulesTable: dynamodb.ITable;
+  public readonly scheduleDispatcher: lambda.IFunction;
+  public readonly scheduleDispatcherDlq: sqs.Queue;
+  public readonly scheduleSigningKeySecret: secretsmanager.ISecret;
   public readonly pipelineBuildStateMachine: stepfunctions.StateMachine;
   public readonly dataAnalysisStateMachine: stepfunctions.StateMachine;
   public readonly backgroundTaskStateMachine: stepfunctions.StateMachine;
@@ -211,18 +246,178 @@ export class OrchestrationStack extends cdk.Stack {
       name: `chimera-agent-schedules-${props.envName}`,
     });
 
-    const schedulerRole = new iam.Role(this, 'SchedulerRole', {
+    this.schedulerRole = new iam.Role(this, 'SchedulerRole', {
       roleName: `chimera-scheduler-${props.envName}`,
       assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
-      description: 'Allows EventBridge Scheduler to publish agent task events',
+      description: 'Allows EventBridge Scheduler to invoke the chimera schedule dispatcher Lambda',
+    });
+    const schedulerRole = this.schedulerRole;
+
+    // ----------------------------------------------------------------------
+    // chimera-2b2a: schedules table + dispatcher Lambda + signing-key secret
+    // ----------------------------------------------------------------------
+    // 7th ChimeraTable. Backs `packages/core/src/scheduling/schedule-service.ts`.
+    // GSI1: list-by-tenant (sorted by createdAt).
+    // GSI2: list-by-expression-type within a tenant (e.g. all cron schedules).
+    // All GSI queries MUST include FilterExpression='tenantId = :tid' per the
+    // project's tenant-isolation convention (CLAUDE.md).
+    const schedulesChimera = new ChimeraTable(this, 'SchedulesTable', {
+      tableName: `chimera-schedules-${props.envName}`,
+      encryptionKey: props.platformKey,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'GSI1-tenant-created',
+          partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+        {
+          indexName: 'GSI2-tenant-expr-type',
+          partitionKey: { name: 'GSI2PK', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'GSI2SK', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+      ],
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+    this.schedulesTable = schedulesChimera.table;
+
+    // HMAC signing key shared between the dispatcher Lambda and the
+    // chat-gateway /chat/stream endpoint. Quarterly rotation is managed
+    // out-of-band (Secrets Manager rotation-via-Lambda would itself need
+    // auth coordination, so we intentionally defer automated rotation to a
+    // separate rotation-runbook tool — see docs/runbooks/ once available).
+    // The consumer validates the secret in chat-gateway's schedule-token
+    // middleware (Workstream B).
+    this.scheduleSigningKeySecret = new secretsmanager.Secret(this, 'ScheduleSigningKey', {
+      secretName: `chimera/schedule-signing-key-${props.envName}`,
+      description: 'HMAC-SHA256 key used to authenticate scheduler -> chat-gateway invocations',
+      generateSecretString: {
+        secretStringTemplate: JSON.stringify({ kid: `chimera-schedule-${props.envName}-v1` }),
+        generateStringKey: 'signingKey',
+        excludePunctuation: false,
+        passwordLength: 64,
+      },
+      encryptionKey: props.platformKey,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    schedulerRole.addToPolicy(
+    // Dispatcher SG — dedicated SG so the ALB SG can narrowly ingress-allow
+    // only dispatcher Lambdas, instead of widening to the whole VPC. Created
+    // only when a VPC is supplied; in region-agnostic tests we skip VPC
+    // wiring and the Lambda runs outside a VPC against the placeholder URL
+    // (HIGH 6 — real deployments MUST pass `props.vpc` + `props.albSecurityGroup`).
+    let dispatcherLambdaSg: ec2.SecurityGroup | undefined;
+    if (props.vpc) {
+      dispatcherLambdaSg = new ec2.SecurityGroup(this, 'ScheduleDispatcherSG', {
+        vpc: props.vpc,
+        securityGroupName: `chimera-schedule-dispatcher-${props.envName}`,
+        description:
+          'Egress-only SG for the chimera schedule dispatcher Lambda -> internal chat-gateway ALB',
+        allowAllOutbound: true,
+      });
+      if (props.albSecurityGroup) {
+        props.albSecurityGroup.addIngressRule(
+          dispatcherLambdaSg,
+          ec2.Port.tcp(80),
+          'Schedule dispatcher Lambda -> chat-gateway ALB (HTTP)',
+        );
+        props.albSecurityGroup.addIngressRule(
+          dispatcherLambdaSg,
+          ec2.Port.tcp(443),
+          'Schedule dispatcher Lambda -> chat-gateway ALB (HTTPS)',
+        );
+      }
+    }
+
+    // Dispatcher Lambda — the security chokepoint between EventBridge
+    // Scheduler and the chat-gateway. Reads the schedule row, re-validates
+    // the tenant, signs an HMAC token, POSTs to /chat/stream, drains the
+    // SSE response, and writes a SCHEDRUN# log entry to chimera-sessions.
+    const scheduleDispatcher = new ChimeraLambda(this, 'ScheduleDispatcherFunction', {
+      functionName: `chimera-schedule-dispatcher-${props.envName}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambdas/schedule-dispatcher')),
+      timeout: cdk.Duration.minutes(15),
+      memorySize: 512,
+      encryptionKey: props.platformKey,
+      vpc: props.vpc,
+      vpcSubnets: props.vpc
+        ? { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }
+        : undefined,
+      securityGroups: dispatcherLambdaSg ? [dispatcherLambdaSg] : undefined,
+      environment: {
+        SCHEDULES_TABLE: this.schedulesTable.tableName,
+        TENANTS_TABLE: `chimera-tenants-${props.envName}`,
+        SESSIONS_TABLE: `chimera-sessions-${props.envName}`,
+        SIGNING_KEY_SECRET_ARN: this.scheduleSigningKeySecret.secretArn,
+        CHAT_GATEWAY_URL:
+          props.chatGatewayInternalUrl ??
+          `http://chimera-chat-${props.envName}.internal.invalid/chat/stream`,
+      },
+    });
+    this.scheduleDispatcher = scheduleDispatcher.fn;
+    this.scheduleDispatcherDlq = scheduleDispatcher.dlq;
+
+    // DDB access: read schedules + tenants, write session run logs.
+    scheduleDispatcher.fn.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ['events:PutEvents'],
-        resources: [this.eventBus.eventBusArn],
+        actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+        resources: [this.schedulesTable.tableArn],
       })
     );
+    scheduleDispatcher.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:GetItem'],
+        resources: [
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-tenants-${props.envName}`,
+        ],
+      })
+    );
+    scheduleDispatcher.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:PutItem'],
+        resources: [
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/chimera-sessions-${props.envName}`,
+        ],
+      })
+    );
+    this.scheduleSigningKeySecret.grantRead(scheduleDispatcher.fn);
+    // Decrypt secret payload + DDB table KMS.
+    scheduleDispatcher.fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Decrypt', 'kms:DescribeKey'],
+        resources: [props.platformKey.keyArn],
+      })
+    );
+
+    // Scheduler role may invoke the dispatcher Lambda for targets under the
+    // chimera-agent-schedules-{env} group. Replaces the unused events:PutEvents
+    // statement — EventBridge Scheduler targets Lambda directly, not EventBus.
+    schedulerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['lambda:InvokeFunction'],
+        resources: [scheduleDispatcher.fn.functionArn],
+      })
+    );
+
+    // DLQ circuit breaker alarm — ChimeraLambda already provisioned the DLQ
+    // (scheduleDispatcher.dlq). Alarm fires when >=5 messages accumulate,
+    // matching the project-wide DLQ convention (ADR-021).
+    new cloudwatch.Alarm(this, 'ScheduleDispatcherDLQAlarm', {
+      alarmName: `chimera-schedule-dispatcher-dlq-${props.envName}`,
+      alarmDescription:
+        'Circuit breaker: schedule dispatcher Lambda DLQ depth exceeds threshold',
+      metric: scheduleDispatcher.dlq.metricApproximateNumberOfMessagesVisible({
+        statistic: cloudwatch.Stats.AVERAGE,
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 5,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
 
     // ======================================================================
     // Per-Tenant FIFO Queues (Dynamic Creation Pattern)
@@ -902,6 +1097,44 @@ def handler(event, context):
       exportName: `${this.stackName}-GroupChatProvisionerRoleArn`,
       description:
         'IAM role ARN for provisioning SNS topics and SQS subscriptions for agent groupchat',
+    });
+
+    // chimera-2b2a outputs ---------------------------------------------------
+    new cdk.CfnOutput(this, 'SchedulesTableName', {
+      value: this.schedulesTable.tableName,
+      exportName: `${this.stackName}-SchedulesTableName`,
+      description: 'chimera-schedules DynamoDB table name',
+    });
+
+    new cdk.CfnOutput(this, 'SchedulesTableArn', {
+      value: this.schedulesTable.tableArn,
+      exportName: `${this.stackName}-SchedulesTableArn`,
+      description: 'chimera-schedules DynamoDB table ARN',
+    });
+
+    new cdk.CfnOutput(this, 'ScheduleDispatcherArn', {
+      value: this.scheduleDispatcher.functionArn,
+      exportName: `${this.stackName}-ScheduleDispatcherArn`,
+      description: 'chimera-schedule-dispatcher Lambda ARN',
+    });
+
+    new cdk.CfnOutput(this, 'ScheduleDispatcherDlqArn', {
+      value: this.scheduleDispatcherDlq.queueArn,
+      exportName: `${this.stackName}-ScheduleDispatcherDlqArn`,
+      description: 'DLQ ARN for the schedule dispatcher Lambda',
+    });
+
+    new cdk.CfnOutput(this, 'ScheduleSigningKeySecretArn', {
+      value: this.scheduleSigningKeySecret.secretArn,
+      exportName: `${this.stackName}-ScheduleSigningKeySecretArn`,
+      description: 'Secrets Manager ARN for the HMAC schedule signing key',
+    });
+
+    new cdk.CfnOutput(this, 'SchedulerRoleArn', {
+      value: this.schedulerRole.roleArn,
+      exportName: `${this.stackName}-SchedulerRoleArn`,
+      description:
+        'IAM role ARN that EventBridge Scheduler assumes to invoke the dispatcher Lambda',
     });
   }
 }

@@ -172,9 +172,39 @@ const skillPipelineStack = new SkillPipelineStack(app, `${prefix}-SkillPipeline`
 applySkillPipelineStackSuppressions(skillPipelineStack);
 skillPipelineStack.addDependency(dataStack);
 
-// --- Stack 8: Chat Gateway ---
+// --- Stack 8: Orchestration (moved before Chat for chimera-2b2a wiring) ---
+// EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
+// Supports swarm, workflow, and graph orchestration patterns.
+// Depends on SecurityStack for KMS encryption.
+// chimera-2b2a: pass VPC + albSG so the schedule-dispatcher Lambda can be
+// attached and reach the chat-gateway's private-subnet ALB. chatGatewayInternalUrl
+// defaults to a static context value to avoid the circular dependency with
+// ChatStack (chat needs schedulerRole + signingKey from orchestration; orchestration
+// needs the ALB DNS from chat). Follow-up: switch to runtime Cloud Map lookup
+// to eliminate the context-value handoff.
+const chatGatewayInternalUrl =
+  (app.node.tryGetContext('chatGatewayInternalUrl') as string | undefined) ??
+  `http://chimera-chat-gateway.${envName}.internal/chat/stream`;
+
+const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
+  env: envConfig,
+  description:
+    'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
+  envName,
+  platformKey: securityStack.platformKey,
+  vpc: networkStack.vpc,
+  albSecurityGroup: networkStack.albSecurityGroup,
+  chatGatewayInternalUrl,
+});
+applyOrchestrationStackSuppressions(orchestrationStack);
+orchestrationStack.addDependency(securityStack);
+orchestrationStack.addDependency(networkStack);
+
+// --- Stack 9: Chat Gateway ---
 // Express/Fastify server on ECS Fargate with ALB, SSE bridge for Vercel AI SDK streaming.
-// Depends on NetworkStack for VPC/security groups, DataStack for DynamoDB tables, and PipelineStack for ECR repository.
+// Depends on NetworkStack for VPC/security groups, DataStack for DynamoDB tables,
+// PipelineStack for ECR repository, and (chimera-2b2a) OrchestrationStack for
+// scheduler IAM props.
 const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   env: envConfig,
   description:
@@ -195,26 +225,17 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   ecrRepository: pipelineStack.chatGatewayEcrRepository,
   cognitoUserPoolId: securityStack.userPool.userPoolId,
   cognitoUserPoolClientId: securityStack.userPoolClient.userPoolClientId,
+  // chimera-2b2a scheduler wiring. ChatStack emits the grants block only
+  // when both ARNs are present.
+  schedulerRoleArn: orchestrationStack.schedulerRole.roleArn,
+  scheduleSigningKeySecretArn: orchestrationStack.scheduleSigningKeySecret.secretArn,
 });
 applyChatStackSuppressions(chatStack, isProd);
 chatStack.addDependency(networkStack);
 chatStack.addDependency(dataStack);
 chatStack.addDependency(pipelineStack);
 chatStack.addDependency(securityStack);
-
-// --- Stack 9: Orchestration ---
-// EventBridge event bus, SQS queues for agent task distribution and A2A messaging.
-// Supports swarm, workflow, and graph orchestration patterns.
-// Depends on SecurityStack for KMS encryption.
-const orchestrationStack = new OrchestrationStack(app, `${prefix}-Orchestration`, {
-  env: envConfig,
-  description:
-    'Chimera orchestration layer: EventBridge event bus, SQS queues for agent communication',
-  envName,
-  platformKey: securityStack.platformKey,
-});
-applyOrchestrationStackSuppressions(orchestrationStack);
-orchestrationStack.addDependency(securityStack);
+chatStack.addDependency(orchestrationStack);
 
 // --- Stack 10: Evolution Engine ---
 // Self-improvement mechanisms: prompt evolution, auto-skill generation, model routing optimization,

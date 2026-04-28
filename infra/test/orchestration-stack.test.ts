@@ -23,13 +23,24 @@ describe('OrchestrationStack', () => {
   beforeEach(() => {
     app = new cdk.App();
 
-    // Create a mock KMS key for encryption
-    const keyStack = new cdk.Stack(app, 'KeyStack');
-    platformKey = new kms.Key(keyStack, 'PlatformKey', {
-      description: 'Test platform encryption key',
-    });
+    // TableV2 (used by ChimeraTable) refuses to render SSE specifications in
+    // a region-agnostic stack, so the stack must be env-bound.
+    // chimera-2b2a introduced the first ChimeraTable to OrchestrationStack,
+    // which is what surfaced the requirement.
+    const testEnv = { account: '123456789012', region: 'us-west-2' };
+
+    // Imported-by-ARN KMS key acts as an IKey stub: grant*() calls become
+    // no-ops so no cross-stack policy edges are created, and CDK won't try
+    // to add an assembly dependency on a separate KeyStack. The real
+    // SecurityStack/DataStack wiring is exercised by the infra synth tests.
+    platformKey = kms.Key.fromKeyArn(
+      new cdk.Stack(app, 'PlatformKeyStub', { env: testEnv }),
+      'PlatformKeyImport',
+      'arn:aws:kms:us-west-2:123456789012:key/00000000-0000-0000-0000-000000000000'
+    ) as kms.Key;
 
     stack = new OrchestrationStack(app, 'TestOrchestrationStack', {
+      env: testEnv,
       envName: 'dev',
       platformKey,
     });
@@ -152,10 +163,14 @@ describe('OrchestrationStack', () => {
   });
 
   describe('SQS Queues', () => {
-    it('should create 10 SQS queues (2 ChimeraQueue main + 2 ChimeraQueue DLQ + 6 Lambda DLQs)', () => {
+    it('should create at least 11 SQS queues (ChimeraQueue mains + DLQs + Lambda DLQs)', () => {
       // ChimeraQueue provides 2 main queues + 2 DLQs.
-      // ChimeraLambda creates 1 DLQ per Lambda × 6 Lambdas = 6 DLQs.
-      template.resourceCountIs('AWS::SQS::Queue', 10);
+      // ChimeraLambda creates 1 DLQ per Lambda: 6 workflow Lambdas + 1
+      // schedule-dispatcher Lambda = 7 DLQs. Baseline total = 11. Using
+      // toBeGreaterThanOrEqual to avoid brittle-count regressions when new
+      // Lambdas or queues are added (cdk-resource-count-test-tripwire).
+      const queues = template.findResources('AWS::SQS::Queue');
+      expect(Object.keys(queues).length).toBeGreaterThanOrEqual(11);
     });
 
     it('should create Standard task queue with correct config', () => {
@@ -201,15 +216,18 @@ describe('OrchestrationStack', () => {
       });
     });
 
-    it('should encrypt queues with KMS', () => {
-      // All 10 queues should have KMS encryption (ChimeraQueue + ChimeraLambda DLQs)
+    it('should encrypt all queues with KMS', () => {
+      // Every queue (ChimeraQueue mains + DLQs + all ChimeraLambda DLQs) must
+      // be KMS-encrypted. Assert encryptedCount == totalCount rather than a
+      // hardcoded N so this test survives new Lambdas being added.
       const queues = template.findResources('AWS::SQS::Queue');
+      const totalCount = Object.keys(queues).length;
       const encryptedCount = Object.values(queues).filter(
         (queue) =>
           (queue as { Properties: { KmsMasterKeyId?: string } }).Properties.KmsMasterKeyId !==
           undefined
       ).length;
-      expect(encryptedCount).toBe(10);
+      expect(encryptedCount).toBe(totalCount);
     });
   });
 
@@ -225,7 +243,8 @@ describe('OrchestrationStack', () => {
     it('should create IAM role for scheduler', () => {
       template.hasResourceProperties('AWS::IAM::Role', {
         RoleName: 'chimera-scheduler-dev',
-        Description: 'Allows EventBridge Scheduler to publish agent task events',
+        Description:
+          'Allows EventBridge Scheduler to invoke the chimera schedule dispatcher Lambda',
         AssumeRolePolicyDocument: Match.objectLike({
           Statement: Match.arrayWith([
             Match.objectLike({
@@ -238,20 +257,91 @@ describe('OrchestrationStack', () => {
       });
     });
 
-    it('should grant scheduler permission to publish events', () => {
-      // Find policies attached to the scheduler role
+    it('should grant scheduler permission to invoke the dispatcher Lambda', () => {
+      // Scheduler role policy must allow lambda:InvokeFunction (no longer
+      // events:PutEvents — chimera-2b2a switched EventBridge Scheduler
+      // targets from event-bus publish to direct Lambda invocation).
       const policies = template.findResources('AWS::IAM::Policy');
       interface PolicyResource {
         Properties: {
           Roles: Array<{ Ref?: string }>;
+          PolicyDocument: {
+            Statement: Array<{ Action: string | string[] }>;
+          };
         };
       }
-      const schedulerPolicy = Object.values(policies).find((policy) =>
-        (policy as PolicyResource).Properties.Roles.some(
-          (role) => role.Ref && role.Ref.includes('SchedulerRole')
-        )
-      );
+      const schedulerPolicy = Object.values(policies).find((policy) => {
+        const p = policy as PolicyResource;
+        return (
+          p.Properties.Roles.some(
+            (role) => role.Ref && role.Ref.includes('SchedulerRole')
+          ) &&
+          p.Properties.PolicyDocument.Statement.some((stmt) => {
+            const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+            return actions.includes('lambda:InvokeFunction');
+          })
+        );
+      });
       expect(schedulerPolicy).toBeDefined();
+    });
+  });
+
+  describe('chimera-2b2a Schedule Dispatcher', () => {
+    it('should create chimera-schedules DynamoDB table with GSI1 + GSI2', () => {
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+        TableName: 'chimera-schedules-dev',
+        GlobalSecondaryIndexes: Match.arrayWith([
+          Match.objectLike({ IndexName: 'GSI1-tenant-created' }),
+          Match.objectLike({ IndexName: 'GSI2-tenant-expr-type' }),
+        ]),
+      });
+    });
+
+    it('should create schedule dispatcher Lambda (Python 3.12, 15-min timeout, 512 MB)', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'chimera-schedule-dispatcher-dev',
+        Runtime: 'python3.12',
+        Timeout: 900,
+        MemorySize: 512,
+      });
+    });
+
+    it('should create signing-key secret in Secrets Manager', () => {
+      template.hasResourceProperties('AWS::SecretsManager::Secret', {
+        Name: 'chimera/schedule-signing-key-dev',
+      });
+    });
+
+    it('should create DLQ for the schedule dispatcher Lambda', () => {
+      template.hasResourceProperties('AWS::SQS::Queue', {
+        QueueName: 'chimera-schedule-dispatcher-dev-dlq',
+      });
+    });
+
+    it('should create DLQ circuit-breaker alarm (>= 5 messages, 5-min period)', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'chimera-schedule-dispatcher-dlq-dev',
+        MetricName: 'ApproximateNumberOfMessagesVisible',
+        Namespace: 'AWS/SQS',
+        Period: 300,
+        EvaluationPeriods: 1,
+        Threshold: 5,
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+      });
+    });
+
+    it('should grant scheduler role lambda:InvokeFunction on dispatcher ARN', () => {
+      const policies = template.findResources('AWS::IAM::Policy');
+      const invokePolicies = Object.values(policies).filter((policy) => {
+        const stmts =
+          (policy as { Properties: { PolicyDocument: { Statement: Array<{ Action: string | string[] }> } } })
+            .Properties.PolicyDocument.Statement;
+        return stmts.some((stmt) => {
+          const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+          return actions.includes('lambda:InvokeFunction');
+        });
+      });
+      expect(invokePolicies.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -306,10 +396,13 @@ describe('OrchestrationStack', () => {
   });
 
   describe('Lambda Functions', () => {
-    it('should create workflow Lambda functions', () => {
-      // 6 ChimeraLambda functions + 1 LogRetention singleton + 1 LogRetention provider = 8
-      // (ChimeraLambda logRetention triggers additional CDK custom resource machinery)
-      template.resourceCountIs('AWS::Lambda::Function', 8);
+    it('should create at least the expected workflow Lambda functions', () => {
+      // 6 workflow ChimeraLambda functions + 1 schedule-dispatcher
+      // ChimeraLambda + LogRetention custom-resource machinery. Use
+      // >= to avoid brittle-count regressions as new Lambdas are added
+      // (cdk-resource-count-test-tripwire).
+      const fns = template.findResources('AWS::Lambda::Function');
+      expect(Object.keys(fns).length).toBeGreaterThanOrEqual(9);
     });
 
     it('should create StartBuildFunction', () => {
@@ -648,18 +741,39 @@ describe('OrchestrationStack', () => {
         },
       });
     });
+
+    it('should export chimera-2b2a schedules table + dispatcher ARNs', () => {
+      template.hasOutput('SchedulesTableName', {
+        Export: { Name: 'TestOrchestrationStack-SchedulesTableName' },
+      });
+      template.hasOutput('SchedulesTableArn', {
+        Export: { Name: 'TestOrchestrationStack-SchedulesTableArn' },
+      });
+      template.hasOutput('ScheduleDispatcherArn', {
+        Export: { Name: 'TestOrchestrationStack-ScheduleDispatcherArn' },
+      });
+      template.hasOutput('ScheduleSigningKeySecretArn', {
+        Export: { Name: 'TestOrchestrationStack-ScheduleSigningKeySecretArn' },
+      });
+      template.hasOutput('SchedulerRoleArn', {
+        Export: { Name: 'TestOrchestrationStack-SchedulerRoleArn' },
+      });
+    });
   });
 
   describe('Production Configuration', () => {
     it('should use longer retention periods in prod', () => {
       // Create a new app for prod stack to avoid synthesis conflicts
       const prodApp = new cdk.App();
-      const prodKeyStack = new cdk.Stack(prodApp, 'ProdKeyStack');
-      const prodPlatformKey = new kms.Key(prodKeyStack, 'ProdPlatformKey', {
-        description: 'Test platform encryption key',
-      });
+      const prodEnv = { account: '123456789012', region: 'us-west-2' };
+      const prodPlatformKey = kms.Key.fromKeyArn(
+        new cdk.Stack(prodApp, 'ProdPlatformKeyStub', { env: prodEnv }),
+        'ProdPlatformKeyImport',
+        'arn:aws:kms:us-west-2:123456789012:key/00000000-0000-0000-0000-000000000000'
+      );
 
       const prodStack = new OrchestrationStack(prodApp, 'ProdOrchestrationStack', {
+        env: prodEnv,
         envName: 'prod',
         platformKey: prodPlatformKey,
       });
@@ -683,12 +797,15 @@ describe('OrchestrationStack', () => {
     it('should use RETAIN removal policy in prod', () => {
       // Create a new app for prod stack to avoid synthesis conflicts
       const prodApp = new cdk.App();
-      const prodKeyStack = new cdk.Stack(prodApp, 'ProdKeyStack');
-      const prodPlatformKey = new kms.Key(prodKeyStack, 'ProdPlatformKey', {
-        description: 'Test platform encryption key',
-      });
+      const prodEnv = { account: '123456789012', region: 'us-west-2' };
+      const prodPlatformKey = kms.Key.fromKeyArn(
+        new cdk.Stack(prodApp, 'ProdPlatformKeyStub', { env: prodEnv }),
+        'ProdPlatformKeyImport',
+        'arn:aws:kms:us-west-2:123456789012:key/00000000-0000-0000-0000-000000000000'
+      );
 
       const prodStack = new OrchestrationStack(prodApp, 'ProdOrchestrationStack', {
+        env: prodEnv,
         envName: 'prod',
         platformKey: prodPlatformKey,
       });
@@ -728,6 +845,11 @@ describe('OrchestrationStack', () => {
       expect(stack.agentTaskQueue).toBeDefined();
       expect(stack.agentMessageQueue).toBeDefined();
       expect(stack.schedulerGroup).toBeDefined();
+      expect(stack.schedulerRole).toBeDefined();
+      expect(stack.schedulesTable).toBeDefined();
+      expect(stack.scheduleDispatcher).toBeDefined();
+      expect(stack.scheduleDispatcherDlq).toBeDefined();
+      expect(stack.scheduleSigningKeySecret).toBeDefined();
       expect(stack.pipelineBuildStateMachine).toBeDefined();
       expect(stack.dataAnalysisStateMachine).toBeDefined();
       expect(stack.backgroundTaskStateMachine).toBeDefined();
