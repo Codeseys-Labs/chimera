@@ -74,6 +74,7 @@ export class OrchestrationStack extends cdk.Stack {
   public readonly scheduleDispatcher: lambda.IFunction;
   public readonly scheduleDispatcherDlq: sqs.Queue;
   public readonly scheduleSigningKeySecret: secretsmanager.ISecret;
+  public readonly scheduleSigningKmsKey: kms.IKey;
   public readonly pipelineBuildStateMachine: stepfunctions.StateMachine;
   public readonly dataAnalysisStateMachine: stepfunctions.StateMachine;
   public readonly backgroundTaskStateMachine: stepfunctions.StateMachine;
@@ -289,6 +290,20 @@ export class OrchestrationStack extends cdk.Stack {
     // separate rotation-runbook tool — see docs/runbooks/ once available).
     // The consumer validates the secret in chat-gateway's schedule-token
     // middleware (Workstream B).
+    // Stack-local CMK for the schedule-signing secret. Using platformKey
+    // (SecurityStack-owned) would cause grantRead() to attach the dispatcher
+    // Lambda role ARN to platformKey's key policy, creating a
+    // Security -> Orchestration DependencyCycle. ChatStack reads the secret
+    // via a separate IAM policy that also requires kms:Decrypt on its key —
+    // grant both here so ChatStack's identity policy remains sufficient.
+    const scheduleSigningKmsKey = new kms.Key(this, 'ScheduleSigningKmsKey', {
+      alias: `alias/chimera-schedule-signing-${props.envName}`,
+      description: 'CMK for the chimera schedule-signing Secrets Manager secret',
+      enableKeyRotation: true,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+    this.scheduleSigningKmsKey = scheduleSigningKmsKey;
+
     this.scheduleSigningKeySecret = new secretsmanager.Secret(this, 'ScheduleSigningKey', {
       secretName: `chimera/schedule-signing-key-${props.envName}`,
       description: 'HMAC-SHA256 key used to authenticate scheduler -> chat-gateway invocations',
@@ -298,7 +313,7 @@ export class OrchestrationStack extends cdk.Stack {
         excludePunctuation: false,
         passwordLength: 64,
       },
-      encryptionKey: props.platformKey,
+      encryptionKey: scheduleSigningKmsKey,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
@@ -317,16 +332,28 @@ export class OrchestrationStack extends cdk.Stack {
         allowAllOutbound: true,
       });
       if (props.albSecurityGroup) {
-        props.albSecurityGroup.addIngressRule(
-          dispatcherLambdaSg,
-          ec2.Port.tcp(80),
-          'Schedule dispatcher Lambda -> chat-gateway ALB (HTTP)',
-        );
-        props.albSecurityGroup.addIngressRule(
-          dispatcherLambdaSg,
-          ec2.Port.tcp(443),
-          'Schedule dispatcher Lambda -> chat-gateway ALB (HTTPS)',
-        );
+        // Use L1 CfnSecurityGroupIngress in Orchestration scope so the rule
+        // lives in this stack. Using albSg.addIngressRule() would put the
+        // rule in Network stack (which owns albSg) and reference the
+        // Orchestration-owned dispatcherLambdaSg, creating a
+        // Network -> Orchestration dependency that conflicts with this
+        // stack's Orchestration -> Network dependency (DependencyCycle).
+        new ec2.CfnSecurityGroupIngress(this, 'AlbIngressFromDispatcherHttp', {
+          groupId: props.albSecurityGroup.securityGroupId,
+          ipProtocol: 'tcp',
+          fromPort: 80,
+          toPort: 80,
+          sourceSecurityGroupId: dispatcherLambdaSg.securityGroupId,
+          description: 'Schedule dispatcher Lambda -> chat-gateway ALB (HTTP)',
+        });
+        new ec2.CfnSecurityGroupIngress(this, 'AlbIngressFromDispatcherHttps', {
+          groupId: props.albSecurityGroup.securityGroupId,
+          ipProtocol: 'tcp',
+          fromPort: 443,
+          toPort: 443,
+          sourceSecurityGroupId: dispatcherLambdaSg.securityGroupId,
+          description: 'Schedule dispatcher Lambda -> chat-gateway ALB (HTTPS)',
+        });
       }
     }
 
@@ -341,7 +368,12 @@ export class OrchestrationStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambdas/schedule-dispatcher')),
       timeout: cdk.Duration.minutes(15),
       memorySize: 512,
-      encryptionKey: props.platformKey,
+      // Intentionally omit encryptionKey so ChimeraLambda auto-provisions a
+      // stack-local CMK for the DLQ. Passing platformKey here causes CDK to
+      // append the Lambda's role ARN to the platformKey's key policy, which
+      // adds a Security -> Orchestration reference and creates a
+      // DependencyCycle (Orchestration already depends on Security). Same
+      // pattern as EmailStack's SQS KMS (see chimera.ts:284-285).
       vpc: props.vpc,
       vpcSubnets: props.vpc
         ? { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }

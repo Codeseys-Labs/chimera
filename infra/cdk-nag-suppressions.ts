@@ -282,6 +282,15 @@ export function applyOrchestrationStackSuppressions(stack: Stack): void {
         'X-Ray tracing is enabled at the Lambda level for all step handlers. ' +
         'State machine-level tracing will be added after observability baseline.',
     },
+    {
+      id: 'AwsSolutions-SMG4',
+      reason:
+        'ScheduleSigningKey rotation is deferred to Wave-33+. Rotation requires ' +
+        'coordinating the chat-gateway in-memory cache (15-min TTL) + dispatcher ' +
+        'Lambda role re-grants. The HMAC scheme already rejects replay via the ' +
+        'timestamp-tolerance window (5 min) + body-hash binding, so key rotation ' +
+        'is a defense-in-depth improvement, not a live mitigation.',
+    },
   ]);
 }
 
