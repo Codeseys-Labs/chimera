@@ -292,13 +292,70 @@ export function batchFiles(
  * Handles large repos (>6MB) by splitting into multiple commits under 5MB each
  * Pure AWS SDK approach - no git remote, credential helper, or pip dependencies
  */
+/**
+ * Resume-from-batch support (chimera-98a6). When a prior push failed partway
+ * through the 67-batch loop, the deploy-state file on the caller side records
+ * the last successful batch and its commit id. On the next push the caller
+ * passes those back in via `resumeFrom` so we skip already-committed batches
+ * instead of re-running from zero.
+ *
+ * `onBatchComplete` is called after each successful CreateCommit so the caller
+ * can update the deploy-state file per-batch and keep it fresh.
+ */
+export interface ResumeOptions {
+  resumeFrom?: { batchIndex: number; parentCommitId: string };
+  onBatchComplete?: (batchIndex: number, commitId: string) => void;
+}
+
+/**
+ * Opt-in native-git push path (chimera-5000). When useGit is true and both
+ * `git` and `aws` are on PATH, bypass the batched CreateCommit loop and push
+ * via `git push <repoUrl>` using the AWS CLI credential helper. Falls back to
+ * batched (with a yellow warning) when either binary is missing.
+ */
+export interface GitPushOptions {
+  useGit?: boolean;
+  repoUrl?: string;
+  region?: string;
+  profile?: string;
+}
+
 export async function pushToCodeCommit(
   client: CodeCommitClient,
   repoName: string,
   repoRoot: string,
   branchName: string = 'main',
   commitMessage?: string,
+  resume?: ResumeOptions,
+  gitOpts?: GitPushOptions,
 ): Promise<string | undefined> {
+  // Opt-in native-git push (chimera-5000). When both git and aws CLI are on
+  // PATH, skip the 67-batch CreateCommit loop entirely — it's ~10x faster
+  // and uses git's fetch-first semantics for coalesce safety. Fall through
+  // to batched with a warning if either binary is missing.
+  if (gitOpts?.useGit && gitOpts.repoUrl && gitOpts.region) {
+    const { detectGit, detectAwsCredentialHelper, pushViaGit } = await import('./git-push.js');
+    const git = await detectGit();
+    const awsOk = await detectAwsCredentialHelper();
+    if (git.present && awsOk) {
+      console.log(color.gray(`  Using native git push (git ${git.version ?? 'unknown'})`));
+      const res = await pushViaGit({
+        repoUrl: gitOpts.repoUrl,
+        branch: branchName,
+        profile: gitOpts.profile,
+        region: gitOpts.region,
+        sourceDir: repoRoot,
+        onProgress: (l) => console.log(color.gray(`    ${l}`)),
+      });
+      return res.pushedSha || undefined;
+    }
+    console.warn(
+      color.yellow(
+        `  --use-git requested but ${!git.present ? 'git' : 'aws CLI'} not on PATH — falling back to batched CreateCommit`,
+      ),
+    );
+  }
+
   console.log(color.gray('  Scanning repository files...'));
   const { files: allFiles, skipped } = collectFiles(repoRoot, repoRoot);
   console.log(color.gray(`  Found ${allFiles.length} files`));
@@ -335,7 +392,23 @@ export async function pushToCodeCommit(
     }
   }
 
+  // Apply resume state (chimera-98a6) exactly once at the start of the loop:
+  // re-point parentCommitId at the last successful batch's commit id so
+  // batch N+1 lands on top of it, and skip batches we've already pushed.
+  const resumeSkipBelow =
+    resume?.resumeFrom !== undefined ? resume.resumeFrom.batchIndex + 1 : 0;
+  if (resume?.resumeFrom) {
+    parentCommitId = resume.resumeFrom.parentCommitId;
+    console.log(
+      color.gray(
+        `  Resuming from batch ${resumeSkipBelow + 1}/${batches.length} ` +
+          `(parent ${parentCommitId})`,
+      ),
+    );
+  }
+
   for (let i = 0; i < batches.length; i++) {
+    if (i < resumeSkipBelow) continue;
     const batch = batches[i];
     const batchNum = i + 1;
     const baseMsg = commitMessage || 'Deploy Chimera to AWS';
@@ -389,6 +462,9 @@ export async function pushToCodeCommit(
         ),
       );
       parentCommitId = createCommitResult.commitId;
+      if (resume?.onBatchComplete && parentCommitId) {
+        resume.onBatchComplete(i, parentCommitId);
+      }
     } catch (error: any) {
       const isNoChangesError =
         error.message?.includes('same as') || error.message?.includes('at least one change');

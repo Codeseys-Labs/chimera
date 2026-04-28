@@ -658,18 +658,11 @@ Examples:
 
         if (!options.json) spinner.start('Pushing source code to CodeCommit...');
 
-        // Resume hooks for codecommit.ts:
+        // Resume hooks for codecommit.ts's ResumeOptions parameter:
         //   - resumeFrom: starting batch index + parent commit id to skip to.
         //   - onBatchComplete: called after each successful CreateCommit so we
-        //     can persist state mid-push.
-        //
-        // These are consumed by pushToCodeCommit's optional ResumeOptions
-        // parameter. Until that signature lands (owned by team-lead —
-        // packages/cli/src/utils/codecommit.ts), resume is a no-op and every
-        // deploy re-pushes all batches. The state helpers themselves, the
-        // --fresh flag, and the invalidation logic here are all correct — only
-        // the mid-push persistence + skip-to-batch is gated on that signature.
-        const _resumeHooks = {
+        //     can persist state mid-push (chimera-98a6).
+        const resumeHooks = {
           resumeFrom,
           onBatchComplete: fileListHash
             ? (batchIndex: number, commitId: string): void => {
@@ -685,13 +678,14 @@ Examples:
               }
             : undefined,
         };
-        void _resumeHooks;
 
         const codecommitCommitId = await pushToCodeCommit(
           codecommitClient,
           repoName,
           sourcePath,
           branchName,
+          undefined,
+          resumeHooks,
         );
         if (!options.json) spinner.succeed(color.green('Source code pushed to CodeCommit'));
 
