@@ -99,11 +99,14 @@ export function findTscForceViolations(root: string): TscForceFinding[] {
       const raw = lines[i];
       if (!raw) continue;
       // YAML comments — everything after an unquoted `#` is documentation,
-      // not a command. Buildspec shell lines start with "- " before the command.
+      // not a command. Strip full-line AND inline comments before testing so a
+      // legitimate annotation like `tsc --build foo.tsconfig  # --force deliberately omitted`
+      // doesn't false-positive on the regex.
       const trimmed = raw.trim();
       if (trimmed.startsWith('#')) continue;
-      if (!/\btsc\s+(?:--build\b|-b\b)/.test(raw)) continue;
-      if (/--force\b/.test(raw)) continue;
+      const stripped = raw.replace(/#.*$/, '');
+      if (!/\btsc\s+(?:--build\b|-b\b)/.test(stripped)) continue;
+      if (/--force\b/.test(stripped)) continue;
       findings.push({ file: rel, line: i + 1, text: raw.trim() });
     }
   }

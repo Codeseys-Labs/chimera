@@ -146,7 +146,10 @@ async function runPipelineLogs(opts: {
 }): Promise<void> {
   const ws = loadWorkspaceConfig();
   const region = opts.region ?? ws?.aws?.region;
-  const envName = opts.env ?? ws?.workspace?.environment ?? 'dev';
+  // Sanitize env name: AWS resource names (pipelines, log groups) only allow
+  // alphanumerics and hyphens; a workspace config with "prod/canary" would
+  // produce an invalid path otherwise. Matches rollback.ts convention.
+  const envName = (opts.env ?? ws?.workspace?.environment ?? 'dev').replace(/[^a-zA-Z0-9-]/g, '');
   if (!region) {
     const msg = 'No AWS region configured. Run "chimera init" to set up your workspace.';
     if (opts.json) {
@@ -233,7 +236,10 @@ async function runBuildLogs(
 
   const ws = loadWorkspaceConfig();
   const region = opts.region ?? ws?.aws?.region;
-  const envName = opts.env ?? ws?.workspace?.environment ?? 'dev';
+  // Sanitize env name: AWS resource names (pipelines, log groups) only allow
+  // alphanumerics and hyphens; a workspace config with "prod/canary" would
+  // produce an invalid path otherwise. Matches rollback.ts convention.
+  const envName = (opts.env ?? ws?.workspace?.environment ?? 'dev').replace(/[^a-zA-Z0-9-]/g, '');
   if (!region) {
     const msg = 'No AWS region configured. Run "chimera init" to set up your workspace.';
     if (opts.json) {
@@ -329,7 +335,10 @@ logsCommand
   .action(async (opts) => {
     const ws = loadWorkspaceConfig();
     const region = opts.region ?? ws?.aws?.region;
-    const envName = opts.env ?? ws?.workspace?.environment ?? 'dev';
+    // Sanitize env name: AWS resource names (pipelines, log groups) only allow
+  // alphanumerics and hyphens; a workspace config with "prod/canary" would
+  // produce an invalid path otherwise. Matches rollback.ts convention.
+  const envName = (opts.env ?? ws?.workspace?.environment ?? 'dev').replace(/[^a-zA-Z0-9-]/g, '');
     if (!region) {
       const msg = 'No AWS region configured.';
       if (opts.json) {

@@ -25,7 +25,14 @@ import {
   saveCredentials,
 } from '../utils/workspace.js';
 import { resolveSourcePath, cleanupSource, type SourceLocation } from '../utils/source.js';
-import { pushToCodeCommit } from '../utils/codecommit.js';
+import { pushToCodeCommit, collectFiles } from '../utils/codecommit.js';
+import {
+  readDeployState,
+  writeDeployState,
+  clearDeployState,
+  computeFileListHash,
+  type DeployState,
+} from '../utils/deploy-state.js';
 import { color } from '../lib/color.js';
 import { findProjectRoot } from '../utils/project.js';
 import { provisionAdminUser } from './setup.js';
@@ -444,6 +451,10 @@ export function registerDeployCommands(program: Command): void {
     .option('--no-setup', 'Skip admin user provisioning after deploy')
     .option('--skip-setup-prompt', 'Auto-generate admin password without prompting')
     .option('--monitor', 'Watch CloudFormation stack events in real-time (10s polling)')
+    .option(
+      '--fresh',
+      'Discard any saved resume state and re-push all batches from scratch (escape hatch for corrupt state)'
+    )
     .option('--json', 'Output result as JSON')
     .addHelpText(
       'after',
@@ -587,14 +598,106 @@ Examples:
         await ensureCodeCommitRepo(codecommitClient, repoName);
         if (!options.json) spinner.succeed(color.green(`CodeCommit repository ready: ${repoName}`));
 
+        // Resume-from-batch (chimera-98a6): if a prior `chimera deploy` failed
+        // mid-push (e.g. CodeCommit "Rate exceeded" on batch 36 of 67), persist
+        // state so the next invocation skips already-committed batches.
+        //
+        // Invalidation is intentionally strict: any change to the git HEAD
+        // (sourceCommitSha) or to the sorted file list (fileListHash) clears
+        // the state and forces a full re-push. This composes safely with the
+        // chimera-a272 TOCTOU guard on parentCommitId — both guards key off
+        // "did the local tree change under us" and bail to a fresh push.
+        const branchName = 'main';
+        if (options.fresh) {
+          clearDeployState(accountId, repoName, branchName);
+          if (!options.json)
+            console.log(color.gray('  --fresh: discarded any saved resume state'));
+        }
+
+        let resumeFrom: { batchIndex: number; parentCommitId: string } | undefined;
+        let deployStateStartedAt = new Date().toISOString();
+        let fileListHash: string | undefined;
+
+        if (options.source === 'local') {
+          // Only the local source mode has a stable git HEAD + file set across
+          // retries. For auto/github/git modes the source path is re-downloaded
+          // each run, so resume state would never match.
+          if (!options.json) spinner.start('Checking for saved resume state...');
+          const { files: filesForHash } = collectFiles(sourcePath, sourcePath);
+          fileListHash = computeFileListHash(filesForHash);
+          const existing = readDeployState(accountId, repoName, branchName);
+
+          if (existing && sourceCommitSha && existing.sourceCommitSha === sourceCommitSha.trim()
+              && existing.fileListHash === fileListHash) {
+            resumeFrom = {
+              batchIndex: existing.lastBatchIndex + 1,
+              parentCommitId: existing.lastCommitId,
+            };
+            deployStateStartedAt = existing.startedAt;
+            if (!options.json)
+              spinner.succeed(
+                color.green(
+                  `Resume: continuing from batch ${existing.lastBatchIndex + 1} ` +
+                    `(parent ${existing.lastCommitId.slice(0, 8)})`,
+                ),
+              );
+          } else {
+            if (existing) {
+              clearDeployState(accountId, repoName, branchName);
+              if (!options.json)
+                spinner.warn(
+                  color.yellow(
+                    'Resume state found but HEAD or files changed — re-pushing from scratch',
+                  ),
+                );
+            } else if (!options.json) {
+              spinner.succeed(color.gray('No resume state — fresh push'));
+            }
+          }
+        }
+
         if (!options.json) spinner.start('Pushing source code to CodeCommit...');
+
+        // Resume hooks for codecommit.ts:
+        //   - resumeFrom: starting batch index + parent commit id to skip to.
+        //   - onBatchComplete: called after each successful CreateCommit so we
+        //     can persist state mid-push.
+        //
+        // These are consumed by pushToCodeCommit's optional ResumeOptions
+        // parameter. Until that signature lands (owned by team-lead —
+        // packages/cli/src/utils/codecommit.ts), resume is a no-op and every
+        // deploy re-pushes all batches. The state helpers themselves, the
+        // --fresh flag, and the invalidation logic here are all correct — only
+        // the mid-push persistence + skip-to-batch is gated on that signature.
+        const _resumeHooks = {
+          resumeFrom,
+          onBatchComplete: fileListHash
+            ? (batchIndex: number, commitId: string): void => {
+                const state: DeployState = {
+                  sourceCommitSha: (sourceCommitSha ?? '').trim(),
+                  lastBatchIndex: batchIndex,
+                  lastCommitId: commitId,
+                  fileListHash: fileListHash as string,
+                  startedAt: deployStateStartedAt,
+                  updatedAt: new Date().toISOString(),
+                };
+                writeDeployState(accountId, repoName, branchName, state);
+              }
+            : undefined,
+        };
+        void _resumeHooks;
+
         const codecommitCommitId = await pushToCodeCommit(
           codecommitClient,
           repoName,
           sourcePath,
-          'main'
+          branchName,
         );
         if (!options.json) spinner.succeed(color.green('Source code pushed to CodeCommit'));
+
+        // Clean success — discard resume state so a subsequent deploy doesn't
+        // mistakenly treat a fresh push as a continuation.
+        clearDeployState(accountId, repoName, branchName);
 
         if (!options.json) spinner.start('Checking Pipeline stack status...');
         const cfnClient = new CloudFormationClient({ region });

@@ -53,6 +53,11 @@ async function pollEcsRollout(
 ): Promise<{ outcome: RollbackOutcome; rolloutState?: string; reason?: string }> {
   const start = Date.now();
   const pollMs = 5_000;
+  // Count consecutive polls where ECS has no PRIMARY deployment (or rolloutState).
+  // Happens briefly during rapid successive deploys; if it persists, surface the
+  // anomaly instead of silently waiting 10 minutes for the outer timeout.
+  let unknownStreak = 0;
+  const UNKNOWN_STREAK_WARN = 3;
   while (Date.now() - start < timeoutMs) {
     const resp = await client.send(new DescribeServicesCommand({ cluster, services: [service] }));
     const svc = resp.services?.[0];
@@ -64,6 +69,16 @@ async function pollEcsRollout(
     }
     if (rolloutState === 'FAILED') {
       return { outcome: 'failed', rolloutState, reason: primary?.rolloutStateReason };
+    }
+    if (!rolloutState) {
+      unknownStreak += 1;
+      if (unknownStreak === UNKNOWN_STREAK_WARN && spinner) {
+        spinner.text =
+          `ECS: no PRIMARY deployment visible for ${unknownStreak * pollMs / 1000}s — ` +
+          `service may be between deployments. Will continue until timeout.`;
+      }
+    } else {
+      unknownStreak = 0;
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }
@@ -181,7 +196,23 @@ Examples:
         }
 
         const payloadText = invokeResp.Payload ? Buffer.from(invokeResp.Payload).toString('utf8') : '{}';
-        const lambdaResult: LambdaRollbackResult = JSON.parse(payloadText);
+        // Lambda runtime crashes can return non-JSON strings as Payload (e.g.
+        // "Task timed out after 300.00 seconds") even without FunctionError set.
+        // Without this guard, JSON.parse throws SyntaxError which bubbles to the
+        // generic catch and emits code:SyntaxError instead of code:LAMBDA_ERROR,
+        // hiding the actual rollback Lambda failure.
+        let lambdaResult: LambdaRollbackResult = {};
+        try {
+          lambdaResult = JSON.parse(payloadText) as LambdaRollbackResult;
+        } catch {
+          const msg = `Lambda ${lambdaName} returned non-JSON payload: ${payloadText.slice(0, 200)}`;
+          if (options.json) {
+            console.log(JSON.stringify({ status: 'error', error: msg, code: 'LAMBDA_ERROR' }));
+          } else {
+            spinner?.fail(color.red(msg));
+          }
+          process.exit(1);
+        }
 
         if (spinner) spinner.text = 'Polling ECS rollout';
         const ecsClient = new ECSClient({ region });

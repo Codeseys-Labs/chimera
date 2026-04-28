@@ -352,6 +352,28 @@ export async function pushToCodeCommit(
       fileContent: file.content,
     }));
 
+    // TOCTOU guard (chimera-a272): refresh tip before each CreateCommit.
+    // A concurrent deploy may have advanced the branch since our initial
+    // GetBranch or since our previous CreateCommit. Without this refresh,
+    // batch i+1 is sent with a stale parentCommitId and CodeCommit rejects
+    // it with ParentCommitIdRequiredException.
+    try {
+      const freshBranch = await withThrottleRetry(() =>
+        client.send(new GetBranchCommand({ repositoryName: repoName, branchName })),
+      );
+      const freshTip = freshBranch.branch?.commitId;
+      if (freshTip && freshTip !== parentCommitId) {
+        console.log(
+          color.yellow(
+            `  Branch tip advanced (concurrent deploy) — re-pointing parent ${parentCommitId} → ${freshTip}`,
+          ),
+        );
+        parentCommitId = freshTip;
+      }
+    } catch (error: any) {
+      if (error.name !== 'BranchDoesNotExistException') throw error;
+    }
+
     try {
       const createCommitResult = await withThrottleRetry(() =>
         client.send(

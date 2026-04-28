@@ -35,9 +35,13 @@ import { filterLogGroup, type LogLine } from '../utils/pipeline-logs.js';
 const PIPELINE_TERMINAL = new Set(['Succeeded', 'Failed', 'Stopped', 'Superseded']);
 
 // Stage-to-log-group map. Matches the deterministic naming used by the
-// Chimera CodePipeline: every stage has a known CodeBuild (or Step
-// Functions) log group. Stages not listed here are silently skipped —
-// they may be Source/Approval stages without log output.
+// Chimera CodePipeline: stage names we know how to tail. Other stage types
+// — Source (CodeCommit), Approval (Manual), and any CDK-renamed future stage
+// — don't have tailable CodeBuild/StepFn log groups. See KNOWN_UNTAILABLE
+// below for ones we intentionally skip silently; anything else triggers a
+// one-time "can't tail this stage" warning so operators notice drift.
+const KNOWN_UNTAILABLE = new Set(['Source', 'Approval']);
+
 function logGroupForStage(stageName: string, env: string): string | undefined {
   const map: Record<string, string> = {
     Build_Package: `/aws/codebuild/chimera-build-${env}`,
@@ -165,6 +169,7 @@ async function tailLoop(
   json: boolean,
 ): Promise<'succeeded' | 'failed' | 'stopped'> {
   const streams = new Map<string, StageStream>();
+  const unmappedWarned = new Set<string>(); // one warning per unknown stage
   const startMs = Date.now() - 60_000; // back-fill 60s of context on first poll
   let colorIdx = 0;
 
@@ -179,7 +184,22 @@ async function tailLoop(
     for (const name of active) {
       if (streams.has(name)) continue;
       const group = logGroupForStage(name, env);
-      if (!group) continue;
+      if (!group) {
+        // Warn once per unexpected stage so operators notice CDK stage-naming
+        // drift (but stay quiet for intentionally-untailable stages like Source).
+        if (!KNOWN_UNTAILABLE.has(name) && !unmappedWarned.has(name)) {
+          unmappedWarned.add(name);
+          if (!json) {
+            process.stdout.write(
+              color.yellow(
+                `[tail] stage "${name}" is InProgress but has no mapped log group — ` +
+                  `may indicate CDK drift. Skipping tail for this stage.\n`,
+              ),
+            );
+          }
+        }
+        continue;
+      }
       streams.set(name, {
         stageName: name,
         logGroup: group,

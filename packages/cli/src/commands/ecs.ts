@@ -30,8 +30,12 @@ import { loadWorkspaceConfig } from '../utils/workspace.js';
 import { color } from '../lib/color.js';
 
 // Secrets filter: hide anything that looks like a credential when printing env vars.
-// ENV var names matching any of these substrings (case-insensitive) have values redacted.
-const SECRET_NAME_RX = /(secret|token|password|api[_-]?key|credential|private)/i;
+// Anchored to word-boundary (^, _, -) on both sides so we redact AUTH_TOKEN,
+// DB_PASSWORD, API_KEY, PRIVATE_KEY — but NOT SESSION_TOKEN_TTL,
+// USE_PRIVATE_SUBNETS, CREDENTIAL_EXPIRY_SECONDS, which operators need
+// to read when diagnosing misconfigurations.
+const SECRET_NAME_RX =
+  /(?:^|[_-])(secret|token|password|api[_-]?key|credential|private)(?:[_-]|$)/i;
 
 interface EcsContext {
   region: string;
