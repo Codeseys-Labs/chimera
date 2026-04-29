@@ -229,6 +229,7 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   // when both ARNs are present.
   schedulerRoleArn: orchestrationStack.schedulerRole.roleArn,
   scheduleSigningKeySecretArn: orchestrationStack.scheduleSigningKeySecret.secretArn,
+  schedulesTableKeyArn: orchestrationStack.schedulesTableKey.keyArn,
 });
 applyChatStackSuppressions(chatStack, isProd);
 chatStack.addDependency(networkStack);

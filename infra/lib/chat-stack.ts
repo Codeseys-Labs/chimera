@@ -48,6 +48,13 @@ export interface ChatStackProps extends cdk.StackProps {
    * on dispatcher-originated requests to /chat/stream.
    */
   scheduleSigningKeySecretArn?: string;
+  /**
+   * chimera-2b2a wiring: ARN of the KMS key encrypting the schedules table.
+   * Chat-gateway's ECS task role needs kms:Decrypt on this key to read/write
+   * the schedules DDB table. Separate from platformKey because the schedules
+   * table uses a table-local CMK (see orchestration-stack.ts for rationale).
+   */
+  schedulesTableKeyArn?: string;
 }
 
 /**
@@ -391,6 +398,15 @@ export class ChatStack extends cdk.Stack {
             effect: iam.Effect.ALLOW,
             actions: ['secretsmanager:GetSecretValue'],
             resources: [props.scheduleSigningKeySecretArn],
+          })
+        );
+      }
+      if (props.schedulesTableKeyArn) {
+        taskRole.addToPolicy(
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ['kms:Decrypt', 'kms:DescribeKey', 'kms:GenerateDataKey'],
+            resources: [props.schedulesTableKeyArn],
           })
         );
       }

@@ -71,6 +71,7 @@ export class OrchestrationStack extends cdk.Stack {
   public readonly schedulerGroup: scheduler.CfnScheduleGroup;
   public readonly schedulerRole: iam.Role;
   public readonly schedulesTable: dynamodb.ITable;
+  public readonly schedulesTableKey: kms.IKey;
   public readonly scheduleDispatcher: lambda.IFunction;
   public readonly scheduleDispatcherDlq: sqs.Queue;
   public readonly scheduleSigningKeySecret: secretsmanager.ISecret;
@@ -262,9 +263,15 @@ export class OrchestrationStack extends cdk.Stack {
     // GSI2: list-by-expression-type within a tenant (e.g. all cron schedules).
     // All GSI queries MUST include FilterExpression='tenantId = :tid' per the
     // project's tenant-isolation convention (CLAUDE.md).
+    // Use a table-local KMS key (ChimeraTable default) rather than platformKey.
+    // The chat-gateway ChatTaskRole already grants kms:Decrypt on per-table keys
+    // via ChimeraTable's auto-alias convention (`alias/chimera-{tableName}`);
+    // sharing platformKey here meant chat-gateway would need a separate grant
+    // on platformKey itself, and we saw a live 500 "kms:Decrypt denied" because
+    // of that gap (Wave-33 post-deploy). Table-local key keeps the grant model
+    // consistent with the other 6 ChimeraTables.
     const schedulesChimera = new ChimeraTable(this, 'SchedulesTable', {
       tableName: `chimera-schedules-${props.envName}`,
-      encryptionKey: props.platformKey,
       globalSecondaryIndexes: [
         {
           indexName: 'GSI1-tenant-created',
@@ -289,6 +296,7 @@ export class OrchestrationStack extends cdk.Stack {
       deletionProtection: isProd ? true : false,
     });
     this.schedulesTable = schedulesChimera.table;
+    this.schedulesTableKey = schedulesChimera.encryptionKey;
 
     // HMAC signing key shared between the dispatcher Lambda and the
     // chat-gateway /chat/stream endpoint. Quarterly rotation is managed
@@ -423,11 +431,16 @@ export class OrchestrationStack extends cdk.Stack {
       })
     );
     this.scheduleSigningKeySecret.grantRead(scheduleDispatcher.fn);
-    // Decrypt secret payload + DDB table KMS.
+    // Decrypt: (a) secret payload (signing key secret's stack-local CMK),
+    // (b) tenants & sessions tables encrypted with platformKey,
+    // (c) schedules table encrypted with its own table-local CMK.
     scheduleDispatcher.fn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['kms:Decrypt', 'kms:DescribeKey'],
-        resources: [props.platformKey.keyArn],
+        resources: [
+          props.platformKey.keyArn,
+          this.schedulesTableKey.keyArn,
+        ],
       })
     );
 
