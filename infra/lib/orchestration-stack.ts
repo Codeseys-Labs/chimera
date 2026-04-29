@@ -280,6 +280,13 @@ export class OrchestrationStack extends cdk.Stack {
         },
       ],
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      // In dev, disable deletion protection so CFN rollback can cleanly delete
+      // the table if a later resource in this stack fails. With protection on,
+      // rollback leaves an orphan table and every subsequent deploy fails
+      // early-validation with "resource ... already exists". Prod keeps the
+      // default (true) — schedules table contains live tenant schedules and
+      // should never be auto-deletable.
+      deletionProtection: isProd ? true : false,
     });
     this.schedulesTable = schedulesChimera.table;
 

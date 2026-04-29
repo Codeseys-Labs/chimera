@@ -20,6 +20,16 @@ export interface ChimeraTableProps {
   stream?: dynamodb.StreamViewType;
   /** Removal policy (default: RETAIN) */
   removalPolicy?: cdk.RemovalPolicy;
+  /**
+   * Override deletion protection. Default: true (production-safe).
+   *
+   * Set to false ONLY for dev-only tables where a failed CFN rollback would
+   * otherwise leave an orphan table that blocks subsequent deploys (early
+   * validation: "Resource of type AWS::DynamoDB::GlobalTable ... already
+   * exists"). See orchestration-stack.ts SchedulesTable for the canonical
+   * example.
+   */
+  deletionProtection?: boolean;
 }
 
 /**
@@ -63,7 +73,7 @@ export class ChimeraTable extends Construct {
       sortKey: props.sortKey ?? { name: 'SK', type: dynamodb.AttributeType.STRING },
       billing: dynamodb.Billing.onDemand(),
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      deletionProtection: true,
+      deletionProtection: props.deletionProtection ?? true,
       encryption: dynamodb.TableEncryptionV2.customerManagedKey(this.encryptionKey),
       dynamoStream: props.stream ?? dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       timeToLiveAttribute: props.ttlAttribute,
