@@ -333,3 +333,20 @@ Add a fifth Cedar policy (originally §5 only covered Create/Update/Delete):
 - **Idempotency**: EB Scheduler retries (maxAttempts=3) can double-charge tokens if the first attempt completed partial agent work. Dispatcher writes `runId = aws.scheduler.execution-id` to DDB with `attribute_not_exists(SK)` condition — duplicate execution-id = 200 OK, no-op (idempotent).
 - **Signing key rotation**: dual-key verify window. Middleware tries HMAC with current key first, then previous key (15-minute overlap during rotation).
 
+### POST body schema (W32-FIX-2, Wave-33): authoritative contract
+
+The request schema in §6.1 (above) is the canonical contract enforced by
+`packages/chat-gateway/src/routes/schedules.ts`. Required fields are
+`name`, `expression`, `prompt`, and `agentId`. Optional fields:
+`description`, `timezone`, `sessionId`, `enabled`, `flexWindowMinutes`,
+`maxRetries`. There is no top-level `scheduleId` in the request (it is
+server-generated) and no top-level `payload` wrapper — the prompt is
+carried directly on the body.
+
+Post-deploy probes or clients that send `{scheduleId, expression, payload}`
+will receive 400 `MISSING_REQUIRED_FIELDS`; update the probe, not the
+route.
+
+See `packages/chat-gateway/src/routes/schedules.ts` (POST handler, field
+extraction) for the authoritative contract.
+
