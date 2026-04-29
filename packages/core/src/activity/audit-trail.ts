@@ -326,6 +326,13 @@ export interface QueryActionsParams {
  * Query by resource ARN parameters
  */
 export interface QueryByResourceParams {
+  /**
+   * Tenant ID — required. resource-activity-index is a shared GSI across
+   * all tenants; without a FilterExpression on the tenantId attribute a
+   * caller could read another tenant's actions keyed on the same ARN
+   * (e.g. after a resource hand-off or ARN collision across accounts).
+   */
+  tenantId: string;
   resourceArn: string;
   startTime?: string;
   endTime?: string;
@@ -624,12 +631,19 @@ export class AuditTrail {
    * @returns Array of action logs
    */
   async queryByResource(params: QueryByResourceParams): Promise<ActionLog[]> {
-    const { resourceArn, startTime, endTime, limit = 100 } = params;
+    const { tenantId, resourceArn, startTime, endTime, limit = 100 } = params;
+
+    if (!tenantId) {
+      throw new Error(
+        'tenantId is required for queryByResource (cross-tenant isolation on resource-activity-index GSI)'
+      );
+    }
 
     // Build key condition for GSI
     let keyConditionExpression = 'resourceArn = :arn';
     const expressionAttributeValues: Record<string, any> = {
       ':arn': resourceArn,
+      ':tid': tenantId,
     };
 
     // Add time range if provided (GSI sort key is timestamp)
@@ -645,10 +659,16 @@ export class AuditTrail {
       expressionAttributeValues[':end'] = endTime;
     }
 
-    const queryParams = {
+    // resource-activity-index is a shared GSI across tenants. Without this
+    // FilterExpression a caller from tenant A could read tenant B's rows
+    // whenever a resourceArn is shared (account hand-off, global ARN
+    // collision, or cross-account resource sharing). tenantId lives on the
+    // nested actionLog payload — filter on that exact path.
+    const queryParams: any = {
       TableName: this.config.activityLogsTableName,
       IndexName: 'resource-activity-index',
       KeyConditionExpression: keyConditionExpression,
+      FilterExpression: 'actionLog.tenantId = :tid',
       ExpressionAttributeNames: {
         '#ts': 'timestamp',
       },
@@ -659,7 +679,12 @@ export class AuditTrail {
 
     const result = await this.config.dynamodb.query(queryParams);
 
-    return (result.Items || []).map((item) => (item as ActionLogItem).actionLog);
+    // Defense-in-depth: drop any row whose nested tenantId does not match
+    // the caller, even if the FilterExpression somehow let it through
+    // (e.g. a legacy row written before tenantId existed on actionLog).
+    return (result.Items || [])
+      .map((item) => (item as ActionLogItem).actionLog)
+      .filter((log) => log.tenantId === tenantId);
   }
 
   /**
@@ -768,13 +793,20 @@ export class AuditTrail {
   /**
    * Get resource lifecycle
    *
-   * Finds all actions (create, update, delete) for a resource
+   * Finds all actions (create, update, delete) for a resource, scoped to
+   * the caller's tenant. resource-activity-index is shared across tenants,
+   * so tenantId is required to prevent cross-tenant reads.
    *
+   * @param tenantId - Tenant ID (required for cross-tenant isolation)
    * @param resourceArn - Resource ARN
    * @returns Array of actions in chronological order
    */
-  async getResourceLifecycle(resourceArn: string): Promise<ActionLog[]> {
+  async getResourceLifecycle(
+    tenantId: string,
+    resourceArn: string
+  ): Promise<ActionLog[]> {
     return this.queryByResource({
+      tenantId,
       resourceArn,
       // No time filter to get complete history
     });

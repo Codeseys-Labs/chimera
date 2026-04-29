@@ -239,3 +239,175 @@ describe('AuditTrail.logAction — tier-enforced TTL', () => {
     expect(item.ttl).toBeLessThan(before + 9999 * 24 * 60 * 60);
   });
 });
+
+/**
+ * SEC-2 — tenant isolation on queryByResource (resource-activity-index GSI).
+ *
+ * resource-activity-index is keyed on (resourceArn, timestamp). Two tenants
+ * that share a resourceArn (account hand-off, cross-account resource
+ * sharing, or global ARN collision — e.g. `arn:aws:s3:::shared-bucket`)
+ * land in the same GSI partition. Without a FilterExpression on tenantId,
+ * tenant A could read tenant B's audit rows.
+ *
+ * Fix: queryByResource now requires tenantId, pushes
+ *   FilterExpression='actionLog.tenantId = :tid'
+ * into the DDB Query, and applies a client-side `.filter(log => log.tenantId === tenantId)`
+ * as defense-in-depth.
+ */
+class CapturingDynamoDBClient implements DynamoDBClient {
+  public lastQuery: any = null;
+  public queryResult: { Items: any[] } = { Items: [] };
+
+  async get(_params: any) {
+    return { Item: undefined } as any;
+  }
+  async put(_params: any) {
+    return {} as any;
+  }
+  async update(_params: any) {
+    return {} as any;
+  }
+  async query(params: any) {
+    this.lastQuery = params;
+    return this.queryResult as any;
+  }
+  async scan(_params: any) {
+    return { Items: [] } as any;
+  }
+}
+
+function buildActionLogItem(
+  tenantId: string,
+  resourceArn: string,
+  actionId: string
+): any {
+  const timestamp = new Date().toISOString();
+  return {
+    PK: `TENANT#${tenantId}`,
+    SK: `ACTION#${timestamp}#${actionId}`,
+    actionId,
+    activityId: 'act-1',
+    actionType: 'aws.s3.put_object',
+    actionCategory: 'update',
+    timestamp,
+    resourceArn,
+    resourceName: 'shared-bucket',
+    awsService: 'S3',
+    awsAction: 'PutObject',
+    estimatedMonthlyCost: 0,
+    ttl: 0,
+    actionLog: {
+      actionId,
+      activityId: 'act-1',
+      tenantId,
+      agentId: 'agent-1',
+      sessionId: 'sess-1',
+      timestamp,
+      actionType: 'aws.s3.put_object',
+      actionCategory: 'update',
+      actionIntent: '',
+      awsService: 'S3',
+      awsAction: 'PutObject',
+      awsRegion: 'us-east-1',
+      awsRequestId: 'req-1',
+      awsEventTime: timestamp,
+      resource: {
+        type: 'S3 Bucket',
+        name: 'shared-bucket',
+        arn: resourceArn,
+      },
+      apiCall: { requestParameters: {}, durationMs: 1, retryCount: 0 },
+      cost: {
+        immediate: 0,
+        estimatedMonthly: 0,
+        estimatedAnnual: 0,
+        confidence: 'low',
+        source: 'estimate',
+      },
+      executionContext: { traceId: 't-1' },
+      tags: {},
+      result: 'success',
+    },
+  };
+}
+
+describe('AuditTrail.queryByResource — tenant isolation (SEC-2)', () => {
+  let ddb: CapturingDynamoDBClient;
+  let trail: AuditTrail;
+
+  beforeEach(() => {
+    ddb = new CapturingDynamoDBClient();
+    trail = new AuditTrail({
+      activityLogsTableName: 'test-audit',
+      hotStorageTTLDays: 90,
+      dynamodb: ddb,
+    });
+  });
+
+  it('pushes FilterExpression=actionLog.tenantId and :tid ExpressionAttributeValue into the DDB Query', async () => {
+    await trail.queryByResource({
+      tenantId: 'tenant-A',
+      resourceArn: 'arn:aws:s3:::shared-bucket',
+    });
+
+    expect(ddb.lastQuery).not.toBeNull();
+    expect(ddb.lastQuery.IndexName).toBe('resource-activity-index');
+    expect(ddb.lastQuery.FilterExpression).toBe('actionLog.tenantId = :tid');
+    expect(ddb.lastQuery.ExpressionAttributeValues[':tid']).toBe('tenant-A');
+    expect(ddb.lastQuery.ExpressionAttributeValues[':arn']).toBe(
+      'arn:aws:s3:::shared-bucket'
+    );
+  });
+
+  it('does not return rows whose tenantId does not match the caller (two tenants on the same resourceArn)', async () => {
+    // Simulate two tenants sharing a resourceArn in the same GSI partition.
+    // If the FilterExpression leaked, the client-side filter is the last
+    // line of defense — assert that even if DDB returned both rows, only
+    // tenant-A sees tenant-A's.
+    ddb.queryResult = {
+      Items: [
+        buildActionLogItem('tenant-A', 'arn:aws:s3:::shared-bucket', 'act-A'),
+        buildActionLogItem('tenant-B', 'arn:aws:s3:::shared-bucket', 'act-B'),
+      ],
+    };
+
+    const results = await trail.queryByResource({
+      tenantId: 'tenant-A',
+      resourceArn: 'arn:aws:s3:::shared-bucket',
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].tenantId).toBe('tenant-A');
+    expect(results[0].actionId).toBe('act-A');
+    // Symmetric: tenant-B querying the same ARN must not see tenant-A.
+    const resultsB = await trail.queryByResource({
+      tenantId: 'tenant-B',
+      resourceArn: 'arn:aws:s3:::shared-bucket',
+    });
+    expect(resultsB).toHaveLength(1);
+    expect(resultsB[0].tenantId).toBe('tenant-B');
+    expect(resultsB[0].actionId).toBe('act-B');
+  });
+
+  it('rejects empty tenantId with a clear error (no accidental unfiltered GSI read)', async () => {
+    await expect(
+      trail.queryByResource({
+        tenantId: '',
+        resourceArn: 'arn:aws:s3:::shared-bucket',
+      })
+    ).rejects.toThrow(/tenantId is required/);
+
+    // And the DDB query must not have fired.
+    expect(ddb.lastQuery).toBeNull();
+  });
+
+  it('getResourceLifecycle forwards tenantId to queryByResource (no silent tenant fallthrough)', async () => {
+    await trail.getResourceLifecycle(
+      'tenant-A',
+      'arn:aws:s3:::shared-bucket'
+    );
+
+    expect(ddb.lastQuery.FilterExpression).toBe('actionLog.tenantId = :tid');
+    expect(ddb.lastQuery.ExpressionAttributeValues[':tid']).toBe('tenant-A');
+  });
+});
