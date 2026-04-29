@@ -26,7 +26,7 @@ import { StrandsStreamEvent } from '@chimera/sse-bridge';
 import type { VercelDSPStreamPart } from '@chimera/sse-bridge';
 import { StreamTee } from '@chimera/sse-bridge';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { context as otelContext, propagation } from '@opentelemetry/api';
 import {
   ChatRequest,
@@ -437,6 +437,22 @@ router.post('/stream', async (c: Context) => {
       return c.json(error, 400);
     }
     const body: ChatRequest = parsed.data;
+
+    // Tenant provenance: the body MAY carry a `tenantId` (legacy clients echoed
+    // it from their config) but the authoritative tenant is always the JWT
+    // claim. If the body carries a conflicting value, reject the request —
+    // silently overriding it lets a buggy/malicious client *think* it is
+    // writing to a different tenant. An equal value is harmless (no-op).
+    if (rawBody?.tenantId && rawBody.tenantId !== tenantContext.tenantId) {
+      const error: ErrorResponse = {
+        error: {
+          code: 'TENANT_MISMATCH',
+          message: 'body tenantId conflicts with authenticated tenant',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      return c.json(error, 400);
+    }
 
     // Determine platform from request (default to 'web')
     const platform = body.platform || 'web';
@@ -852,6 +868,36 @@ router.get('/sessions/:sessionId/messages', async (c: Context) => {
       createdAt: item.createdAt,
       completedAt: item.completedAt,
     }));
+
+    // Distinguish "empty session" from "session does not exist in this tenant".
+    // The messages query above scopes PK to TENANT#{tenantId}#SESSION#{sessionId},
+    // so zero results can mean either: (a) the session exists but has no
+    // persisted messages yet, or (b) no such session belongs to this tenant
+    // (foreign session id or typo). Callers expect 404 in case (b).
+    //
+    // Only probe on empty results — if any messages came back the session
+    // clearly exists, saving a GetItem round trip.
+    if (messages.length === 0 && !cursor) {
+      const sessionProbe = await ddbClient.send(
+        new GetCommand({
+          TableName: SESSIONS_TABLE,
+          Key: {
+            PK: `TENANT#${tenantContext.tenantId}`,
+            SK: `SESSION#${sessionId}`,
+          },
+        })
+      );
+      if (!sessionProbe.Item) {
+        const error: ErrorResponse = {
+          error: {
+            code: 'SESSION_NOT_FOUND',
+            message: `Session not found: ${sessionId}`,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        return c.json(error, 404);
+      }
+    }
 
     const response: any = {
       sessionId,

@@ -15,6 +15,7 @@
  */
 import {
   CodePipelineClient,
+  GetPipelineExecutionCommand,
   ListActionExecutionsCommand,
   ListPipelineExecutionsCommand,
   type ActionExecutionDetail,
@@ -90,6 +91,25 @@ export async function getLatestExecutionId(
   const summary = resp.pipelineExecutionSummaries?.[0];
   if (!summary?.pipelineExecutionId) return undefined;
   return { id: summary.pipelineExecutionId, status: summary.status ?? 'Unknown' };
+}
+
+/**
+ * Fetch the authoritative overall status of a single pipeline execution via
+ * GetPipelineExecution. ListActionExecutions only returns actions that have
+ * *started*, so inferring "Succeeded" from it silently misreports pipelines
+ * where later stages (Deploy / Test / Rollout) haven't begun — the action
+ * list looks all-green but the pipeline is still InProgress. See chimera-cc6f
+ * (CLI-1, Wave-33). Returns undefined if the API returns no status.
+ */
+export async function getPipelineExecutionStatus(
+  client: CodePipelineClient,
+  pipelineName: string,
+  pipelineExecutionId: string,
+): Promise<string | undefined> {
+  const resp = await client.send(
+    new GetPipelineExecutionCommand({ pipelineName, pipelineExecutionId }),
+  );
+  return resp.pipelineExecution?.status;
 }
 
 /**
@@ -235,7 +255,6 @@ export async function buildFailedStageReport(
   tailLines = 50,
 ): Promise<FailedStageReport> {
   let execId = executionId;
-  let execStatus = 'Unknown';
   if (!execId) {
     const latest = await getLatestExecutionId(codepipeline, pipelineName);
     if (!latest) {
@@ -247,7 +266,18 @@ export async function buildFailedStageReport(
       };
     }
     execId = latest.id;
-    execStatus = latest.status;
+  }
+
+  // Authoritative overall status comes from GetPipelineExecution.
+  // ListActionExecutions only returns actions that have started, so inferring
+  // "Succeeded" from it misreports pipelines whose later stages haven't begun
+  // (the action list is all-green but the pipeline is still InProgress).
+  let execStatus = 'Unknown';
+  try {
+    const authoritative = await getPipelineExecutionStatus(codepipeline, pipelineName, execId);
+    if (authoritative) execStatus = authoritative;
+  } catch {
+    // Fall through to stage-inferred status below.
   }
 
   const { stages, failedAction } = await describeExecutionStages(
@@ -256,12 +286,13 @@ export async function buildFailedStageReport(
     execId,
   );
 
-  // If caller passed an explicit executionId we didn't get its status above.
-  // Derive a status from the stages if we still don't have one.
+  // Last-resort fallback if GetPipelineExecution didn't yield a status.
   if (execStatus === 'Unknown') {
     if (stages.some((s) => s.status === 'Failed')) execStatus = 'Failed';
-    else if (stages.every((s) => s.status === 'Succeeded')) execStatus = 'Succeeded';
     else if (stages.some((s) => s.status === 'InProgress')) execStatus = 'InProgress';
+    else if (stages.length > 0 && stages.every((s) => s.status === 'Succeeded')) {
+      execStatus = 'Succeeded';
+    }
   }
 
   const report: FailedStageReport = {

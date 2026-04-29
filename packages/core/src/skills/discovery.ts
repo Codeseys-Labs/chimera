@@ -108,9 +108,13 @@ export class SkillDiscovery {
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
+    if (!tenantId) {
+      throw new Error('tenantId is required for skill discovery (cross-tenant isolation)');
+    }
+
     // Try semantic search first (if enabled and client available)
     if (this.config.enableSemanticSearch && this.bedrockKB) {
-      return this.semanticSearch(query, filters, limit);
+      return this.semanticSearch(query, tenantId, filters, limit);
     }
 
     // Fall back to keyword search
@@ -120,23 +124,33 @@ export class SkillDiscovery {
   /**
    * Semantic search using Bedrock Knowledge Base
    *
-   * Embeds query using Titan Embeddings V2 and retrieves relevant skills
+   * Embeds query using Titan Embeddings V2 and retrieves relevant skills.
+   * The Bedrock KB retrieve call is filtered by tenant_id to prevent
+   * cross-tenant data leakage when a single KB indexes docs from multiple
+   * tenants (the KB itself does not enforce partition isolation — we must
+   * push the filter down to the vector search configuration).
    *
    * @param query - Natural language query
+   * @param tenantId - Tenant ID enforced via KB filter (required)
    * @param filters - Optional filters
    * @param limit - Max results
    * @returns Ranked search results
    */
   async semanticSearch(
     query: string,
+    tenantId: string,
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
     if (!this.bedrockKB || !this.config.knowledgeBaseId) {
       throw new Error('Bedrock Knowledge Base not configured');
     }
+    if (!tenantId) {
+      throw new Error('tenantId is required for semanticSearch (cross-tenant isolation)');
+    }
 
-    // Query Knowledge Base
+    // Query Knowledge Base with tenant filter pushed into vector search config.
+    // Bedrock KB RetrieveAndGenerate filter operator: equals + { key, value }.
     const kbResponse = await this.bedrockKB.query({
       knowledgeBaseId: this.config.knowledgeBaseId,
       retrievalQuery: {
@@ -145,6 +159,12 @@ export class SkillDiscovery {
       retrievalConfiguration: {
         vectorSearchConfiguration: {
           numberOfResults: limit,
+          filter: {
+            equals: {
+              key: 'tenant_id',
+              value: tenantId,
+            },
+          },
         },
       },
     });
@@ -156,6 +176,13 @@ export class SkillDiscovery {
       // Extract skill name from metadata
       const skillName = result.metadata?.skill_name;
       if (!skillName) continue;
+
+      // Defense-in-depth: reject any result whose metadata tenant_id does not
+      // match, even if the KB filter somehow let it through.
+      const resultTenantId = result.metadata?.tenant_id;
+      if (resultTenantId && resultTenantId !== tenantId) {
+        continue;
+      }
 
       // Get skill from registry
       const skill: Skill | null = await this.config.registry.getSkill(skillName);
@@ -191,8 +218,12 @@ export class SkillDiscovery {
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
+    if (!tenantId) {
+      throw new Error('tenantId is required for keywordSearch (cross-tenant isolation)');
+    }
+
     if (this.openSearch && this.config.openSearchEndpoint) {
-      return this.openSearchQuery(query, filters, limit);
+      return this.openSearchQuery(query, tenantId, filters, limit);
     }
 
     // Fall back to registry search (DynamoDB scan)
@@ -200,19 +231,28 @@ export class SkillDiscovery {
   }
 
   /**
-   * OpenSearch full-text search
+   * OpenSearch full-text search.
+   *
+   * tenant_id is added to the `must` clause so cross-tenant documents
+   * indexed in the same `chimera-skills` index cannot be returned to a
+   * caller from a different tenant.
    */
   private async openSearchQuery(
     query: string,
+    tenantId: string,
     filters?: DiscoveryFilters,
     limit: number = 10
   ): Promise<SearchResult[]> {
     if (!this.openSearch) {
       throw new Error('OpenSearch client not configured');
     }
+    if (!tenantId) {
+      throw new Error('tenantId is required for openSearchQuery (cross-tenant isolation)');
+    }
 
     // Build OpenSearch query
     const must: any[] = [
+      { term: { tenant_id: tenantId } },
       {
         multi_match: {
           query,
