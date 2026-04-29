@@ -328,7 +328,7 @@ export class OrchestrationStack extends cdk.Stack {
         vpc: props.vpc,
         securityGroupName: `chimera-schedule-dispatcher-${props.envName}`,
         description:
-          'Egress-only SG for the chimera schedule dispatcher Lambda -> internal chat-gateway ALB',
+          'Egress-only SG for chimera schedule dispatcher Lambda to internal chat-gateway ALB',
         allowAllOutbound: true,
       });
       if (props.albSecurityGroup) {
