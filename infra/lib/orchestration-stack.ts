@@ -351,7 +351,7 @@ export class OrchestrationStack extends cdk.Stack {
           fromPort: 80,
           toPort: 80,
           sourceSecurityGroupId: dispatcherLambdaSg.securityGroupId,
-          description: 'Schedule dispatcher Lambda -> chat-gateway ALB (HTTP)',
+          description: 'Schedule dispatcher Lambda to chat-gateway ALB (HTTP)',
         });
         new ec2.CfnSecurityGroupIngress(this, 'AlbIngressFromDispatcherHttps', {
           groupId: props.albSecurityGroup.securityGroupId,
@@ -359,7 +359,7 @@ export class OrchestrationStack extends cdk.Stack {
           fromPort: 443,
           toPort: 443,
           sourceSecurityGroupId: dispatcherLambdaSg.securityGroupId,
-          description: 'Schedule dispatcher Lambda -> chat-gateway ALB (HTTPS)',
+          description: 'Schedule dispatcher Lambda to chat-gateway ALB (HTTPS)',
         });
       }
     }
