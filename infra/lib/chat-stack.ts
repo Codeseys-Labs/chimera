@@ -55,6 +55,28 @@ export interface ChatStackProps extends cdk.StackProps {
    * table uses a table-local CMK (see orchestration-stack.ts for rationale).
    */
   schedulesTableKeyArn?: string;
+  /**
+   * chimera-2b2a wiring: EventBridge Scheduler group name
+   * (OrchestrationStack.schedulerGroup.name).
+   */
+  schedulerGroupName?: string;
+  /**
+   * chimera-2b2a wiring: dispatcher Lambda ARN
+   * (OrchestrationStack.scheduleDispatcher.functionArn).
+   * Passed as the EventBridge Scheduler target.
+   */
+  schedulerDispatcherArn?: string;
+  /**
+   * chimera-2b2a wiring: dispatcher Lambda DLQ ARN
+   * (OrchestrationStack.scheduleDispatcherDlq.queueArn).
+   * Attached to the EventBridge Scheduler DeadLetterConfig.
+   */
+  schedulerDlqArn?: string;
+  /**
+   * chimera-2b2a wiring: DDB schedules table name
+   * (OrchestrationStack.schedulesTable.tableName).
+   */
+  schedulesTableName?: string;
 }
 
 /**
@@ -502,6 +524,17 @@ export class ChatStack extends cdk.Stack {
         COGNITO_CLIENT_ID: props.cognitoUserPoolClientId ?? '',
         CODE_INTERPRETER_NETWORK_MODE: 'PUBLIC',
         CODE_INTERPRETER_SESSION_TTL: '3600',
+
+        // chimera-2b2a: EventBridge Scheduler config for /tenants/:id/schedules
+        // routes. Without these, the chat-gateway ScheduleService falls back to
+        // placeholder ARNs (arn:aws:iam::000000000000:role/...) and EB Scheduler
+        // rejects the create with "Cross-account pass role is not allowed."
+        SCHEDULER_ROLE_ARN: props.schedulerRoleArn ?? '',
+        SCHEDULER_DISPATCHER_ARN: props.schedulerDispatcherArn ?? '',
+        SCHEDULER_GROUP_NAME: props.schedulerGroupName ?? '',
+        SCHEDULER_DLQ_ARN: props.schedulerDlqArn ?? '',
+        SCHEDULES_TABLE_NAME: props.schedulesTableName ?? '',
+        SCHEDULE_SIGNING_KEY_SECRET_ARN: props.scheduleSigningKeySecretArn ?? '',
 
         // AgentCore Observability (ADR-040 / chimera-301e).
         //

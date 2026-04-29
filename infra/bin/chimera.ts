@@ -230,6 +230,10 @@ const chatStack = new ChatStack(app, `${prefix}-Chat`, {
   schedulerRoleArn: orchestrationStack.schedulerRole.roleArn,
   scheduleSigningKeySecretArn: orchestrationStack.scheduleSigningKeySecret.secretArn,
   schedulesTableKeyArn: orchestrationStack.schedulesTableKey.keyArn,
+  schedulerGroupName: orchestrationStack.schedulerGroup.name,
+  schedulerDispatcherArn: orchestrationStack.scheduleDispatcher.functionArn,
+  schedulerDlqArn: orchestrationStack.scheduleDispatcherDlq.queueArn,
+  schedulesTableName: orchestrationStack.schedulesTable.tableName,
 });
 applyChatStackSuppressions(chatStack, isProd);
 chatStack.addDependency(networkStack);
