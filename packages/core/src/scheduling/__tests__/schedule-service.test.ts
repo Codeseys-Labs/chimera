@@ -299,6 +299,11 @@ describe('ScheduleService.createSchedule', () => {
 });
 
 describe('ScheduleService.listSchedules', () => {
+  // W32-FIX-1: IndexName MUST match the name declared on the CDK table in
+  // infra/lib/orchestration-stack.ts (`GSI1-tenant-created`). The bare
+  // `GSI1` alias caused a live 500 against dev ("The table does not have the
+  // specified index: GSI1") — this assertion pins the regression so the pair
+  // can never drift again without a failing test.
   it('GSI1 query MUST include FilterExpression=tenantId (CLAUDE.md anti-pattern guard)', async () => {
     const ddb = makeFakeDdb();
     const sch = makeFakeScheduler();
@@ -309,7 +314,7 @@ describe('ScheduleService.listSchedules', () => {
 
     const queryCall = ddb.calls.find((c) => c.method === 'query');
     expect(queryCall).toBeDefined();
-    expect(queryCall?.params.IndexName).toBe('GSI1');
+    expect(queryCall?.params.IndexName).toBe('GSI1-tenant-created');
     expect(queryCall?.params.FilterExpression).toBe('tenantId = :tid');
     expect(queryCall?.params.ExpressionAttributeValues[':tid']).toBe('acme');
   });

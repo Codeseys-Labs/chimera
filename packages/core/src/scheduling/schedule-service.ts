@@ -529,7 +529,11 @@ export class ScheduleService {
   async listSchedules(tenantId: string): Promise<ScheduleItem[]> {
     const resp = await this.config.dynamodb.query({
       TableName: this.config.schedulesTableName,
-      IndexName: 'GSI1',
+      // Must match the index name declared on the CDK table in
+      // infra/lib/orchestration-stack.ts (SchedulesTable). The bare `GSI1`
+      // alias caused a live 500 against dev; DDB raises
+      // "The table does not have the specified index: GSI1".
+      IndexName: 'GSI1-tenant-created',
       KeyConditionExpression: 'GSI1PK = :tid',
       // MANDATORY per CLAUDE.md — GSI keys don't enforce partition isolation
       // on their own on a shared multi-tenant table.
