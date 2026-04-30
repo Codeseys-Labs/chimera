@@ -1,0 +1,19 @@
+- CRITICAL packages/chat-gateway/src/middleware/user-resolution.ts:136 + packages/core/src/auth/user-pairing.ts:122: platform user resolution queries by `USER_PAIRING#{platform}#{platformUserId}` with no tenantId input, PK, or filter. A Slack/Teams/Discord user id collision or malicious pairing can resolve into another tenant before agent invocation. Fix by making tenantId mandatory in `resolveUser/getPairing/updatePairing/deletePairing` and key/query by `TENANT#{tenantId}` or add `FilterExpression tenantId = :tid`.
+
+- HIGH packages/core/src/activity/audit-trail.ts:701: `queryByService()` queries shared `service-action-index` by `awsService` only and returns action logs for every tenant. This violates the Wave-33 pattern applied to `queryByResource()` and leaks audit history by service. Add required `tenantId`, `FilterExpression: actionLog.tenantId = :tid`, and post-filter.
+
+- HIGH packages/core/src/tenant/tenant-router.ts:105: `TenantRouter` decodes JWTs locally and only checks exp/issuer/token_use, not the signature. Any caller using this pipeline directly can forge `custom:tenantId` and load another tenant. Replace with `aws-jwt-verify` or require a verified claims object as input.
+
+- HIGH packages/chat-gateway/src/routes/tenant.ts:443 and :497: tenant tier/status admin queries use GSIs without tenantId PK or FilterExpression. Platform-admin listing may be intentional, but it is an explicit exception to “every DDB read includes tenantId” and depends entirely on app auth. Document as admin-only, add a separate audited admin path, or include an organization/admin scope guard.
+
+- MED packages/chat-gateway/src/routes/chat.ts:933: `POST /chat/message` accepts the same `ChatRequestSchema` as streaming but lacks the body tenantId mismatch check present at :446. It currently invokes with `tenantContext.tenantId`, but caller-controlled tenantId is silently ignored, creating provenance ambiguity and future persistence risk. Reuse the same mismatch guard before agent/tool loading.
+
+- MED packages/chat-gateway/src/routes/integrations.ts:594: `/integrations/resolve-user` accepts `tenantId` from the request body instead of validated `tenantContext`. If middleware is relaxed for platform webhooks, this becomes caller-influenced tenant selection for pairing lookup. Read tenantId from context or require a signed platform-to-tenant mapping.
+
+- MED packages/core/src/skills/discovery.ts:335, :352, :393: `browseByCategory`, `getTrending`, and `getRecommendations` do not reject empty tenantId, unlike `search/semanticSearch/keywordSearch`. Registry behavior becomes the isolation boundary on alternate entrypoints. Add `if (!tenantId) throw` to every public discovery method.
+
+- LOW packages/chat-gateway/src/stream-manager.ts:37 and packages/chat-gateway/src/routes/chat.ts:677: SSE reconnect is tenant-bound in-memory via `getForTenant(messageId, tenantContext.tenantId)`, so a different JWT cannot read an active stream. Residual risk is process-local only: after task restart there is no persisted stream ownership check, just 404.
+
+- LOW packages/chat-gateway/src/persistence-listener.ts:69, :90, :119, :178, :264, :279, :296, :311 and packages/chat-gateway/src/routes/chat.ts:757, :858, :882: scoped chat/session DDB operations use tenant-bearing PKs. No missing tenant guard found in these paths.
+
+- MED packages/core/src/tenant/cedar-authorization.ts:76: Cedar coverage is incomplete. Matrix: Schedule has Create/Read/Update permits and cross-tenant deny, but no same-tenant Delete/List permit; Skill has only Install tier deny, no Read/List/Create/Update/Delete tenant permits; Session has Read/Create only, no List/Update/Delete; Memory has no policies; Tenant has no Read/List/Create/Update/Delete policy except generic admin-full-access. Add explicit entity/action policies and tests for Schedule, Skill, Session, Memory, and Tenant across Read/List/Create/Update/Delete.
