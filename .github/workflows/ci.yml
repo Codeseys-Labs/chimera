@@ -133,7 +133,7 @@ jobs:
       # artifacts via `codecov/codecov-action@v4` with a CODECOV_TOKEN secret.
       - name: Upload TypeScript coverage (LCOV)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-typescript-lcov
           path: coverage-ts/
@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload Python coverage (Cobertura XML)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-python-cobertura
           path: test-results/agents-coverage.xml
@@ -215,7 +215,7 @@ jobs:
         run: ./chimera --version
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chimera-cli-linux-x64
           path: packages/cli/chimera
