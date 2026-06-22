@@ -27,7 +27,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@chimera/shared": "workspace:*",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^5.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
